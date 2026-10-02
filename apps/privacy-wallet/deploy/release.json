@@ -2,7 +2,7 @@
   "appId": "4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39",
   "turnkeyOrganizationId": "9b98a0d8-04a4-47a3-9dc3-afa84c686de4",
   "endpoint": "https://app-4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39.app.turnkey.cloud",
-  "imageRepository": "docker.io/sergeytimoshin/zolana-tvc-keyholder",
+  "imageRepository": "ghcr.io/helius-labs/zolana-tvc-privacy-wallet",
   "qosVersion": "0.12.1",
   "securityDomainId": "6833d54afc265196b7051a12acc448f28e3a34e0a1339f8a31ee4283c54fb3fd",
   "quorumKeyId": "b45f8b07-4d2c-4c72-a2a5-a5eadc3c1373",
