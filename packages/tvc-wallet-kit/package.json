@@ -1,0 +1,66 @@
+{
+  "name": "@zolana/tvc-wallet-kit",
+  "version": "0.0.0",
+  "description": "Experimental devnet private balance for helius-wallet-kit's embedded wallet, over the attested Zolana TVC privacy wallet.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./next": {
+      "types": "./dist/next/index.d.ts",
+      "import": "./dist/next/index.js",
+      "require": "./dist/next/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsup && node augment-dts.mjs",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zolana/tvc-wallet": "workspace:*"
+  },
+  "peerDependencies": {
+    "@heliuslabs/zolana": ">=0.8.0-alpha",
+    "@solana/kit": "^8.3.0",
+    "helius-wallet-kit": "^1.2.0",
+    "next": ">=14.0.0",
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@heliuslabs/zolana": "0.8.0-alpha",
+    "@solana/kit": "^8.3.0",
+    "@solana/web3.js": "^1.98.4",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "helius-wallet-kit": "^1.2.0",
+    "next": "16.2.3",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

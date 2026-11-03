@@ -5,10 +5,13 @@ node_modules/
 .pnpm-store/
 dist/
 **/dist/
+.next/
+*.tsbuildinfo
 .DS_Store
 .idea/
 .env
 .env.*
+!.env.example
 operator.json
 **/operator.json
 test-ledger/

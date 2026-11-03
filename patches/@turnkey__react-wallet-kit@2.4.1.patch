@@ -1,0 +1,30 @@
+diff --git a/dist/providers/client/Provider.js b/dist/providers/client/Provider.js
+index e38444552d247d4c8d1c4458e73a4dba571e3807..9c8340d7b3f33be043d5614e52c88eb48415befa 100644
+--- a/dist/providers/client/Provider.js
++++ b/dist/providers/client/Provider.js
+@@ -1113,7 +1113,8 @@ const ClientProvider = ({
+         // Remove timers for this session
+         timers.clearKey(expiryTimeoutsRef.current, sessionKey);
+         timers.clearKey(expiryTimeoutsRef.current, warnKey);
+-        await logout();
++        // clearSession already removed the session and reset provider state.
++        // Calling logout here again rejects with NO_SESSION_FOUND.
+       };
+       // Already expired → expire immediately
+       if (timeUntilExpiry <= 0) {
+diff --git a/dist/providers/client/Provider.mjs b/dist/providers/client/Provider.mjs
+index 0594e0d3aaeb84d17172fe463563b1e35c3725d7..881f190b4a491b360d8c2488bf25fe0a038b92a0 100644
+--- a/dist/providers/client/Provider.mjs
++++ b/dist/providers/client/Provider.mjs
+@@ -1866,9 +1866,8 @@ var ClientProvider = function ClientProvider(_ref) {
+                       // Remove timers for this session
+                       clearKey(expiryTimeoutsRef.current, sessionKey);
+                       clearKey(expiryTimeoutsRef.current, warnKey);
+-                      _context32.n = 6;
+-                      return logout();
+-                    case 6:
++                      // clearSession already removed the session and reset provider state.
++                      // Calling logout here again rejects with NO_SESSION_FOUND.
+                       return _context32.a(2);
+                   }
+                 }, _callee32);

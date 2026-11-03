@@ -10,13 +10,13 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "build:ts": "pnpm --filter @zolana/tvc-wallet build",
-    "lint:ts": "eslint packages/tvc-wallet examples/typescript-client/src examples/typescript-client/examples apps/tvc-gateway/e2e eslint.config.js --max-warnings 0",
-    "test:ts": "pnpm --filter @zolana/tvc-wallet test",
-    "typecheck:ts": "pnpm --filter @zolana/tvc-wallet typecheck",
+    "build:ts": "pnpm --filter @zolana/tvc-wallet --filter @zolana/tvc-wallet-kit build",
+    "lint:ts": "eslint packages/tvc-wallet packages/tvc-wallet-kit examples/privacy-wallet-next-app/src examples/typescript-client/src examples/typescript-client/examples apps/tvc-gateway/e2e eslint.config.js --max-warnings 0",
+    "test:ts": "pnpm --filter @zolana/tvc-wallet --filter @zolana/tvc-wallet-kit test",
+    "typecheck:ts": "pnpm --filter @zolana/tvc-wallet --filter @zolana/tvc-wallet-kit typecheck",
     "ci:ts": "pnpm lint:ts && pnpm typecheck:ts && pnpm test:ts && pnpm build:ts && pnpm typecheck:examples && pnpm test:examples && pnpm typecheck:e2e",
-    "typecheck:examples": "pnpm --filter zolana-tvc-typescript-client-example typecheck",
-    "test:examples": "pnpm --filter zolana-tvc-typescript-client-example test",
+    "typecheck:examples": "pnpm --filter zolana-tvc-typescript-client-example --filter zolana-privacy-wallet-next-app typecheck",
+    "test:examples": "pnpm --filter zolana-tvc-typescript-client-example --filter zolana-privacy-wallet-next-app test",
     "typecheck:e2e": "pnpm --filter @zolana/tvc-gateway-e2e typecheck"
   },
   "devDependencies": {
@@ -25,5 +25,11 @@
     "@typescript-eslint/parser": "^8.68.0",
     "eslint": "^10.9.1",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@lightprotocol/hasher.rs@0.2.1": "patches/@lightprotocol__hasher.rs@0.2.1.patch",
+      "@turnkey/react-wallet-kit@2.4.1": "patches/@turnkey__react-wallet-kit@2.4.1.patch"
+    }
   }
 }

@@ -1,0 +1,38 @@
+diff --git a/dist/browser-fat/es/index_browser_fat.js b/dist/browser-fat/es/index_browser_fat.js
+index 5f76e39..23e3332 100644
+--- a/dist/browser-fat/es/index_browser_fat.js
++++ b/dist/browser-fat/es/index_browser_fat.js
+@@ -253,7 +253,7 @@ async function __wbg_init$1(module_or_path) {
+     }
+ 
+     if (typeof module_or_path === 'undefined') {
+-        module_or_path = new URL('light_wasm_hasher_bg.wasm', import.meta.url);
++        module_or_path = new URL('../../light_wasm_hasher_bg.wasm', import.meta.url);
+     }
+     const imports = __wbg_get_imports$1();
+ 
+@@ -519,7 +519,7 @@ async function __wbg_init(module_or_path) {
+     }
+ 
+     if (typeof module_or_path === 'undefined') {
+-        module_or_path = new URL('hasher_wasm_simd_bg.wasm', import.meta.url);
++        module_or_path = new URL('../../hasher_wasm_simd_bg.wasm', import.meta.url);
+     }
+     const imports = __wbg_get_imports();
+ 
+@@ -609,6 +609,6 @@
+ const loadWasmSimd = async (module) => {
+     if (simdMemory === undefined) {
+-        simdMemory = __wbg_init(module ?? wasmSimdInit?.()).then((x) => {
++        simdMemory = __wbg_init({ module_or_path: module ?? wasmSimdInit?.() }).then((x) => {
+             return wasmHasher({
+                 blake2str: blake2str,
+                 blake2: blake2,
+@@ -624,6 +624,6 @@
+ const loadWasm = async (module) => {
+     if (sisdMemory === undefined) {
+-        sisdMemory = __wbg_init$1(module ?? wasmInit?.()).then((x) => {
++        sisdMemory = __wbg_init$1({ module_or_path: module ?? wasmInit?.() }).then((x) => {
+             return wasmHasher({
+                 blake2str: blake2str$1,
+                 blake2: blake2$1,

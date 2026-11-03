@@ -16,9 +16,11 @@ long-lived nullifier secret, reaches only an attested TEE prover; see
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
 | [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence, React bindings. |
+| [`packages/tvc-wallet-kit`](packages/tvc-wallet-kit) | The private balance for helius-wallet-kit's embedded wallet: `HeliusPrivateWalletProvider` and the Next.js route handler. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
 | [`crates/boot-proof`](crates/boot-proof) | Fetches a replica's public Boot Proof from Turnkey for a relying party that cannot. |
 | [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles against a deployed enclave or the local testkit. |
+| [`examples/privacy-wallet-next-app`](examples/privacy-wallet-next-app) | The Helius embedded-wallet demo with a private balance tab, and its AWS deployment. |
 | [`scripts`](scripts) | Operator tooling: releases, wallet descriptors, the localnet for `just headless-e2e`. |
 
 ## Responsibility split
