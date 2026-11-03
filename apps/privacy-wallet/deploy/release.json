@@ -1,6 +1,5 @@
 {
   "appId": "4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39",
-  "turnkeyOrganizationId": "9b98a0d8-04a4-47a3-9dc3-afa84c686de4",
   "endpoint": "https://app-4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39.app.turnkey.cloud",
   "imageRepository": "ghcr.io/helius-labs/zolana-tvc-privacy-wallet",
   "qosVersion": "0.12.1",
