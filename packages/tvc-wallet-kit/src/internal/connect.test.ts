@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTvcClient } from "@zolana/tvc-wallet";
+import { createTvcClient, TvcProverPolicy } from "@zolana/tvc-wallet";
 import {
   walletEnrollmentMessage,
   type WalletDescriptor,
@@ -60,8 +60,7 @@ const identity = {
 const walletKeys = { address: vi.fn() };
 
 vi.mock("@zolana/tvc-wallet", async (importOriginal) => ({
-  DEVNET_RELEASE: (await importOriginal<typeof import("@zolana/tvc-wallet")>())
-    .DEVNET_RELEASE,
+  ...(await importOriginal<typeof import("@zolana/tvc-wallet")>()),
   createTvcClient: vi.fn((config: { operations?: unknown }) => ({
     connectAndVerify: async () => {
       test.events.push(config.operations ? "verify:operations" : "verify:deployment");
@@ -80,7 +79,6 @@ vi.mock("@zolana/tvc-wallet", async (importOriginal) => ({
   })),
   identityOf: () => identity,
   sealedSeedOf: () => ({ sealedSeed: "55".repeat(64) }),
-  DEVNET_PROVER_POLICY: { policy: { version: 1 }, scheme: "p256-sha256", signature: "aa" },
   TvcKeys: class {
     address = walletKeys.address;
     constructor(input: { prover: unknown }) {
@@ -257,9 +255,10 @@ describe("openPrivateWallet", () => {
       "walletDescriptor",
     ]);
     // Proofs post through the host's route, sealed for their route below the prover URL.
+    // Under the policy file devnet publishes, which the enclave checks.
     expect(test.prover).toEqual({
       url: "https://wallet.example.com/api/tvc/zolana/prover",
-      policy: { policy: { version: 1 }, scheme: "p256-sha256", signature: "aa" },
+      policy: expect.any(TvcProverPolicy),
     });
   });
 

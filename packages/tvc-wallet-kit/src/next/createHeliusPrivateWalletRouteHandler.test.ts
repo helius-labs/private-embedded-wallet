@@ -90,7 +90,7 @@ describe("createHeliusPrivateWalletRouteHandler", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("reaches devnet-d's indexer and prover directly, without the server's API key", async () => {
+  it("reaches devnet-e's indexer and prover directly, without the server's API key", async () => {
     vi.stubEnv("HELIUS_API_KEY", "");
     const fetch = vi.fn(async () => Response.json({ result: {} }, { status: 200 }));
     vi.stubGlobal("fetch", fetch);
@@ -111,9 +111,9 @@ describe("createHeliusPrivateWalletRouteHandler", () => {
 
     const urls = fetch.mock.calls.map((call) => String((call as unknown as [URL])[0]));
     expect(urls).toEqual([
-      "https://d21d98xh5lgv3b.cloudfront.net/getMerkleProofs",
-      "https://d1unet9hn0mci0.cloudfront.net/v1/spr/prove/merge_8_1",
-      "https://d1unet9hn0mci0.cloudfront.net/v1/spr/prove/merge_8_1/status?jobId=job-1",
+      "https://d34xe1hqb2ibg2.cloudfront.net/getMerkleProofs",
+      "https://dd73hh473h6ha.cloudfront.net/prove/merge_8_1",
+      "https://dd73hh473h6ha.cloudfront.net/prove/merge_8_1/status?jobId=job-1",
     ]);
   });
 
@@ -193,7 +193,7 @@ describe("createHeliusPrivateWalletRouteHandler", () => {
     expect(response.headers.get("spr-tee")).toBe("v1");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(answer);
     const [url, init] = fetch.mock.calls[0] as unknown as [URL, RequestInit];
-    expect(String(url)).toBe("https://d1unet9hn0mci0.cloudfront.net/v1/spr/prove/merge_8_1");
+    expect(String(url)).toBe("https://dd73hh473h6ha.cloudfront.net/prove/merge_8_1");
     const headers = new Headers(init.headers);
     expect(headers.get("spr-tee")).toBe("v1");
     expect(headers.get("spr-tee-enc")).toBe(enc);
@@ -238,7 +238,7 @@ describe("createHeliusPrivateWalletRouteHandler", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ platform: "aws-nitro" });
     expect(String((fetch.mock.calls[0] as unknown as [URL])[0])).toBe(
-      `https://d1unet9hn0mci0.cloudfront.net/v1/spr/attestation?nonce=${nonce}`,
+      `https://dd73hh473h6ha.cloudfront.net/attestation?nonce=${nonce}`,
     );
     expect((await attest("nonce=42")).status).toBe(400);
     expect(fetch).toHaveBeenCalledTimes(1);

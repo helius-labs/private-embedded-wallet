@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "github:helius-labs/zolana#40c457e00dd518e627905fd8f928a8b7a90d2693&path:/sdk-libs/ts",
+    "@heliuslabs/zolana": "0.8.0-alpha",
     "@solana/kit": "^8.3.0",
     "@solana/web3.js": "^1.98.4",
     "@turnkey/react-wallet-kit": "2.4.1",

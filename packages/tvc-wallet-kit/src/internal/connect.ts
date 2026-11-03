@@ -25,10 +25,10 @@ import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import { address, type Address } from "@solana/kit";
 import {
   createTvcClient,
-  DEVNET_PROVER_POLICY,
   identityOf,
   sealedSeedOf,
   TvcKeys,
+  TvcProverPolicy,
   type OperationsConfig,
   type ShieldedIdentity,
   type TvcClient,
@@ -363,7 +363,7 @@ export async function openPrivateWallet(
       // this host's route handler forwards it untouched.
       prover: {
         url: `${origin}/api/tvc/zolana/prover`,
-        policy: DEVNET_PROVER_POLICY,
+        policy: TvcProverPolicy.forNetwork("devnet"),
       },
     }),
     signal,

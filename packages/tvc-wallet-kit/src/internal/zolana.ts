@@ -1,5 +1,5 @@
 import { createZolanaClient } from "@heliuslabs/zolana";
-import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import { SignedTeePolicy, type ZolanaClient } from "@heliuslabs/zolana/client";
 
 const INDEXER_PATH = "/api/tvc/zolana/indexer/";
 const INDEXER_ATTEMPTS = 3;
@@ -66,6 +66,7 @@ export function createPrivateZolanaClient(
     indexerUrl: `${origin}/api/tvc/zolana/indexer`,
     proverUrl: `${origin}/api/tvc/zolana/prover`,
     allowInsecureHttp: new URL(origin).protocol === "http:",
+    proverTee: SignedTeePolicy.forNetwork("devnet"),
     fetch: privateWalletFetch(origin, rpcPathname),
     // The enclave completes resolved proof inputs; it has no indexed proving.
     proofDataSource: "client",

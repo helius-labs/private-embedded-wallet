@@ -29,10 +29,10 @@ identity checks, descriptor/sealed-seed persistence, Turnkey signing of the
 SDK's transactions, and the sync-at-landed-slot rule. The example resyncs
 after reload.
 
-The release comes from tvc-wallet's `DEVNET_RELEASE`, currently
-`private-wallet-devnet-e91c22e`, the
-`zolana-private-wallet-devnet` app in the Helius TVC organization, on Zolana
-devnet-d. The enclave seals each proof's witness to an attested Nitro prover.
+The release comes from tvc-wallet's `DEVNET_RELEASE`, the
+`zolana-private-wallet-devnet` app in the Helius TVC organization. The demo
+talks to devnet-e's indexer and prover, and the enclave seals each proof's
+witness to a prover devnet's signed policy admits.
 This demo is for disposable devnet funds only.
 
 ## Run

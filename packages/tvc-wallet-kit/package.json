@@ -37,7 +37,7 @@
     "@zolana/tvc-wallet": "workspace:*"
   },
   "peerDependencies": {
-    "@heliuslabs/zolana": ">=0.5.0-alpha",
+    "@heliuslabs/zolana": ">=0.8.0-alpha",
     "@solana/kit": "^8.3.0",
     "helius-wallet-kit": "^1.2.0",
     "next": ">=14.0.0",
@@ -49,7 +49,7 @@
     }
   },
   "devDependencies": {
-    "@heliuslabs/zolana": "github:helius-labs/zolana#40c457e00dd518e627905fd8f928a8b7a90d2693&path:/sdk-libs/ts",
+    "@heliuslabs/zolana": "0.8.0-alpha",
     "@solana/kit": "^8.3.0",
     "@solana/web3.js": "^1.98.4",
     "@types/node": "^24.0.0",
