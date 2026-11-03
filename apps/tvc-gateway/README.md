@@ -170,7 +170,7 @@ signed release policy that descriptors are issued under, and the authority set
 it must verify against. The service refuses to start if the policy does not
 verify.
 
-**When a new enclave release ships:** `scripts/release.mjs pins` rewrites both
+**When a new enclave release ships:** `scripts/release.mjs pins` writes both
 files; publish a new image and redeploy.
 
 ## Development

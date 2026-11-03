@@ -46,8 +46,8 @@ client.proofService)` in place of `TvcKeys`. Nothing else changes.
 
 - Node.js 24+, pnpm, and a Helius devnet API key.
 - The TVC deployment's endpoint and trust material: the operator's
-  `privacy-wallet.trust.json` (`releasePolicy`, `releaseAuthorities`,
-  `qosIdentityPcrs`; `apps/privacy-wallet/deploy/` holds the current one).
+  trust file (`releasePolicy`, `releaseAuthorities`, `qosIdentityPcrs`;
+  `packages/tvc-wallet/src/devnet-release.json` is the current one).
   Never copy these values from the service itself.
 - A Boot Proof source. Only a user of the TVC organization can read the
   enclave's Boot Proof from Turnkey, so either a server the operator runs

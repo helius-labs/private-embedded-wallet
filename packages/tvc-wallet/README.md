@@ -27,6 +27,7 @@ import {
 import { AssetRegistry } from "@heliuslabs/zolana/transaction";
 import {
   DEVNET_PROVER_POLICY,
+  DEVNET_RELEASE,
   TvcKeys,
   sealedSeedOf,
   createTvcClient,
@@ -34,7 +35,7 @@ import {
   shieldedAddressOf,
 } from "@zolana/tvc-wallet";
 
-const tvc = createTvcClient(config); // release policy, authorities, PCRs, descriptor, authorizer
+const tvc = createTvcClient({ ...DEVNET_RELEASE, ...config }); // + backend, descriptor, authorizer
 const connection = await tvc.connectAndVerify();
 
 // Once per wallet; also the recovery path after the sealed seed is lost or the Quorum key rotates.

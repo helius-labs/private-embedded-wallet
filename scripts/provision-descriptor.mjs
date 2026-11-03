@@ -7,7 +7,7 @@
 //     [--provisioning-key <path>] [--trust <path>]
 //
 // The security domain, environment and operation list come from the published
-// trust material (apps/privacy-wallet/deploy/privacy-wallet.trust.json), so the
+// trust material (packages/tvc-wallet/src/devnet-release.json), so the
 // descriptor names exactly the release the client pins. The provisioning key is
 // read from TVC_PROVISIONING_KEY_JSON or the --provisioning-key file, both the
 // Turnkey API key format ({"private_key": "<hex>"}), checked against the public
@@ -22,7 +22,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const DEFAULT_TRUST = "apps/privacy-wallet/deploy/privacy-wallet.trust.json";
+const DEFAULT_TRUST = "packages/tvc-wallet/src/devnet-release.json";
 
 function fail(message) {
   console.error(`error: ${message}`);

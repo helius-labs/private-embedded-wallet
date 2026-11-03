@@ -129,10 +129,9 @@ gateway-e2e: install-ts
     npx --yes pnpm@9.15.0 build:ts
     npx --yes pnpm@9.15.0 --filter @zolana/tvc-gateway-e2e e2e
 
-# Build, deploy, sign the release policy and pin it in tvc-gateway and wallet-kit; see scripts/release.mjs.
-# Operators confirm the manifest interactively; `just release <id> --unattended` skips that review.
+# Deploy a published image, sign the release policy and pin it in tvc-wallet and tvc-gateway; see scripts/release.mjs.
 release release_id *flags:
-    node scripts/release.mjs all {{release_id}} --wallet-kit ../wallet-kit {{flags}}
+    node scripts/release.mjs all {{release_id}} {{flags}}
 
 # Sign a wallet descriptor for one client key; see scripts/provision-descriptor.mjs.
 provision-descriptor *flags:
