@@ -4,9 +4,9 @@ use std::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_pubkey::Pubkey;
+use spr_keypair::shielded::ShieldedAddress;
+use spr_keypair::{derivation, Curve, NullifierKey, PublicKey, ViewingKey};
 use zeroize::{Zeroize, Zeroizing};
-use zolana_keypair::shielded::ShieldedAddress;
-use zolana_keypair::{derivation, Curve, NullifierKey, PublicKey, ViewingKey};
 use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::digest::{descriptor_digest, sealed_seed_digest, wallet_id_hash};
 use zolana_tvc_protocol::types::{OperationRequest, SealedSeed};

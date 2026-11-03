@@ -11,7 +11,6 @@
     "json-reject.json": "3108301e4d4e0f648add6e0e9bc1b835b7ea1921ac24ff0b7f7e2a1cd5f79640",
     "p256-signatures.json": "013b2716e5f94758ffd44ed7b2b1b1143c104a1414caaeaa1d18db98e9616e4f",
     "proof-payload-utf8.json": "fce1f29f28b5edac9809540bac9f41aeee6e2a32bb5eb688b3e8982a7e8a989f",
-    "prover-policy-digest.json": "6eb06662a8be71627f9041f9c7704698f7d5a90b10568b7f248ecab72146e4ca",
     "qos-borsh-envelope.json": "2e8bc9d5afde86a65205c3472c883275f5de470192ea0c76afe544a88189bf61",
     "qos-negative.json": "0a9698ba5aba75b5b0fdd19e1da97101631be5d496fe6a254da1b533723a3980",
     "qos-p256-public.json": "d8332b125d10478c8ca74f5ff6bc5a9b20ea567b93c6a35eb4126bcb8abc5311",

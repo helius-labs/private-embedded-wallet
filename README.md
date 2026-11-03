@@ -18,7 +18,7 @@ long-lived nullifier secret, reaches only an attested TEE prover; see
 | [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence, React bindings. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
 | [`crates/boot-proof`](crates/boot-proof) | Fetches a replica's public Boot Proof from Turnkey for a relying party that cannot. |
-| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL, SPL, and custom-ring lifecycles against a deployed enclave or the local testkit. |
+| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles against a deployed enclave or the local testkit. |
 | [`scripts`](scripts) | Operator tooling: releases, wallet descriptors, the localnet for `just headless-e2e`. |
 
 ## Responsibility split
@@ -49,7 +49,7 @@ The enclave serves five operations at `POST /v1/operations`:
 | `Decrypt` | The plaintext of the encrypted outputs the client fetched from the index, in batches; the client matches commitments and keeps the Zolana `Wallet`. |
 | `Derive` | The nullifiers and merge blindings of a spend. |
 | `TransactionKeys` | The per-transaction viewing key that encrypts a spend's outputs, minted for the spend's first nullifier. |
-| `Prove` | The witness sealed to an attested prover. The SDK assembles it with the nullifier-secret slots open; the enclave fills them, checks the prover's attestation against a signed prover policy, and encrypts the witness to that prover's key. The client posts it and opens the proof. |
+| `Prove` | The witness sealed to an attested prover. The SDK assembles it with the nullifier-secret slots open; the enclave fills them, checks the prover's attestation against the network's signed prover policy, and encrypts the witness to that prover's key. The client posts it and opens the proof. |
 
 They are exactly the Zolana SDK's `ShieldedKeys` and `ProofAuthority` methods,
 so `TvcKeys` implements the SDK's `WalletKeys` and every SDK flow runs
@@ -84,19 +84,21 @@ executable, so changing one is a new release.
 | `api.turnkey.com` | Bootstrap signing |
 
 A proof's witness leaves the enclave only sealed to a TEE prover whose
-attestation passes a prover policy signed by the key compiled into the image
-(`PROVER_POLICY_PUBLIC`); the client posts it, and only that prover can open
-it. `scripts/sign-prover-policy.mjs` signs a policy for a zolana TEE pin, and
-tvc-wallet ships the devnet one (`DEVNET_PROVER_POLICY`).
+attestation passes the signed prover policy of the network the image was built
+for (`SPR_NETWORK`, `devnet` or `mainnet`). The client downloads the policy
+file that network publishes and hands it to the enclave, which checks it
+against the signers zolana pins (`POLICY_SIGNERS`); the client posts the
+sealed request, and only that prover can open it. A new prover release needs
+no new enclave release; a change of signers does.
 
 Enrollment requires an independent owner approval of the exact bootstrap
 message; the service credential alone must not authorize wallet signatures.
 See the [automatic client approval](examples/typescript-client/README.md#bootstrap-authorization).
 This limits signing authority, not the damage to privacy secrets after a
-quorum-key compromise: Turnkey can reproduce the bootstrap seed, and the holder
-of the prover policy key decides which prover images may read a witness.
+quorum-key compromise: Turnkey can reproduce the bootstrap seed, and the
+network's policy signers decide which prover images may read a witness.
 Production needs an external egress boundary enforcing this table and release
-governance with rotation and revocation for the release and prover policy keys.
+governance with rotation and revocation for the release keys.
 
 ## Development
 
@@ -110,7 +112,7 @@ just ci
 
 `just ci` runs fmt, clippy, the Rust tests, the committed-fixture check, and
 the TypeScript lint, typecheck, tests, and build. `just headless-e2e` runs the
-client example's SOL, SPL, and custom-ring lifecycles against the testkit and
+client example's SOL and SPL lifecycles against the testkit and
 a local Zolana network built from a sibling `../zolana` checkout, which must be
 at the commit
 [`headless-local-e2e.yml`](.github/workflows/headless-local-e2e.yml) pins.

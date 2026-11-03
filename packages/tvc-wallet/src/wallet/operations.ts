@@ -14,7 +14,7 @@ import type {
   TransactionKeysOperation,
 } from "../protocol/types.js";
 import { assertExactObjectKeys } from "../client/http.js";
-import { isProverTarget, provingKeyName } from "./prover.js";
+import { proverTarget, provingKeyName } from "./prover.js";
 import {
   executeOperationEnvelope,
   type OperationExecutionContext,
@@ -117,7 +117,7 @@ export function checkTransactionKeys(
 }
 
 const SEALING_KEYS = ["target", "nonce", "attestation", "policy"] as const;
-const SIGNED_POLICY_KEYS = ["policy", "scheme", "signature"] as const;
+const SIGNED_POLICY_KEYS = ["payload", "signatures"] as const;
 const SEALED_KEYS = ["target", "enc", "ciphertext", "response_key"] as const;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -134,7 +134,11 @@ export function checkProve(operation: ProveOperation): ProveOperation {
   assertExactObjectKeys(sealing, SEALING_KEYS, "InvalidProverRequest");
   assertExactObjectKeys(sealing.policy, SIGNED_POLICY_KEYS, "InvalidProverRequest");
   requireHex(sealing.nonce, 32);
-  if (!isObject(sealing.attestation) || sealing.policy.scheme !== "p256-sha256") {
+  if (
+    !isObject(sealing.attestation) ||
+    typeof sealing.policy.payload !== "string" ||
+    !Array.isArray(sealing.policy.signatures)
+  ) {
     throw new TvcError("InvalidProverRequest");
   }
   const body = operation.request;
@@ -156,7 +160,7 @@ export function checkProve(operation: ProveOperation): ProveOperation {
             (input as Record<string, unknown>)["nullifierSecret"] === null,
         );
   if (!open) throw new TvcError("InvalidProverRequest");
-  if (!isProverTarget(sealing.target, provingKeyName(body))) {
+  if (sealing.target !== proverTarget(provingKeyName(body))) {
     throw new TvcError("InvalidProverRequest", "target is not the request's proving key route");
   }
   return operation;

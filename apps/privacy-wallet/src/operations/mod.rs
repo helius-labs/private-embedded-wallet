@@ -59,15 +59,37 @@ const CLIENT_KEY_ID_PREFIX: &str = "tvc-browser-p256-";
 const DERIVATION_SUITE: &str = "zolana-ed25519-role-expansion-v1";
 /// Leave time to respond before the proxy deadline; request expiry may shorten this.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(75);
-// The devnet prover policy key; its private half is the Secrets Manager secret
-// zolnet-devnet-c/tvc-prover-policy-key.
-pub(crate) const PROVER_POLICY_PUBLIC: [u8; 65] = [
-    0x04, 0x07, 0xc0, 0xa2, 0xe3, 0xa4, 0x69, 0x27, 0xc4, 0x2d, 0x25, 0x79, 0x07, 0xb5, 0x43, 0xe1,
-    0xf4, 0x79, 0xf8, 0xe9, 0x1a, 0x75, 0xce, 0x15, 0xae, 0xff, 0xb4, 0xf8, 0x05, 0xf8, 0x02, 0xbb,
-    0x91, 0xb1, 0x77, 0xab, 0x24, 0x72, 0xbc, 0xa8, 0x16, 0x13, 0x48, 0x22, 0x1c, 0xd0, 0xf7, 0x7a,
-    0x3d, 0x5c, 0x3f, 0x95, 0x89, 0x30, 0x36, 0xec, 0x63, 0x71, 0x77, 0x1f, 0x23, 0x31, 0xd8, 0x15,
-    0xfc,
-];
+/// The network whose signed prover policy the image accepts, set at build
+/// time with `SPR_NETWORK`: `devnet` (the default) or `mainnet`.
+pub const NETWORK: &str = match option_env!("SPR_NETWORK") {
+    Some(network) => network,
+    None => "devnet",
+};
+const _: () = assert!(
+    eq(NETWORK, "devnet") || eq(NETWORK, "mainnet"),
+    "SPR_NETWORK must be devnet or mainnet"
+);
+/// Who signs each network's prover policy, as zolana pins them in
+/// `sdk-libs/client/src/prover/tee/signers.json`: today one KMS key for both.
+/// A change here is a new release.
+pub(crate) const POLICY_SIGNERS: [&str; 1] =
+    ["1fe5d29c79064ea17a16308452040b799df8aeaaae588d44a527a8da9ffa924a"];
+pub(crate) const POLICY_THRESHOLD: usize = 1;
+
+const fn eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
 // The devnet provisioner key; its private half is the Secrets Manager secret
 // zolnet-devnet-c/tvc-provisioning-key.
 pub(crate) const PROVISIONING_PUBLIC: [u8; 65] = [

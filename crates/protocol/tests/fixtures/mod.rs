@@ -27,15 +27,14 @@ use zolana_tvc_protocol::encoding::{
 };
 use zolana_tvc_protocol::error::{ErrorCode, TvcError};
 use zolana_tvc_protocol::http::handle_public_http;
-use zolana_tvc_protocol::prover_policy::prover_policy_signing_digest;
 use zolana_tvc_protocol::release::{
     bind_discovery_to_policy, sign_release_policy, verify_signed_release_policy,
     PinnedReleaseAuthorities, ReleaseAuthorityKey,
 };
 use zolana_tvc_protocol::types::{
     ClientAuthorization, ClientAuthorizationScheme, ClientGrant, Environment, Operation,
-    OperationKind, OperationRequest, ProverPolicy, ReleaseAuthoritySignature, ReleasePolicy,
-    ServiceInfo, SignedReleasePolicy, WalletDescriptor, WalletGrant,
+    OperationKind, OperationRequest, ReleaseAuthoritySignature, ReleasePolicy, ServiceInfo,
+    SignedReleasePolicy, WalletDescriptor, WalletGrant,
 };
 
 const OPERATIONS: [OperationKind; 5] = [
@@ -683,26 +682,6 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
             "id": "wallet-grant-digest",
             "grant": grant,
             "grant_digest": encode_lower_hex(&wallet_grant_digest(&grant)?),
-        })),
-    );
-
-    let prover_policy = ProverPolicy {
-        version: API_VERSION,
-        tee: json!({
-            "platform": "aws-nitro",
-            "measurements": [{"pcr0": "01".repeat(48), "pcr1": "02".repeat(48), "pcr2": "03".repeat(48)}],
-            "gpu": "optional",
-            "max_age_secs": 600,
-        }),
-        valid_from_ms: 1_800_000_000_000,
-        expires_at_ms: 1_831_536_000_000,
-    };
-    files.insert(
-        "prover-policy-digest.json".to_owned(),
-        fixture_json(&json!({
-            "id": "prover-policy-digest",
-            "policy": prover_policy,
-            "policy_digest": encode_lower_hex(&prover_policy_signing_digest(&prover_policy)?),
         })),
     );
 

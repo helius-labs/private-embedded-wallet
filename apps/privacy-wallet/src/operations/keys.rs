@@ -4,9 +4,9 @@
 //! secret, and no answer is interpreted here: the client decodes plaintexts
 //! and matches derived values against what the chain published.
 
-use zolana_keypair::viewing_key::Salt;
-use zolana_keypair::{ViewingKey, X25519Pubkey};
-use zolana_transaction::instructions::merge::{
+use spr_keypair::viewing_key::Salt;
+use spr_keypair::{ViewingKey, X25519Pubkey};
+use spr_transaction::instructions::merge::{
     merge_dummy_nullifier, merge_output_blinding, merge_output_key, merge_private_tx_blinding,
 };
 use zolana_tvc_protocol::constants::MAX_ITEMS_PER_BATCH;

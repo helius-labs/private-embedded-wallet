@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts a fresh Zolana localnet (validator, Photon, prover) from the sibling
-# zolana checkout, mints one SPL test asset and initializes one custom ring for
-# the client example; see `just headless-e2e`.
+# zolana checkout and mints one SPL test asset for the client example; see
+# `just headless-e2e`.
 set -euo pipefail
 
 if [[ "$#" -ne 4 ]]; then
@@ -33,13 +33,11 @@ solana_keypair="$(cd "$(dirname "$solana_keypair")" && pwd)/$(basename "$solana_
 output_env="$(cd "$(dirname "$output_env")" && pwd)/$(basename "$output_env")"
 
 cd "$zolana_root"
-ZOLANA_PORT_OFFSET="$port_offset" just build-programs build-prover-server build-cli ensure-photon \
-  ensure-custom-ring-live-keys
+ZOLANA_PORT_OFFSET="$port_offset" just build-programs build-prover-server build-cli ensure-photon
 
 eval "$(cargo run -q -p xtask -- program-ids)"
 : "${SHIELDED_POOL_PROGRAM_ID:?xtask did not emit SHIELDED_POOL_PROGRAM_ID}"
 : "${USER_REGISTRY_PROGRAM_ID:?xtask did not emit USER_REGISTRY_PROGRAM_ID}"
-: "${CUSTOM_RING_PROGRAM_ID:?xtask did not emit CUSTOM_RING_PROGRAM_ID}"
 
 bin="$zolana_root/target/debug/zolana"
 accounts_dir="$fixture_dir/accounts"
@@ -51,19 +49,11 @@ mkdir -p "$ZOLANA_CONFIG_DIR"
 cargo run -q -p xtask -- generate-account-snapshots \
   --deploy-dir target/deploy --accounts-dir "$accounts_dir"
 
-# The ring program is loaded upgradeable; only its upgrade authority may
-# create the ring config, so the authority is a keypair of this run.
-ring_dir="$fixture_dir/ring"
-mkdir -p "$ring_dir"
-solana-keygen new --no-bip39-passphrase --silent --force -o "$ring_dir/authority.json"
-ring_authority="$(solana-keygen pubkey "$ring_dir/authority.json")"
-
 "$bin" dev start --no-use-surfpool \
   --rpc-port "$rpc_port" --photon-port "$photon_port" --prover-port "$prover_port" \
   --account-dir "$accounts_dir" --limit-ledger-size 5000000 \
   --sbf-program "$SHIELDED_POOL_PROGRAM_ID" target/deploy/shielded_pool_program.so \
-  --sbf-program "$USER_REGISTRY_PROGRAM_ID" target/deploy/zolana_user_registry.so \
-  --upgradeable-program "$CUSTOM_RING_PROGRAM_ID" target/deploy/custom_ring_program.so "$ring_authority" \
+  --sbf-program "$USER_REGISTRY_PROGRAM_ID" target/deploy/spr_user_registry.so \
   -- --deactivate-feature B8JJXCy5amZyWG9r7EnUYLwzXSXTxG7GZ1qZ1qggo83g
 
 "$bin" config set --rpc-url "$rpc_url" --indexer-url "$indexer_url" \
@@ -83,36 +73,10 @@ spl_token_account="$(sed -n 's/^ok test_mint .* token_account=\([^ ]*\).*/\1/p' 
 : "${spl_asset_id:?test-mint did not emit an asset id}"
 : "${spl_token_account:?test-mint did not emit a token account}"
 
-# One custom ring with a fresh auditor key. Nothing in the example reads as
-# the auditor, so the ring RPC is not started; the ring config alone lets the
-# pool accept ring deposits, transfers and exits.
-cat >"$ring_dir/ring.toml" <<TOML
-name = "headless-e2e-ring"
-program_id = "$CUSTOM_RING_PROGRAM_ID"
-authority_keypair = "$ring_dir/authority.json"
-target = "localnet"
-
-[localnet]
-rpc = "$rpc_url"
-indexer = "$indexer_url"
-prover = "$prover_url"
-ring_rpc = "http://127.0.0.1:1"
-
-[devnet]
-rpc = "$rpc_url"
-indexer = "$indexer_url"
-prover = "$prover_url"
-ring_rpc = "http://127.0.0.1:1"
-TOML
-cargo run -q -p zolana-ring-rpc -- keygen --out "$ring_dir/auditor.key"
-cargo run -q -p custom-ring-cli -- --config "$ring_dir/ring.toml" \
-  init --auditor-pubkey-file "auditor.key.pub"
-
 printf '%s\n' \
   "SPL_MINT=$spl_mint" \
   "SPL_ASSET_ID=$spl_asset_id" \
-  "SPL_TOKEN_ACCOUNT=$spl_token_account" \
-  "RING_PROGRAM_ID=$CUSTOM_RING_PROGRAM_ID" >"$output_env"
+  "SPL_TOKEN_ACCOUNT=$spl_token_account" >"$output_env"
 
 echo
 echo "localnet ready"
@@ -120,4 +84,3 @@ echo "  rpc       $rpc_url"
 echo "  photon    $indexer_url"
 echo "  prover    $prover_url"
 echo "  SPL mint  $spl_mint (asset $spl_asset_id)"
-echo "  ring      $CUSTOM_RING_PROGRAM_ID"

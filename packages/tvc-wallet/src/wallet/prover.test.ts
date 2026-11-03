@@ -1,17 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { TvcTransport } from "../client/transport.js";
-import { DEVNET_PROVER_POLICY } from "../protocol/prover-policy.js";
 import { decodeLowerHex } from "../protocol/hex.js";
 import {
-  attestationReuseMs,
   decryptProverAnswer,
   fetchAttestation,
-  isProverTarget,
   provingKeyName,
+  proverTarget,
   sealingFor,
   submitSealed,
 } from "./prover.js";
+import { TvcProverPolicy, type HeldProverPolicy } from "./prover-policy.js";
+import { POLICY_URL, policyFile } from "./prover-policy.testkit.js";
+
+const HELD: HeldProverPolicy = {
+  file: policyFile({ expiresAt: 1_900_000_000 }),
+  version: 1,
+  maxAgeSecs: 600,
+  expiresAt: 1_900_000_000,
+  fetchedAtMs: 0,
+};
 
 /** zolana `prover/tee/testdata/vectors.json`: an answer the Go prover sealed. */
 const VECTOR = {
@@ -79,22 +87,8 @@ describe("proving key routes", () => {
     }
   });
 
-  it("accept only the key's route under plain segments", () => {
-    for (const target of ["/prove/merge_8_1", "/v1/zolana/prove/merge_8_1"]) {
-      expect(isProverTarget(target, "merge_8_1")).toBe(true);
-    }
-    for (const target of [
-      "/v1/zolana/prove/merge_24_1",
-      "/v1/zolana/prove/merge_8_1?jobId=1",
-      "/v1/zolana/prove/merge_8_1/",
-      "/v1//prove/merge_8_1",
-      "/v1/../prove/merge_8_1",
-      "v1/prove/merge_8_1",
-      "prove/merge_8_1",
-      `/${"a".repeat(256)}/prove/merge_8_1`,
-    ]) {
-      expect(isProverTarget(target, "merge_8_1"), target).toBe(false);
-    }
+  it("are the bare route below the prover URL", () => {
+    expect(proverTarget("merge_8_1")).toBe("/prove/merge_8_1");
   });
 });
 
@@ -102,18 +96,23 @@ describe("attestation", () => {
   const request = merge("merge", 8);
   const config = (response: Response) => {
     const transport: TvcTransport = { fetch: vi.fn(async () => response) };
-    return { url: "https://gatekeeper.test/v1/zolana/?api-key=k", policy: DEVNET_PROVER_POLICY, transport };
+    return {
+      url: "https://gateway.test/v1/spr/?api-key=k",
+      policy: new TvcProverPolicy(POLICY_URL, transport),
+      transport,
+    };
   };
 
   it("carries the prover's answer and seals the route below the prover URL", async () => {
     const prover = config(Response.json({ platform: "aws-nitro" }));
     const attested = await fetchAttestation(prover);
-    const sealing = sealingFor(prover, attested, request);
+    const sealing = sealingFor(HELD, attested, request);
     expect(sealing.target).toBe("/prove/merge_8_1");
     expect(sealing.nonce).toMatch(/^[0-9a-f]{64}$/);
     expect(sealing.nonce).toBe(attested.nonce);
     expect(sealing.attestation).toEqual({ platform: "aws-nitro" });
-    expect(sealing.policy).toBe(DEVNET_PROVER_POLICY);
+    expect(sealing.policy).toBe(HELD.file);
+    expect(vi.mocked(prover.transport.fetch).mock.calls[0]?.[0].pathname).toBe("/v1/spr/attestation");
   });
 
   it("seals the same route behind a proxy and posts to the proxy", async () => {
@@ -125,12 +124,12 @@ describe("attestation", () => {
       }),
     };
     const proxied = {
-      url: "https://app.test/api/tvc/zolana/prover?session=s",
-      policy: DEVNET_PROVER_POLICY,
+      url: "https://app.test/api/tvc/spr/prover?session=s",
+      policy: new TvcProverPolicy(POLICY_URL, transport),
       transport,
     };
     const attested = { nonce: "42".repeat(32), attestation: {}, fetchedAtMs: 0 };
-    const sealing = sealingFor(proxied, attested, request);
+    const sealing = sealingFor(HELD, attested, request);
     expect(sealing.target).toBe("/prove/merge_8_1");
     const answer = await submitSealed(proxied, {
       target: sealing.target,
@@ -140,25 +139,8 @@ describe("attestation", () => {
     });
     expect(answer).toEqual({ kind: "keyLost" });
     expect(`${seen[0]?.pathname}${seen[0]?.search}`).toBe(
-      "/api/tvc/zolana/prover/prove/merge_8_1?session=s",
+      "/api/tvc/spr/prover/prove/merge_8_1?session=s",
     );
-  });
-
-  it("is reused for the policy's max age and never past its expiry", () => {
-    const policy = (maxAge: unknown, expiresAtMs: number) => ({
-      ...DEVNET_PROVER_POLICY,
-      policy: {
-        ...DEVNET_PROVER_POLICY.policy,
-        tee: { ...DEVNET_PROVER_POLICY.policy.tee, max_age_secs: maxAge },
-        expiresAtMs: String(expiresAtMs),
-      },
-    });
-    expect(attestationReuseMs(policy(600, 10_000_000), 0)).toBe(600_000);
-    expect(attestationReuseMs(policy(600, 1_000), 0)).toBe(1_000);
-    expect(attestationReuseMs(policy(600, 1_000), 2_000)).toBe(0);
-    for (const maxAge of [0, -1, 1.5, "600", undefined]) {
-      expect(attestationReuseMs(policy(maxAge, 10_000_000), 0), String(maxAge)).toBe(0);
-    }
   });
 
   it("refuses an unavailable prover or an answer that is not an object", async () => {

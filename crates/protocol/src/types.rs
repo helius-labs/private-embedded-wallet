@@ -221,33 +221,12 @@ pub struct ProverSealing {
     /// The nonce the attestation was requested with.
     #[serde(with = "hex32")]
     pub nonce: [u8; 32],
-    /// The prover's answer to `GET /tee/v1/attestation`, as received.
+    /// The prover's answer to `GET /attestation`, as received.
     pub attestation: serde_json::Value,
-    pub policy: SignedProverPolicy,
-}
-
-/// The prover deployments the enclave seals to, signed by the prover policy
-/// key the enclave is built with.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SignedProverPolicy {
-    pub policy: ProverPolicy,
-    pub scheme: ClientAuthorizationScheme,
-    #[serde(with = "hex_bytes")]
-    pub signature: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProverPolicy {
-    pub version: u8,
-    /// A `zolana-prover-tee` policy: the platform, its pins, `gpu` and
-    /// `max_age_secs`.
-    pub tee: serde_json::Value,
-    #[serde(with = "decimal_u64")]
-    pub valid_from_ms: u64,
-    #[serde(with = "decimal_u64")]
-    pub expires_at_ms: u64,
+    /// The network's signed prover policy file (zolana
+    /// `prover/tee/WIRE_CONTRACT.md`, "Signed policy"), as downloaded. The
+    /// enclave verifies it against the signers its image pins.
+    pub policy: serde_json::Value,
 }
 
 impl Operation {
@@ -447,7 +426,7 @@ pub enum OperationResult {
 }
 
 /// One prover request under the encrypted prover wire contract: `ciphertext`
-/// is the body of `POST target` with `Zolana-Tee: v1` and `Zolana-Tee-Enc:
+/// is the body of `POST target` with `Spr-Tee: v1` and `Spr-Tee-Enc:
 /// enc`, and `response_key` opens the answer. The key is an HPKE export, so it
 /// opens no request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

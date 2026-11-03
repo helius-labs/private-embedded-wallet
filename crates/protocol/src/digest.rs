@@ -3,9 +3,9 @@
 use sha2::{Digest, Sha256};
 
 use crate::constants::{
-    CLIENT_AUTH_DOMAIN, PROVER_POLICY_DOMAIN, PROVISIONING_AUTH_DOMAIN, RELEASE_POLICY_DOMAIN,
-    REQUEST_DIGEST_DOMAIN, REQUEST_ID_HASH_DOMAIN, RESULT_DIGEST_DOMAIN, SEALED_SEED_DIGEST_DOMAIN,
-    WALLET_GRANT_DOMAIN, WALLET_ID_HASH_DOMAIN,
+    CLIENT_AUTH_DOMAIN, PROVISIONING_AUTH_DOMAIN, RELEASE_POLICY_DOMAIN, REQUEST_DIGEST_DOMAIN,
+    REQUEST_ID_HASH_DOMAIN, RESULT_DIGEST_DOMAIN, SEALED_SEED_DIGEST_DOMAIN, WALLET_GRANT_DOMAIN,
+    WALLET_ID_HASH_DOMAIN,
 };
 use crate::encoding::{self, canonicalize_json_value};
 use crate::error::{ErrorCode, TvcError};
@@ -96,8 +96,4 @@ pub fn request_id_hash(request_id: &[u8; 32]) -> [u8; 32] {
 
 pub fn release_policy_digest(policy_jcs: &[u8]) -> [u8; 32] {
     domain_separated_hash(RELEASE_POLICY_DOMAIN, policy_jcs)
-}
-
-pub fn prover_policy_digest(policy_jcs: &[u8]) -> [u8; 32] {
-    domain_separated_hash(PROVER_POLICY_DOMAIN, policy_jcs)
 }

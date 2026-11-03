@@ -2,7 +2,7 @@
 //! attestation route with a fixture Nitro document under a fixture root,
 //! opens sealed requests, forwards them to a plaintext prover, and seals the
 //! answers. The local enclave trusts its root and the testkit's prover policy
-//! key. Never linked into the enclave binary.
+//! signer. Never linked into the enclave binary.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -13,22 +13,21 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, Method, Response, StatusCode, Uri};
 use axum::routing::get;
 use axum::Router;
+use ed25519_dalek::Signer as _;
 use serde_json::Value;
-use zolana_prover_tee::{
-    seal_response, Anchors, FixtureProver, NitroFixture, ATTESTATION_PATH, HEADER_ENC,
-    HEADER_VERSION, VERSION,
+use spr_prover_tee::{
+    seal_response, Anchors, FixtureProver, NitroFixture, PolicyPayload, PolicySignature,
+    SignedPolicyFile, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, POLICY_DOMAIN, VERSION,
 };
-use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
-use zolana_tvc_protocol::sign_prover_policy;
-use zolana_tvc_protocol::types::{ProverPolicy, SignedProverPolicy};
 
 use crate::local_dev::testkit_prover_keys;
+use crate::operations::NETWORK;
 
 /// Serves the signed policy the local enclave accepts, for the local client.
 pub const POLICY_PATH: &str = "/local/prover-policy";
 const PROVE_SEGMENT: &str = "/prove/";
-const POLICY_LIFETIME_MS: u64 = 86_400_000;
+const POLICY_LIFETIME_SECS: u64 = 86_400;
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(120);
 const INITIAL_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -38,7 +37,7 @@ pub struct LocalProver {
     /// Every fixture document and the trusted root are built at this instant,
     /// so the root the enclave pins is the one each document chains to.
     epoch_secs: u64,
-    policy: SignedProverPolicy,
+    policy: SignedPolicyFile,
     upstream: String,
     client: reqwest::Client,
 }
@@ -46,24 +45,27 @@ pub struct LocalProver {
 impl LocalProver {
     /// A prover forwarding to the plaintext prover at `upstream`.
     pub fn new(upstream: &str) -> Self {
-        let (policy_secret, ikm) = testkit_prover_keys();
+        let (signer, ikm) = testkit_prover_keys();
         let prover = FixtureProver::from_ikm(&ikm);
         let epoch_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock after 1970")
             .as_secs();
-        let epoch_ms = epoch_secs * 1_000;
-        let fixture = NitroFixture::at([0; 32], epoch_secs);
-        let policy = sign_prover_policy(
-            ProverPolicy {
-                version: API_VERSION,
-                tee: serde_json::to_value(fixture.policy()).expect("fixture policy"),
-                valid_from_ms: epoch_ms - POLICY_LIFETIME_MS,
-                expires_at_ms: epoch_ms + POLICY_LIFETIME_MS,
-            },
-            &policy_secret,
-        )
-        .expect("testkit prover policy key");
+        let payload = serde_json::to_vec(&PolicyPayload {
+            network: NETWORK.to_owned(),
+            version: 1,
+            expires_at: epoch_secs + POLICY_LIFETIME_SECS,
+            policy: NitroFixture::at([0; 32], epoch_secs).policy().clone(),
+        })
+        .expect("fixture policy");
+        let signature = signer.sign(&[POLICY_DOMAIN, &payload].concat());
+        let policy = SignedPolicyFile {
+            payload: hex::encode(&payload),
+            signatures: vec![PolicySignature {
+                public_key: hex::encode(signer.verifying_key().to_bytes()),
+                signature: hex::encode(signature.to_bytes()),
+            }],
+        };
         Self {
             prover,
             epoch_secs,

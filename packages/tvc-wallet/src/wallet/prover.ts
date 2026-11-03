@@ -5,28 +5,21 @@ import { fetchWithSignal, gatewayUrl, httpError, readBoundedBytes, readBoundedTe
 import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
 import { TvcError, TvcHttpError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
-import type {
-  ProverRequest,
-  ProverSealing,
-  SealedProverRequest,
-  SignedProverPolicy,
-} from "../protocol/types.js";
+import type { ProverRequest, ProverSealing, SealedProverRequest } from "../protocol/types.js";
+import type { HeldProverPolicy, TvcProverPolicy } from "./prover-policy.js";
 
 /** The encrypted prover wire contract, v1 (zolana `prover/tee/WIRE_CONTRACT.md`). */
-const HEADER_VERSION = "Zolana-Tee";
-const HEADER_ENC = "Zolana-Tee-Enc";
+const HEADER_VERSION = "Spr-Tee";
+const HEADER_ENC = "Spr-Tee-Enc";
 const VERSION = "v1";
-const ATTESTATION_PATH = "tee/v1/attestation";
+const ATTESTATION_PATH = "attestation";
 /** The prover no longer holds the key the request was sealed to. */
 const KEY_LOST = "tee_decryption_failed";
 const MAX_ATTESTATION_BYTES = 1n << 20n;
 const MAX_ANSWER_BYTES = 1n << 20n;
 const MAX_ERROR_BYTES = 4096n;
 const RESPONSE_NONCE_BYTES = 12;
-/** Mirrors the enclave's `MAX_PROVER_TARGET_LEN`. */
-const MAX_TARGET_LENGTH = 256;
 const MAX_PROVE_INPUTS = 52;
-const PLAIN_SEGMENT = /^[A-Za-z0-9_-]+$/;
 const FAMILIES: Readonly<Record<string, string>> = {
   "transfer-confidential": "transfer_confidential",
   "transfer-ring": "transfer_ring",
@@ -36,12 +29,14 @@ const FAMILIES: Readonly<Record<string, string>> = {
 
 /**
  * Where the client proves and under which policy. `url` is the prover's base
- * URL, such as `https://<gatekeeper>/v1/zolana?api-key=<key>`: the attestation
- * and proof routes are appended to its path and its query is kept.
+ * URL, such as a regional prover or `https://<gateway>/v1/spr?api-key=<key>`:
+ * the attestation and proof routes are appended to its path and its query is
+ * kept. `policy` is the signed policy file of the network the enclave image
+ * was built for, usually `TvcProverPolicy.forNetwork(network)`.
  */
 export type TvcProverConfig = {
   readonly url: string;
-  readonly policy: SignedProverPolicy;
+  readonly policy: TvcProverPolicy;
   readonly transport?: TvcTransport;
 };
 
@@ -69,19 +64,11 @@ export function provingKeyName(request: ProverRequest): string {
 
 /**
  * The route a request for `key` is sealed to: its path below the prover's URL,
- * whatever path a gateway or proxy serves that URL on.
+ * whatever path a gateway or proxy serves that URL on. The enclave seals to
+ * nothing else.
  */
 export function proverTarget(key: string): string {
   return `/prove/${key}`;
-}
-
-/** Mirrors the enclave's check: `key`'s route under plain path segments, no query. */
-export function isProverTarget(target: string, key: string): boolean {
-  const suffix = `/prove/${key}`;
-  if (target.length > MAX_TARGET_LENGTH || !target.endsWith(suffix)) return false;
-  const prefix = target.slice(0, target.length - suffix.length);
-  if (prefix === "") return true;
-  return prefix.startsWith("/") && prefix.slice(1).split("/").every((segment) => PLAIN_SEGMENT.test(segment));
 }
 
 /** A prover's attestation for one nonce, and when the client fetched it. */
@@ -120,7 +107,7 @@ export async function fetchAttestation(
 
 /** What the enclave needs to seal `request` to the attested prover. */
 export function sealingFor(
-  config: TvcProverConfig,
+  policy: HeldProverPolicy,
   attested: ProverAttestation,
   request: ProverRequest,
 ): ProverSealing {
@@ -128,19 +115,8 @@ export function sealingFor(
     target: proverTarget(provingKeyName(request)),
     nonce: attested.nonce,
     attestation: attested.attestation,
-    policy: config.policy,
+    policy: policy.file,
   };
-}
-
-/**
- * How long the policy lets one attestation serve further proofs: its
- * `max_age_secs`, and never past the policy's expiry. Zero without one.
- */
-export function attestationReuseMs(policy: SignedProverPolicy, nowMs: number): number {
-  const maxAgeSecs = policy.policy.tee["max_age_secs"];
-  if (typeof maxAgeSecs !== "number" || !Number.isSafeInteger(maxAgeSecs) || maxAgeSecs <= 0) return 0;
-  const untilExpiry = Number(policy.policy.expiresAtMs) - nowMs;
-  return Math.max(0, Math.min(maxAgeSecs * 1_000, untilExpiry));
 }
 
 /**
@@ -153,8 +129,7 @@ export async function submitSealed(
   sealed: SealedProverRequest,
   signal?: AbortSignal,
 ): Promise<ProverAnswer> {
-  const key = sealed.target.slice(sealed.target.lastIndexOf("/prove/") + "/prove/".length);
-  const url = gatewayUrl(new URL(config.url), `prove/${key}`);
+  const url = gatewayUrl(new URL(config.url), sealed.target.replace(/^\/+/, ""));
   const transport = config.transport ?? createDefaultTransport();
   const response = await fetchWithSignal(
     transport,

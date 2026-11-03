@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use ed25519_dalek::{Signer as _, SigningKey};
 use qos_p256::P256Pair;
 use serde::Deserialize;
-use zolana_prover_tee::Anchors;
+use spr_prover_tee::{Anchors, PolicySigners};
 use zolana_tvc_protocol::constants::{
     API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
     TVC_APP_PROOF_TYPE,
@@ -21,7 +21,7 @@ use zolana_tvc_protocol::encoding::decode_lower_hex_array;
 use zolana_tvc_protocol::types::{Environment, OperationKind, ServiceInfo};
 
 use crate::custody::{Custody, CustodyError, Evidence, RawSignature, WalletKey};
-use crate::operations::ProverTrust;
+use crate::operations::{ProverTrust, NETWORK};
 use crate::{AppState, Runtime, OPERATIONS};
 
 const TESTKIT_JSON: &str = include_str!("../../../packages/tvc-wallet/src/local-testkit.json");
@@ -37,7 +37,7 @@ struct Testkit {
     executable_label: String,
     provisioning_private_key_hex: String,
     grant_private_key_hex: String,
-    prover_policy_private_key_hex: String,
+    prover_policy_signer_seed_hex: String,
     prover_tee_ikm_hex: String,
     ephemeral_seed_hex: String,
     quorum_seed_hex: String,
@@ -83,11 +83,12 @@ pub fn local_testkit_qos_seeds() -> ([u8; 32], [u8; 32]) {
     )
 }
 
-/// The prover policy secret and the stand-in prover's HPKE key material.
-pub(crate) fn testkit_prover_keys() -> ([u8; 32], [u8; 32]) {
+/// The testkit's prover policy signer and the stand-in prover's HPKE key
+/// material.
+pub(crate) fn testkit_prover_keys() -> (SigningKey, [u8; 32]) {
     let testkit = testkit();
     (
-        decode_32(&testkit.prover_policy_private_key_hex),
+        SigningKey::from_bytes(&decode_32(&testkit.prover_policy_signer_seed_hex)),
         decode_32(&testkit.prover_tee_ikm_hex),
     )
 }
@@ -106,21 +107,25 @@ fn public_of(private_key_hex: &str) -> [u8; 65] {
 /// The provers a local enclave seals witnesses to.
 pub enum LocalProverTrust {
     /// The stand-in prover: provers chaining to these anchors, under the
-    /// testkit's prover policy key.
+    /// testkit's prover policy signer.
     StandIn(Anchors),
-    /// The devnet TEE prover: the production vendor roots, under the devnet
-    /// prover policy key the enclave image carries.
-    Devnet,
+    /// The live TEE provers of the image's network: the production vendor
+    /// roots, under the policy signers the enclave image carries.
+    Image,
 }
 
 impl LocalProverTrust {
     fn trust(self) -> ProverTrust {
         match self {
-            Self::StandIn(anchors) => ProverTrust {
-                policy_public: public_of(&testkit().prover_policy_private_key_hex),
-                anchors,
-            },
-            Self::Devnet => ProverTrust::devnet(),
+            Self::StandIn(anchors) => {
+                let signer = testkit_prover_keys().0.verifying_key().to_bytes();
+                ProverTrust {
+                    signers: PolicySigners::new(NETWORK, vec![signer], 1)
+                        .expect("testkit policy signer"),
+                    anchors,
+                }
+            }
+            Self::Image => ProverTrust::image(),
         }
     }
 }

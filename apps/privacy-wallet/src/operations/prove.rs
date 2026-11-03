@@ -2,21 +2,23 @@
 //! from. The client assembles the whole prover request, with `null` in every
 //! nullifier secret slot that is this wallet's to fill; the enclave fills those
 //! slots, changes nothing else, and seals the request to a prover whose
-//! attestation passes the signed prover policy. The client posts the sealed
-//! request; only the attested prover can open it.
+//! attestation passes the network's signed prover policy. The client posts the
+//! sealed request; only the attested prover can open it.
 //!
 //! Ownership of the inputs is not checked: a slot filled for a UTXO this wallet
 //! does not own yields a witness the circuit rejects, and a proof reveals
 //! nothing about the secret either way.
 
 use serde_json::{Map, Value};
+use spr_prover_tee::{
+    verify_with, Anchors, Attestation, EncryptedRequest, PolicySigners, SignedPolicyFile,
+    MAX_SIGNED_POLICY_BYTES,
+};
 use zeroize::{Zeroize, Zeroizing};
-use zolana_prover_tee::{verify_with, Anchors, Attestation, EncryptedRequest, TeePolicy};
 use zolana_tvc_protocol::constants::{MAX_PROVER_TARGET_LEN, MAX_PROVE_INPUTS};
 use zolana_tvc_protocol::types::{FailureStage, ProverSealing, SealedProverRequest};
-use zolana_tvc_protocol::verify_signed_prover_policy;
 
-use super::{Failure, PROVER_POLICY_PUBLIC};
+use super::{Failure, NETWORK, POLICY_SIGNERS, POLICY_THRESHOLD};
 
 /// A proving key's route, `<prefix>/prove/<key>`; `<key>` is the key file name
 /// without `.key`.
@@ -24,18 +26,24 @@ const PROVE_PATH: &str = "/prove/";
 
 /// The provers a `Prove` may seal to.
 pub(crate) struct ProverTrust {
-    /// Signs prover policies. Only the public half is present in the image.
-    pub policy_public: [u8; 65],
+    /// Who signs the policy files a sealing may present.
+    pub signers: PolicySigners,
     /// The vendor roots a prover's evidence must chain to.
     pub anchors: Anchors,
 }
 
 impl ProverTrust {
     /// The trust the enclave image carries: the production vendor roots, under
-    /// the devnet prover policy key.
-    pub(crate) fn devnet() -> Self {
+    /// the signers of the network the image was built for.
+    pub(crate) fn image() -> Self {
+        let keys = POLICY_SIGNERS
+            .iter()
+            .map(|key| hex::decode(key).ok().and_then(|key| key.try_into().ok()))
+            .collect::<Option<Vec<[u8; 32]>>>()
+            .expect("policy signer keys are 32-byte hex");
         Self {
-            policy_public: PROVER_POLICY_PUBLIC,
+            signers: PolicySigners::new(NETWORK, keys, POLICY_THRESHOLD)
+                .expect("policy signers are well formed"),
             anchors: Anchors::PRODUCTION,
         }
     }
@@ -188,17 +196,24 @@ pub(super) fn seal(
 }
 
 /// The HPKE key of a prover whose attestation, for the client's nonce,
-/// passes a current policy the prover policy key signed.
+/// passes a current policy enough of the network's signers signed.
+///
+/// The enclave keeps no state, so it cannot refuse a file older than one it
+/// accepted before; the file's expiry bounds how long a superseded policy
+/// stays usable.
 fn attested_key(
     sealing: &ProverSealing,
     trust: &ProverTrust,
     now_ms: u64,
 ) -> Result<[u8; 32], Failure> {
     let refused = || Failure::Stage(FailureStage::Prover);
-    verify_signed_prover_policy(&sealing.policy, &trust.policy_public, now_ms)
-        .map_err(|_| refused())?;
-    let policy: TeePolicy =
-        serde_json::from_value(sealing.policy.policy.tee.clone()).map_err(|_| refused())?;
+    let file = serde_json::to_vec(&sealing.policy).map_err(|_| refused())?;
+    if file.len() > MAX_SIGNED_POLICY_BYTES {
+        return Err(refused());
+    }
+    let (approved, _) =
+        SignedPolicyFile::verify(&file, &trust.signers, now_ms / 1_000).map_err(|_| refused())?;
+    let policy = approved.policy;
     let attestation: Attestation =
         serde_json::from_value(sealing.attestation.clone()).map_err(|_| refused())?;
     verify_with(
@@ -212,27 +227,13 @@ fn attested_key(
     .map_err(|_| refused())
 }
 
-/// `target` must be `key`'s route under a prefix of plain path segments, with
-/// no query: the encryption binds the path the client posts to.
+/// `target` must be `key`'s route, `/prove/<key>`, with no prefix or query:
+/// the encryption binds the route, which a gateway serves under any path.
 fn check_target(target: &str, key: &str) -> Result<(), Failure> {
-    if target.len() > MAX_PROVER_TARGET_LEN {
+    if target.len() > MAX_PROVER_TARGET_LEN || target.strip_prefix(PROVE_PATH) != Some(key) {
         return Err(Failure::Invalid);
     }
-    let prefix = target
-        .strip_suffix(key)
-        .and_then(|rest| rest.strip_suffix(PROVE_PATH))
-        .ok_or(Failure::Invalid)?;
-    let plain = |segment: &str| {
-        !segment.is_empty()
-            && segment
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-    };
-    match prefix.strip_prefix('/') {
-        None if prefix.is_empty() => Ok(()),
-        Some(segments) if segments.split('/').all(plain) => Ok(()),
-        _ => Err(Failure::Invalid),
-    }
+    Ok(())
 }
 
 /// Wipes every nullifier secret slot of a completed request.

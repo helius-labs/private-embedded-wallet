@@ -5,12 +5,13 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { VerifiedConnection } from "../client/connection.js";
 import type { TvcTransport } from "../client/transport.js";
-import { DEVNET_PROVER_POLICY } from "../protocol/prover-policy.js";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type { ProverSealing, SealedProverRequest, SealedSeed } from "../protocol/types.js";
 import type { ShieldedIdentity, TvcClient } from "./client.js";
 import { TvcKeys } from "./keys.js";
+import { TvcProverPolicy } from "./prover-policy.js";
+import { POLICY_URL, policyFile } from "./prover-policy.testkit.js";
 import type { OperationOptions } from "./operations.js";
 
 const encoders = vi.hoisted(() => ({
@@ -40,7 +41,8 @@ function bytes(value: number, length = 32): Uint8Array {
   return new Uint8Array(length).fill(value);
 }
 
-const PROVER_URL = "https://gatekeeper.test/v1/zolana?api-key=k";
+const PROVER_URL = "https://gateway.test/v1/spr?api-key=k";
+const POLICY = policyFile({ expiresAt: 1_900_000_000 });
 const RESPONSE_KEY = "33".repeat(32);
 
 function sealedFor(target: string): SealedProverRequest {
@@ -64,12 +66,13 @@ function proverTransport(answers: readonly Response[] = []) {
   const transport: TvcTransport = {
     fetch: vi.fn(async (url: URL, init?: RequestInit) => {
       seen.push({ method: init?.method ?? "GET", url, headers: new Headers(init?.headers) });
-      if (url.pathname.endsWith("/tee/v1/attestation")) {
+      if (url.href === POLICY_URL) return Response.json(POLICY);
+      if (url.pathname.endsWith("/attestation")) {
         return Response.json({ platform: "aws-nitro", hpke_public_key: "44".repeat(32) });
       }
       return (
         queue.shift() ??
-        new Response(sealedAnswer(200, ZERO_PROOF), { headers: { "Zolana-Tee": "v1" } })
+        new Response(sealedAnswer(200, ZERO_PROOF), { headers: { "Spr-Tee": "v1" } })
       );
     }),
   };
@@ -112,7 +115,7 @@ function fixture(answers: readonly Response[] = []) {
       connection,
       sealedSeed,
       identity,
-      prover: { url: PROVER_URL, policy: DEVNET_PROVER_POLICY, transport },
+      prover: { url: PROVER_URL, policy: new TvcProverPolicy(POLICY_URL, transport), transport },
     }),
   };
 }
@@ -134,7 +137,7 @@ describe("TvcKeys", () => {
           connection,
           sealedSeed,
           identity: { ...identity, shieldedOwnerHash: "00".repeat(32) },
-          prover: { url: PROVER_URL, policy: DEVNET_PROVER_POLICY },
+          prover: { url: PROVER_URL, policy: new TvcProverPolicy(POLICY_URL) },
         }),
     ).toThrowError(/ShieldedIdentityChanged/);
   });
@@ -260,23 +263,25 @@ describe("TvcKeys", () => {
         target: "/prove/merge_1_1",
         nonce: expect.stringMatching(/^[0-9a-f]{64}$/),
         attestation: { platform: "aws-nitro", hpke_public_key: "44".repeat(32) },
-        policy: DEVNET_PROVER_POLICY,
+        policy: POLICY,
       },
       {},
     );
     expect(proof.a).toHaveLength(64);
 
-    // The attestation carries the nonce the enclave checks; the sealed request
-    // goes to its target with the base URL's API key and the TEE headers.
-    const [attest, submit] = seen;
+    // The policy file comes first; the attestation carries the nonce the
+    // enclave checks; the sealed request goes to its target with the base
+    // URL's API key and the TEE headers.
+    const [policy, attest, submit] = seen;
     const nonce = client.prove.mock.lastCall?.[3].nonce;
-    expect(attest?.url.pathname).toBe("/v1/zolana/tee/v1/attestation");
+    expect(policy?.url.href).toBe(POLICY_URL);
+    expect(attest?.url.pathname).toBe("/v1/spr/attestation");
     expect(attest?.url.searchParams.get("nonce")).toBe(nonce);
     expect(attest?.url.searchParams.get("api-key")).toBe("k");
     expect(submit?.method).toBe("POST");
-    expect(`${submit?.url.pathname}${submit?.url.search}`).toBe("/v1/zolana/prove/merge_1_1?api-key=k");
-    expect(submit?.headers.get("Zolana-Tee")).toBe("v1");
-    expect(submit?.headers.get("Zolana-Tee-Enc")).toBe("11".repeat(32));
+    expect(`${submit?.url.pathname}${submit?.url.search}`).toBe("/v1/spr/prove/merge_1_1?api-key=k");
+    expect(submit?.headers.get("Spr-Tee")).toBe("v1");
+    expect(submit?.headers.get("Spr-Tee-Enc")).toBe("11".repeat(32));
 
     const transfer = {
       circuitType: "transfer-confidential",
@@ -294,7 +299,7 @@ describe("TvcKeys", () => {
     );
   });
 
-  it("attests and seals again once when the prover lost its key", async () => {
+  it("downloads the policy, attests and seals again once when the prover lost its key", async () => {
     const lost = () => Response.json({ code: "tee_decryption_failed" }, { status: 400 });
     const { keys, client, seen } = fixture([lost()]);
     encoders.mergeProverRequestBody.mockReturnValue({
@@ -306,6 +311,7 @@ describe("TvcKeys", () => {
     expect(proof.a).toHaveLength(64);
     expect(client.prove).toHaveBeenCalledTimes(2);
     expect(seen.filter(({ url }) => url.pathname.endsWith("/attestation"))).toHaveLength(2);
+    expect(seen.filter(({ url }) => url.href === POLICY_URL)).toHaveLength(2);
 
     const twice = fixture([lost(), lost()]);
     await expect(
@@ -340,7 +346,7 @@ describe("TvcKeys", () => {
     }
   });
 
-  it("fetches a fresh attestation once when the enclave refuses a cached one", async () => {
+  it("fetches a fresh policy and attestation once when the enclave refuses them", async () => {
     const { keys, client, seen } = fixture();
     encoders.mergeProverRequestBody.mockReturnValue({
       circuitType: "merge",
@@ -352,13 +358,14 @@ describe("TvcKeys", () => {
     client.prove.mockRejectedValueOnce(new TvcError("OperationFailed", "Prover"));
     await keys.proveMerge(inputs);
     expect(seen.filter(({ url }) => url.pathname.endsWith("/attestation"))).toHaveLength(2);
+    expect(seen.filter(({ url }) => url.href === POLICY_URL)).toHaveLength(2);
     expect(client.prove).toHaveBeenCalledTimes(3);
 
-    // A fresh attestation the enclave refuses is the caller's error.
+    // A fresh policy and attestation the enclave refuses are the caller's error.
     const refused = fixture();
     refused.client.prove.mockRejectedValue(new TvcError("OperationFailed", "Prover"));
     await expect(refused.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed" });
-    expect(refused.client.prove).toHaveBeenCalledTimes(1);
+    expect(refused.client.prove).toHaveBeenCalledTimes(2);
   });
 
   it("refuses an unencrypted success and surfaces the prover's refusal", async () => {
@@ -373,12 +380,12 @@ describe("TvcKeys", () => {
       code: "ProverAnswerUnencrypted",
     });
     const refused = fixture([
-      new Response(sealedAnswer(422, { code: "bad_witness" }), { headers: { "Zolana-Tee": "v1" } }),
+      new Response(sealedAnswer(422, { code: "bad_witness" }), { headers: { "Spr-Tee": "v1" } }),
     ]);
     await expect(refused.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "ProverRefused" });
     const tampered = sealedAnswer(200, ZERO_PROOF);
     tampered[20] = (tampered[20] ?? 0) ^ 1;
-    const forged = fixture([new Response(tampered, { headers: { "Zolana-Tee": "v1" } })]);
+    const forged = fixture([new Response(tampered, { headers: { "Spr-Tee": "v1" } })]);
     await expect(forged.keys.proveMerge(inputs)).rejects.toMatchObject({
       code: "ProverAnswerInvalid",
     });
@@ -394,7 +401,7 @@ describe("TvcKeys", () => {
     for (const encrypted of [false, true]) {
       const response = encrypted
         ? new Response(sealedAnswer(status, { code: "unavailable" }), {
-            headers: { "Zolana-Tee": "v1", "Retry-After": "3" },
+            headers: { "Spr-Tee": "v1", "Retry-After": "3" },
           })
         : new Response("upstream unavailable", { status, headers: { "Retry-After": "3" } });
       const { keys, client, seen } = fixture([response]);

@@ -47,7 +47,7 @@ pub use local_dev::{local_testkit_qos_seeds, local_unattested_state, LocalProver
 #[cfg(feature = "local-dev")]
 pub use local_prover::{LocalProver, POLICY_PATH};
 
-pub use operations::OPERATIONS;
+pub use operations::{NETWORK, OPERATIONS};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveryConfig {
@@ -87,7 +87,7 @@ impl AppState {
                 quorum,
                 provisioning_public: operations::PROVISIONING_PUBLIC,
                 grant_public: operations::GRANT_PUBLIC,
-                prover: operations::ProverTrust::devnet(),
+                prover: operations::ProverTrust::image(),
             })),
         }
     }

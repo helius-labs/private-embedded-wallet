@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helius-labs/zolana
-          ref: 40c457e00dd518e627905fd8f928a8b7a90d2693
+          ref: 6bb4f7008294695ebe614f08affb215d4321a538
           path: zolana
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -71,5 +71,5 @@ jobs:
           corepack prepare pnpm@9.15.0 --activate
           pnpm install --frozen-lockfile
           pnpm ci:ts
-      - name: Run the SOL, SPL and ring lifecycles
+      - name: Run the SOL and SPL lifecycles
         run: just headless-e2e

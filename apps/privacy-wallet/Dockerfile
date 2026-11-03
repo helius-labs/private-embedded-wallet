@@ -1,5 +1,8 @@
 FROM rust:1.98-alpine3.24@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f AS build
 
+# The network whose signed prover policy the image accepts: devnet or mainnet.
+ARG SPR_NETWORK
+ENV SPR_NETWORK=${SPR_NETWORK}
 ENV RUSTFLAGS='-C target-feature=+crt-static'
 ENV OPENSSL_STATIC='1'
 ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --locked --release --package zolana-tvc-privacy-wallet --bin zolana-tvc-privacy-wallet'
@@ -16,6 +19,7 @@ WORKDIR /src/
 RUN cargo fetch --locked
 RUN --network=none <<-EOF
     set -eu
+    case "${SPR_NETWORK}" in devnet|mainnet) ;; *) echo "--build-arg SPR_NETWORK=devnet|mainnet" >&2; exit 1 ;; esac
     cargo build ${CARGOFLAGS}
     mkdir -p /rootfs
     mv ${RELEASE_DIR}/zolana-tvc-privacy-wallet /rootfs/tvc_app
