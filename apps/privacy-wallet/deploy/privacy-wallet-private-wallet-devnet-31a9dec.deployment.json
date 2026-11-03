@@ -1,0 +1,25 @@
+{
+  "appId": "4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39",
+  "qosVersion": "0.12.1",
+  "pivotContainerImageUrl": "ghcr.io/helius-labs/zolana-tvc-privacy-wallet:privacy-wallet-devnet-31a9dec99c0d@sha256:5bfb34a8060d689f471bde13f7bad3c1f8cc7afdda41d9671fcd5368b9920b9d",
+  "pivotPath": "/tvc_app",
+  "pivotArgs": [
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "3000",
+    "--security-domain-id",
+    "6833d54afc265196b7051a12acc448f28e3a34e0a1339f8a31ee4283c54fb3fd",
+    "--release-id",
+    "private-wallet-devnet-31a9dec",
+    "--quorum-key-id",
+    "b45f8b07-4d2c-4c72-a2a5-a5eadc3c1373",
+    "--quorum-key-epoch",
+    "1"
+  ],
+  "expectedPivotDigest": "d4ca1f4eb33655f7d55cb644376a4589e9d4ab42a14b9d18af4353349cddf424",
+  "dangerousDeployDebugMode": false,
+  "healthCheckType": "TVC_HEALTH_CHECK_TYPE_HTTP",
+  "healthCheckPort": 3000,
+  "publicIngressPort": 3000
+}
