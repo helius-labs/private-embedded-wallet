@@ -2,8 +2,9 @@
 
 | Script | Purpose |
 | --- | --- |
-| [`release.mjs`](release.mjs) | Builds, deploys, and signs a release of the privacy-wallet enclave, then pins it in the wallet-kit demo. |
+| [`release.mjs`](release.mjs) | Builds, deploys, and signs a release of the privacy-wallet enclave, then pins it in tvc-gateway and wallet-kit. |
 | [`provision-descriptor.mjs`](provision-descriptor.mjs) | Signs a wallet descriptor for one client key. |
+| [`sign-prover-policy.mjs`](sign-prover-policy.mjs) | Signs the prover policy: the TEE prover deployments the enclave may seal a witness to. |
 | [`start-localnet.sh`](start-localnet.sh) | Starts a Zolana localnet for `just headless-e2e`. |
 
 The scripts need Node 24, Docker with `linux/amd64`, cargo, and the Turnkey
@@ -17,17 +18,22 @@ pinned by `@sha256:`, signed release policy, and wallet descriptors. The
 constants of the current app are in
 [`apps/privacy-wallet/deploy/release.json`](../apps/privacy-wallet/deploy/release.json).
 
+The `publish-privacy-wallet-image` workflow builds the image of a commit into
+the public GHCR package `imageRepository`, and its run summary has the
+reference pinned by digest and the `/tvc_app` SHA-256. `just image-privacy-wallet`
+builds the same image locally to compare against.
+
 ```sh
-just release keyholder-v35                      # all four phases
-node scripts/release.mjs policy keyholder-v35   # one phase
+just release private-wallet-devnet-<sha> --image <reference>
+node scripts/release.mjs policy private-wallet-devnet-<sha>   # one phase
 ```
 
 | Phase | What it does |
 | --- | --- |
-| `build` | Builds and pushes the image and records `privacy-wallet-<release>.deployment.json` with the OCI digest and the `/tvc_app` SHA-256 (`expectedPivotDigest`). Debug mode stays off; `qosVersion` equals the pinned `qos_core`. |
+| `build` | Reads the `/tvc_app` SHA-256 from the `--image` reference and records it (`expectedPivotDigest`) with the reference in `privacy-wallet-<release>.deployment.json`. Debug mode stays off; `qosVersion` equals the pinned `qos_core`. |
 | `deploy` | Drives the `tvc` CLI: creates the deployment, collects one approval per operator, provisions it, sets it live, and waits until `/v1/info` serves the release. Each approval shows the QOS manifest for the operator to confirm; `--unattended` skips that review. A re-run continues from the last completed step. |
 | `policy` | Assembles the release policy from `/v1/info` and `release.json`, signs it with a one-time authority key (`cargo run -p zolana-tvc-protocol --example sign-release-policy`; the private half exists only inside that call), and writes `privacy-wallet.trust.json`: the policy, the authority public keys, and the QOS identity PCRs a client pins. |
-| `pins` | Writes the trust material into the wallet-kit demo's `tvc-policy.ts` and enables its signature test. |
+| `pins` | Writes the signed policy and its authorities into tvc-gateway's `configs/`, and the trust material into wallet-kit's `release.ts`. |
 
 Turnkey keeps three deployable deployments per app. `--prune-deployments`
 deletes the oldest that are neither live nor the release's own until the new
@@ -42,10 +48,10 @@ every client must accept.
 ## Wallet descriptors
 
 A wallet descriptor is the operator's grant that lets one client key drive the
-enclave operations of one Turnkey wallet. The client reports the values
-(`examples/typescript-client` prints them from `pnpm example examples/enroll.ts`;
-the wallet-kit demo requests a descriptor from its own route), and the
-operator signs:
+enclave operations of one Turnkey wallet. tvc-gateway signs one on each
+`POST /v1/private-wallet/enroll`. For a client that talks to the enclave
+directly, the client reports the values (`examples/typescript-client` prints
+them from `pnpm example examples/enroll.ts`) and the operator signs:
 
 ```sh
 node scripts/provision-descriptor.mjs --organization-id <org> --wallet-id <id> \

@@ -128,7 +128,7 @@ constants of the current app are in
 a release is one command, and a descriptor one more:
 
 ```sh
-just release keyholder-v35
+just release private-wallet-devnet-<sha> --image <reference>
 just provision-descriptor --organization-id <org> --wallet-id <id> \
   --address <address> --client-public-key <hex> --out descriptor.json
 ```
