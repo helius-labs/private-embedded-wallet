@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Zolana privacy-wallet demo on AWS App Runner
+
+Parameters:
+  ImageIdentifier:
+    Type: String
+  HeliusApiKey:
+    Type: String
+    NoEcho: true
+  SolanaRpcUrl:
+    Type: String
+
+Resources:
+  EcrAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: build.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  Service:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: zolana-privacy-wallet-demo
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt EcrAccessRole.Arn
+        AutoDeploymentsEnabled: false
+        ImageRepository:
+          ImageIdentifier: !Ref ImageIdentifier
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: "3001"
+            RuntimeEnvironmentVariables:
+              - Name: NODE_ENV
+                Value: production
+              - Name: DEVNET_SOLANA_RPC_URL
+                Value: !Ref SolanaRpcUrl
+              - Name: HELIUS_API_KEY
+                Value: !Ref HeliusApiKey
+      InstanceConfiguration:
+        Cpu: "1 vCPU"
+        Memory: "2 GB"
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+Outputs:
+  ServiceArn:
+    Value: !GetAtt Service.ServiceArn
+  ServiceUrl:
+    Value: !Sub "https://${Service.ServiceUrl}"

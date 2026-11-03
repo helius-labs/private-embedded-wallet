@@ -13,6 +13,8 @@ export default [
   {
     files: [
       "packages/tvc-wallet/**/*.{ts,tsx}",
+      "packages/tvc-wallet-kit/**/*.{ts,tsx}",
+      "examples/privacy-wallet-next-app/src/**/*.{ts,tsx}",
       "examples/typescript-client/{src,examples}/**/*.{ts,tsx}",
       "apps/tvc-gateway/e2e/*.ts",
     ],
