@@ -9,7 +9,7 @@ import {
   type ShieldedAddress,
 } from "@heliuslabs/zolana";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { DEVNET_PROVER_POLICY } from "../protocol/prover-policy.js";
+import { TvcProverPolicy } from "./prover-policy.js";
 
 import type { VerifiedConnection } from "../client/connection.js";
 import { encodeLowerHex } from "../protocol/hex.js";
@@ -50,7 +50,7 @@ function keysFor(address: ShieldedAddress, client: TvcClient): TvcKeys {
     connection,
     sealedSeed,
     identity: identityOf(address),
-    prover: { url: "http://prover.invalid", policy: DEVNET_PROVER_POLICY },
+    prover: { url: "http://prover.invalid", policy: TvcProverPolicy.forNetwork("devnet") },
   });
 }
 

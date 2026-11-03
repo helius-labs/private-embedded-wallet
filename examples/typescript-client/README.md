@@ -6,7 +6,6 @@ enclave (`@zolana/tvc-wallet`), in the layout of
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw, with the enclave as the key holder
 - **[spl_deposit_transfer_withdraw](examples/spl_deposit_transfer_withdraw.ts)** - The same lifecycle for an SPL token registered with the pool
-- **[ring_deposit_transfer_exit](examples/ring_deposit_transfer_exit.ts)** - Deposit into a custom ring, transfer inside it, and exit back to the default ring
 
 ## What a TVC wallet is
 
@@ -88,25 +87,13 @@ The examples check balance changes relative to the wallet's starting balance,
 so they can be rerun with an existing wallet.
 
 The wallet in the descriptor pays fees and the deposit, so it needs devnet
-SOL: the SOL and ring examples each deposit 0.01 SOL, so 0.1 SOL covers a
-run of everything. For the SPL example set `SPL_MINT`, `SPL_ASSET_ID` (the id the pool
+SOL: the SOL example deposits 0.01 SOL, so 0.1 SOL covers a run of
+everything. For the SPL example set `SPL_MINT`, `SPL_ASSET_ID` (the id the pool
 registered the mint under) and `SPL_TOKEN_ACCOUNT` (the wallet's token account
 the deposit leaves from), and optionally `SPL_AMOUNT`:
 
 ```bash
 pnpm example examples/spl_deposit_transfer_withdraw.ts
-```
-
-The ring example needs `RING_PROGRAM_ID`, a custom ring program registered
-with the pool on the network you run against. Zolana v1 transactions do not use
-address lookup tables. The TVC enclave completes the shielded-pool proof; the
-client prover completes the ring's base and, when configured, policy proof, so
-`ZOLANA_PROVER_URL` must list the matching custom-ring circuits at `GET /health`.
-The ring program must accept those proofs; registration alone does not guarantee
-compatibility:
-
-```bash
-pnpm example examples/ring_deposit_transfer_exit.ts
 ```
 
 The merge example consolidates the wallet's SOL notes into one. It sets the
@@ -148,11 +135,8 @@ This restriction does not protect privacy secrets after a quorum-key compromise
 or undo previous exposure. Live checks on 2026-09-09 against
 `keyholder-pr9-34b4e28` verified attestation, encrypted ping, bootstrap with
 automatic owner approval and App Proof verification, and recovery of the same
-wallet identity. SOL and SPL deposit, private transfer, and withdrawal, plus
-custom-ring deposit, transfer, and exit, all finalized on devnet with the expected
-balance changes. The ring test used
-`3H426EKpn3hhu3ra2rMfsVRs4HYbY3BqivadcJqFqAKg` with the default prover. An older
-registered ring rejected its proofs with `ProofVerificationFailed`.
+wallet identity. SOL and SPL deposit, private transfer, and withdrawal all
+finalized on devnet with the expected balance changes.
 
 ## Operator provisioning
 
@@ -205,18 +189,19 @@ just headless-e2e 400
 ```
 
 The recipe builds the package, starts the validator, Photon and the prover
-(`scripts/start-localnet.sh`, which also mints a test SPL asset and initializes
-a custom ring), starts the testkit, funds the keypair, runs the three examples,
+(`scripts/start-localnet.sh`, which also mints a test SPL asset), starts the
+testkit, funds the keypair, runs the two examples,
 and tears everything down. The same workflow runs it in CI. Setting
 `TVC_LOCAL_TESTKIT_ENDPOINT` (with
-`TVC_SOLANA_KEYPAIR_PATH`, `TVC_WALLET_PATH`, the `ZOLANA_*` URLs, the
-`SPL_*` values and `RING_PROGRAM_ID`) runs an example against a stack you
-started yourself.
+`TVC_SOLANA_KEYPAIR_PATH`, `TVC_WALLET_PATH`, the `ZOLANA_*` URLs and the
+`SPL_*` values) runs an example against a stack you started yourself.
 
-The testkit also runs against devnet. Started with `--live-prover`, it seals
-witnesses to the devnet TEE prover under `DEVNET_PROVER_POLICY` rather than to
-its stand-in. Set `TVC_PROVER_URL` to that prover and `API_KEY`, and leave the
-`ZOLANA_*` URLs unset for the devnet RPC, indexer and prover:
+The testkit also runs against a live network. Started with `--live-prover`, it
+seals witnesses to the network's TEE provers under its signed policy rather
+than to its stand-in. Set `TVC_PROVER_URL` to one of them and `API_KEY`, and
+leave the `ZOLANA_*` URLs unset for the network's RPC, indexer and prover. A
+mainnet testkit needs `SPR_NETWORK=mainnet` both when it is built and when the
+example runs:
 
 ```bash
 cargo run -p zolana-tvc-privacy-wallet --features local-dev \
@@ -245,10 +230,12 @@ IndexedDB.
 
 ## Notes
 
-- Pre-production, devnet only, disposable funds. The enclave seals each proof's
-  witness to the attested prover at `TVC_PROVER_URL` (default gatekeeper's
-  `/v1/zolana` with `API_KEY`); the client-side prover at `ZOLANA_PROVER_URL`
-  never sees an enclave witness.
+- Pre-production, disposable funds. `SPR_NETWORK` (`devnet` by default, or
+  `mainnet`) picks the RPC, Photon indexer and TEE prover, and must match the
+  network the enclave image was built for. The enclave seals each proof's
+  witness to the attested prover at `TVC_PROVER_URL` (default the network's
+  eu-north-1 prover); the client-side prover at `ZOLANA_PROVER_URL` never sees
+  an enclave witness.
 - Never commit `.env`, the client key, the descriptor, or the stored wallet.
 
 ## Documentation

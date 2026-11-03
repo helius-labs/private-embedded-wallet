@@ -159,34 +159,27 @@ export type TransactionKeysOperation = {
 };
 
 /**
- * A prover policy: the `zolana-prover-tee` policy (`platform`, its pins, `gpu`
- * and `max_age_secs`) the enclave verifies a prover's attestation against,
- * valid between the two instants.
+ * A network's signed prover policy file (zolana `prover/tee/WIRE_CONTRACT.md`,
+ * "Signed policy"), as downloaded: the hex of the approved payload and the
+ * Ed25519 signatures over it. The enclave verifies it against the signers its
+ * image pins.
  */
-export type ProverPolicy = {
-  version: 1;
-  tee: Readonly<Record<string, unknown>>;
-  validFromMs: string;
-  expiresAtMs: string;
-};
-
-/** Signed by the prover policy key the enclave is built with. */
-export type SignedProverPolicy = {
-  policy: ProverPolicy;
-  scheme: "p256-sha256";
-  signature: string;
+export type SignedProverPolicyFile = {
+  payload: string;
+  signatures: readonly { public_key: string; signature: string }[];
 };
 
 /**
- * The prover a `Prove` seals to: the path the client posts the sealed request
- * to (`/prove/<key>` under any prefix, no query), the nonce the attestation was
- * requested with, the attestation as the prover answered it, and the policy.
+ * The prover a `Prove` seals to: the route the client posts the sealed request
+ * to (`/prove/<key>` below the prover URL, no query), the nonce the attestation
+ * was requested with, the attestation as the prover answered it, and the
+ * policy file.
  */
 export type ProverSealing = {
   target: string;
   nonce: string;
   attestation: Readonly<Record<string, unknown>>;
-  policy: SignedProverPolicy;
+  policy: SignedProverPolicyFile;
 };
 
 export type ProveOperation = { type: "Prove"; request: ProverRequest; prover: ProverSealing };
@@ -269,8 +262,8 @@ export type TransactionKeysResult = {
 
 /**
  * One encrypted prover request: post `ciphertext` to `target` with
- * `Zolana-Tee: v1` and `Zolana-Tee-Enc: enc`; `response_key` opens the answer
- * and nothing else.
+ * `Spr-Tee: v1` and `Spr-Tee-Enc: enc`; `response_key` opens the answer and
+ * nothing else.
  */
 export type SealedProverRequest = {
   target: string;

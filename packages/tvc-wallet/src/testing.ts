@@ -19,9 +19,10 @@ import {
 } from "./protocol/digest.js";
 import { signWalletGrant } from "./protocol/grant.js";
 import { decodeLowerHex, encodeLowerHex } from "./protocol/hex.js";
-import type { OperationKind, SignedProverPolicy, WalletDescriptor } from "./protocol/types.js";
+import type { OperationKind, WalletDescriptor } from "./protocol/types.js";
 import { clientFromSession, type TvcClient } from "./wallet/client.js";
 import type { TvcProverConfig } from "./wallet/prover.js";
+import { TvcProverPolicy } from "./wallet/prover-policy.js";
 
 const te = new TextEncoder();
 if (localTestkit.version !== 1) throw new Error("UnsupportedLocalTestkitFixture");
@@ -123,15 +124,14 @@ export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
 
 /**
  * The testkit's stand-in attested prover (`zolana-tvc-privacy-wallet-local
- * --prover-tee-port`), with the policy it publishes. The local enclave trusts
- * its fixture root and that policy's key; nothing else does.
+ * --prover-tee-port`), with the policy file it publishes. The local enclave
+ * trusts its fixture root and the testkit's policy signer; nothing else does.
  */
-export async function localProverConfig(url: string, transport?: TvcTransport): Promise<TvcProverConfig> {
+export function localProverConfig(url: string, transport?: TvcTransport): TvcProverConfig {
   const base = new URL(url);
   if (base.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(base.hostname)) {
     throw new Error("LocalProverRequiresLoopback");
   }
-  const response = await (transport ?? { fetch }).fetch(new URL("/local/prover-policy", base));
-  if (!response.ok) throw new Error(`LocalProverPolicyUnavailable: HTTP ${response.status}`);
-  return { url, policy: (await response.json()) as SignedProverPolicy, ...(transport ? { transport } : {}) };
+  const policy = new TvcProverPolicy(new URL("/local/prover-policy", base), transport);
+  return { url, policy, ...(transport ? { transport } : {}) };
 }

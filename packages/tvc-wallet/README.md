@@ -6,13 +6,8 @@ every operation in a QOS P-256 envelope, checks the proof-bound result, and
 answers the Zolana SDK's `WalletKeys` interface through `TvcKeys`, so every
 `@heliuslabs/zolana` flow runs over the enclave unchanged.
 
-Pre-production, disposable devnet funds only. `DEVNET_PROVER_POLICY` expires;
-past its `expiresAtMs` a proof fails at the `Prover` stage until the client
-carries a newer signed policy.
-
-This source targets Zolana commit `1305a420a4fd3bac28d9edf0548cb4eec1b690c8`.
-The published `0.1.6-alpha` package predates the Kit 8 and protocol update; keep
-the Git pin until Zolana publishes the next release.
+Pre-production. Requires `@heliuslabs/zolana` 0.8.0-alpha or later, which
+speaks the `/v1/spr` prover contract and its signed policies.
 
 ## Usage
 
@@ -24,11 +19,12 @@ import {
   createZolanaClient,
   syncWallet,
 } from "@heliuslabs/zolana";
+import { SignedTeePolicy } from "@heliuslabs/zolana/client";
 import { AssetRegistry } from "@heliuslabs/zolana/transaction";
 import {
-  DEVNET_PROVER_POLICY,
   DEVNET_RELEASE,
   TvcKeys,
+  TvcProverPolicy,
   sealedSeedOf,
   createTvcClient,
   identityOf,
@@ -44,15 +40,16 @@ const identity = identityOf(bootstrap); // persist
 const sealedSeed = sealedSeedOf(bootstrap); // persist; presented on every later call
 
 // The enclave as the SDK's keys. Nothing below learns a secret: a proof's witness
-// is sealed inside the enclave to the attested prover at `prover.url`.
+// is sealed inside the enclave to the attested prover at `prover.url`, under the
+// signed policy of the network the enclave image was built for.
 const keys = new TvcKeys({
   client: tvc,
   connection,
   sealedSeed,
   identity,
   prover: {
-    url: `https://beta-devnet.helius-rpc.com/v1/zolana?api-key=${apiKey}`,
-    policy: DEVNET_PROVER_POLICY,
+    url: proverUrl, // a regional TEE prover, or a gateway's `/v1/spr`
+    policy: TvcProverPolicy.forNetwork("devnet"),
   },
 });
 // The enclave completes resolved proof inputs; it has no indexed proving, so the
@@ -61,6 +58,7 @@ const zolana = await createZolanaClient({
   solanaRpcUrl,
   indexerUrl,
   proverUrl,
+  proverTee: SignedTeePolicy.forNetwork("devnet"),
   proofDataSource: "client",
 });
 const wallet = new Wallet({
@@ -94,19 +92,22 @@ sync stops its decrypt batches as a cancelled build stops its proof. The pool
 cipher is unauthenticated, so the SDK adopts a decrypted UTXO only when its
 commitment matches the indexed output.
 
-A proof is at most three calls. `TvcKeys` fetches the prover's attestation for a
-fresh nonce (`GET <url>/tee/v1/attestation`) and reuses it for the policy's
-`max_age_secs`, asks the enclave to complete the request and seal it to the
-attested key under `policy`, and posts the sealed request to
-`<url path>/prove/<key>` with the URL's query, such as its API key. It opens the
-answer with the response key the enclave returned, which opens nothing else. A
-cached attestation the enclave refuses is fetched again once, and a prover that
-rebooted onto a new key is attested and sealed to once more. Neither the client
-nor any proxy in front of the prover holds the witness in plaintext.
+A proof is at most three calls after the policy file. `TvcProverPolicy`
+downloads the network's signed policy file and holds it for its
+`max_age_secs`; the enclave, not the client, checks its signatures. `TvcKeys`
+fetches the prover's attestation for a fresh nonce (`GET <url>/attestation`)
+and reuses it for the same `max_age_secs`, asks the enclave to complete the
+request and seal it to the attested key under that file, and posts the sealed
+request to `<url path>/prove/<key>` with the URL's query, such as its API key.
+It opens the answer with the response key the enclave returned, which opens
+nothing else. When the enclave refuses the policy or attestation, or the
+prover answers `tee_decryption_failed`, the client downloads the policy again,
+attests again and seals once more. Neither the client nor any proxy in front of
+the prover holds the witness in plaintext.
 
 The enclave binds a sealed request to its route below the prover's URL,
 `/prove/<key>`, so a gateway or proxy may serve the prover on any path. It must
-forward the request with its `Zolana-Tee` headers and body unchanged.
+forward the request with its `Spr-Tee` headers and body unchanged.
 
 Prover failures, including encrypted failures, retain their status and
 `Retry-After` as `TvcHttpError`. They are returned without automatically

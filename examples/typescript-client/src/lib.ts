@@ -26,12 +26,12 @@ import {
   initializePoseidon,
   type ZolanaClientConfig,
 } from "@heliuslabs/zolana";
+import { SignedTeePolicy } from "@heliuslabs/zolana/client";
 import type { AssetBalance } from "@heliuslabs/zolana/transaction";
 import { DEFAULT_SOLANA_ACCOUNTS, Turnkey } from "@turnkey/sdk-server";
 import {
   createTvcClient,
   createTvcOperationAuthorizer,
-  DEVNET_PROVER_POLICY,
   identityOf,
   sealedSeedOf,
   type BootProofResolver,
@@ -40,6 +40,8 @@ import {
   type ShieldedIdentity,
   type TvcClient,
   type TvcProverConfig,
+  type TvcProverNetwork,
+  TvcProverPolicy,
   type WalletDescriptor,
   type VerifiedConnection,
 } from "@zolana/tvc-wallet";
@@ -86,14 +88,23 @@ interface TrustMaterial {
   readonly qosIdentityPcrs: QosIdentityPcrs;
 }
 
-// PROVER_URL, the devnet TEE prover the SDK's default TEE policy pins, handles
-// client-side proofs. The enclave seals its proofs to the attested prover
-// behind gatekeeper instead (TVC_PROVER_URL).
-const RPC_URL = "https://devnet.helius-rpc.com";
-const GATEKEEPER_URL = "https://beta-devnet.helius-rpc.com";
+// Each network's Solana RPC, Photon indexer and eu-north-1 TEE prover. SPR_NETWORK
+// picks one; it must be the network the enclave image was built for. The SDK
+// and the enclave both accept the provers that network's signed policy admits.
+const NETWORKS = {
+  devnet: {
+    rpc: "https://devnet.helius-rpc.com",
+    indexer: "https://d34xe1hqb2ibg2.cloudfront.net",
+    prover: "https://dd73hh473h6ha.cloudfront.net",
+  },
+  mainnet: {
+    rpc: "https://mainnet.helius-rpc.com",
+    indexer: "https://dgcj4pjarvo65.cloudfront.net",
+    prover: "https://d3ky2kt0ntqxt1.cloudfront.net",
+  },
+} as const satisfies Record<TvcProverNetwork, unknown>;
 const LOCAL_PROVER_URL = "http://127.0.0.1:44021";
-const INDEXER_URL = "https://d21d98xh5lgv3b.cloudfront.net";
-const PROVER_URL = "https://d1unet9hn0mci0.cloudfront.net";
+const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
 const TURNKEY_API_URL = "https://api.turnkey.com";
 const P256 = { name: "ECDSA", namedCurve: "P-256" } as const;
 
@@ -111,18 +122,29 @@ async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8")) as unknown;
 }
 
-function clientConfigFromEnv(): ZolanaClientConfig {
+function networkFromEnv(): TvcProverNetwork {
+  const network = process.env["SPR_NETWORK"]?.trim() || "devnet";
+  if (network !== "devnet" && network !== "mainnet") throw new Error("SPR_NETWORK must be devnet or mainnet");
+  return network;
+}
+
+function clientConfigFromEnv(network: TvcProverNetwork): ZolanaClientConfig {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
   const apiKey = process.env["API_KEY"]?.trim();
   const solanaRpcUrl =
-    endpoint || (apiKey ? `${RPC_URL}/?api-key=${apiKey}` : undefined);
+    endpoint || (apiKey ? `${NETWORKS[network].rpc}/?api-key=${apiKey}` : undefined);
   if (!solanaRpcUrl) {
     throw new Error("set API_KEY or ZOLANA_ENDPOINT");
   }
+  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim() || NETWORKS[network].prover;
   return Object.freeze({
     solanaRpcUrl,
-    indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
-    proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
+    indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || NETWORKS[network].indexer,
+    proverUrl,
+    // A local network's plaintext prover is the only one without a policy.
+    ...(LOOPBACK_HOSTS.includes(new URL(proverUrl).hostname)
+      ? {}
+      : { proverTee: SignedTeePolicy.forNetwork(network) }),
     // The enclave completes resolved proof inputs; it has no indexed proving.
     proofDataSource: "client",
   });
@@ -545,20 +567,19 @@ async function localTestkit(endpoint: string): Promise<{
 
 export async function setup(): Promise<ExampleSetup> {
   await initializePoseidon();
-  const zolana = await createZolanaClient(clientConfigFromEnv());
+  const network = networkFromEnv();
+  const zolana = await createZolanaClient(clientConfigFromEnv(network));
   const walletPath = env("TVC_WALLET_PATH");
   const testkit = process.env["TVC_LOCAL_TESTKIT_ENDPOINT"]?.trim();
   if (testkit) {
     const local = await localTestkit(testkit);
     const connection = await local.tvc.connectAndVerify();
-    // TVC_PROVER_URL names the devnet TEE prover, for a testkit started with
-    // --live-prover; otherwise the testkit's stand-in prover.
+    // TVC_PROVER_URL names a TEE prover of the network, for a testkit
+    // started with --live-prover; otherwise the testkit's stand-in prover.
     const liveProver = process.env["TVC_PROVER_URL"]?.trim();
     const prover = liveProver
-      ? { url: liveProver, policy: DEVNET_PROVER_POLICY }
-      : await localProverConfig(
-          process.env["TVC_LOCAL_PROVER_URL"]?.trim() || LOCAL_PROVER_URL,
-        );
+      ? { url: liveProver, policy: TvcProverPolicy.forNetwork(network) }
+      : localProverConfig(process.env["TVC_LOCAL_PROVER_URL"]?.trim() || LOCAL_PROVER_URL);
     return Object.freeze({ zolana, walletPath, ...local, connection, prover });
   }
   const { tvc: enclave, descriptor, servicePublicKey } = await tvcClientFromEnv();
@@ -580,15 +601,11 @@ export async function setup(): Promise<ExampleSetup> {
     zolana, tvc, connection,
     signer: turnkeySigner(owner, descriptor),
     walletPath,
-    prover: { url: proverUrlFromEnv(), policy: DEVNET_PROVER_POLICY },
+    prover: {
+      url: process.env["TVC_PROVER_URL"]?.trim() || NETWORKS[network].prover,
+      policy: TvcProverPolicy.forNetwork(network),
+    },
   });
-}
-
-/** The attested prover's base URL: TVC_PROVER_URL, else gatekeeper's Zolana prefix. */
-function proverUrlFromEnv(): string {
-  const configured = process.env["TVC_PROVER_URL"]?.trim();
-  if (configured) return configured;
-  return `${GATEKEEPER_URL}/v1/zolana?api-key=${env("API_KEY")}`;
 }
 
 /** The stored identity and sealed seed, or `undefined` before the first bootstrap. */

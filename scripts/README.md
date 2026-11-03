@@ -4,7 +4,6 @@
 | --- | --- |
 | [`release.mjs`](release.mjs) | Deploys and signs a release of the privacy-wallet enclave, then pins it in tvc-wallet and tvc-gateway. |
 | [`provision-descriptor.mjs`](provision-descriptor.mjs) | Signs a wallet descriptor for one client key. |
-| [`sign-prover-policy.mjs`](sign-prover-policy.mjs) | Signs the prover policy: the TEE prover deployments the enclave may seal a witness to. |
 | [`start-localnet.sh`](start-localnet.sh) | Starts a Zolana localnet for `just headless-e2e`. |
 
 The scripts need Node 24, Docker with `linux/amd64`, cargo, and the Turnkey
@@ -18,10 +17,12 @@ pinned by `@sha256:`, signed release policy, and wallet descriptors. The
 constants of the current app are in
 [`apps/privacy-wallet/deploy/release.json`](../apps/privacy-wallet/deploy/release.json).
 
-The `publish-privacy-wallet-image` workflow builds the image of a commit into
-the public GHCR package `imageRepository`, and its run summary has the
-reference pinned by digest and the `/tvc_app` SHA-256. `just image-privacy-wallet`
-builds the same image locally to compare against.
+The `publish-privacy-wallet-image` workflow builds the image of a commit for one
+network (`devnet` or `mainnet`, the signed prover policy the image accepts)
+into the public GHCR package `imageRepository`, and its run summary has the
+reference pinned by digest and the `/tvc_app` SHA-256.
+`just image-privacy-wallet <network>` builds the same image locally to compare
+against.
 
 ```sh
 just release private-wallet-devnet-<sha> --image <reference>
@@ -67,32 +68,13 @@ public data; the client stores it at its `TVC_DESCRIPTOR_PATH`.
 
 The script imports the protocol package, so run `pnpm build:ts` first.
 
-## Prover policy
-
-`sign-prover-policy.mjs` signs the TEE prover deployments the enclave may seal a
-proof witness to:
-
-```sh
-node scripts/sign-prover-policy.mjs --tee ../zolana/prover/tee/deployments/nitro-c7a.json \
-  [--valid-days 180] [--out packages/tvc-wallet/src/devnet-prover-policy.json]
-```
-
-`--tee` is a zolana TEE pin. The prover policy key comes from
-`TVC_PROVER_POLICY_KEY_JSON` or `--prover-policy-key <path>` (`{"private_key":
-"<hex>"}`), checked against `PROVER_POLICY_PUBLIC` in the image before it signs.
-The devnet key is the Secrets Manager secret
-`zolnet-devnet-c/tvc-prover-policy-key`. Re-sign before `expiresAtMs`, and
-whenever the prover image changes its PCRs; the default output is the policy
-tvc-wallet ships. Needs `pnpm build:ts` first.
-
 ## Localnet
 
 `start-localnet.sh PORT_OFFSET SOLANA_KEYPAIR FIXTURE_DIR OUTPUT_ENV` builds
 the programs, Photon, the prover, and the CLI from a sibling `../zolana`
 checkout, starts a validator with the shielded pool, Photon, and the prover on
-the offset ports, mints a test SPL asset, deploys and initializes a custom
-ring, and writes the `SPL_*` and `RING_PROGRAM_ID` values the client example
-reads to `OUTPUT_ENV`. `just headless-e2e` runs it. The sibling checkout must
+the offset ports, mints a test SPL asset, and writes the `SPL_*` values the
+client example reads to `OUTPUT_ENV`. `just headless-e2e` runs it. The sibling checkout must
 be at the zolana commit
 [`headless-local-e2e.yml`](../.github/workflows/headless-local-e2e.yml) pins,
 the `gitHead` of the `@heliuslabs/zolana` release the packages depend on.

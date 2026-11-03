@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { p256 } from "@noble/curves/p256";
 import { sha256 } from "@noble/hashes/sha256";
 import { describe, expect, it } from "vitest";
 import { canonicalizeJsonValue, isRfc8785 } from "./jcs.js";
@@ -11,7 +10,6 @@ import { parseStrictJson } from "./json.js";
 import {
   clientAuthDigest,
   descriptorDigest,
-  proverPolicyDigest,
   walletGrantDigest,
   requestDigest,
   requestIdHash,
@@ -20,12 +18,7 @@ import {
   walletIdHash,
 } from "./digest.js";
 import { TvcError } from "./error.js";
-import {
-  DEVELOPMENT_PROVER_POLICY_PUBLIC_KEY,
-  DEVNET_PROVER_POLICY,
-  signProverPolicy,
-} from "./prover-policy.js";
-import type { HealthResponse, ProverPolicy, ServiceInfo } from "./types.js";
+import type { HealthResponse, ServiceInfo } from "./types.js";
 import { HEALTH_KEYS, SERVICE_INFO_KEYS } from "./types.js";
 import {
   parseUncompressedSec1,
@@ -418,38 +411,6 @@ describe("wallet grant digests", () => {
     expect(encodeLowerHex(walletGrantDigest({ ...grant, project_id: "project-2" }))).not.toBe(
       fixture.grant_digest,
     );
-  });
-});
-
-describe("prover policy digests", () => {
-  it("matches the Rust prover policy digest and signs it", () => {
-    const fixture = readJson("prover-policy-digest.json");
-    const policy = fixture.policy as ProverPolicy;
-    expect(encodeLowerHex(proverPolicyDigest(policy))).toBe(fixture.policy_digest);
-    expect(encodeLowerHex(proverPolicyDigest({ ...policy, expiresAtMs: "1" }))).not.toBe(
-      fixture.policy_digest,
-    );
-    const secret = new Uint8Array(32).fill(0x99);
-    const signed = signProverPolicy(policy, secret);
-    expect(signed.scheme).toBe("p256-sha256");
-    expect(() =>
-      verifyP256Prehash(
-        p256.getPublicKey(secret, false),
-        decodeLowerHex(fixture.policy_digest as string),
-        decodeLowerHex(signed.signature),
-      ),
-    ).not.toThrow();
-  });
-
-  it("ships a devnet policy signed by the key the enclave is built with", () => {
-    expect(() =>
-      verifyP256Prehash(
-        decodeLowerHex(DEVELOPMENT_PROVER_POLICY_PUBLIC_KEY),
-        proverPolicyDigest(DEVNET_PROVER_POLICY.policy),
-        decodeLowerHex(DEVNET_PROVER_POLICY.signature),
-      ),
-    ).not.toThrow();
-    expect(DEVNET_PROVER_POLICY.policy.tee["platform"]).toBe("aws-nitro");
   });
 });
 

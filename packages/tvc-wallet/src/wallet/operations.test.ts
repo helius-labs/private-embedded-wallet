@@ -33,18 +33,14 @@ function sealing(target: string): ProverSealing {
     target,
     nonce: "42".repeat(32),
     attestation: { platform: "aws-nitro" },
-    policy: {
-      policy: { version: 1, tee: {}, validFromMs: "0", expiresAtMs: "1" },
-      scheme: "p256-sha256",
-      signature: "aa".repeat(64),
-    },
+    policy: { payload: "7b7d", signatures: [{ public_key: "11".repeat(32), signature: "aa".repeat(64) }] },
   };
 }
 
 const MERGE = { circuitType: "merge", inputs: [{}], userNullifierSecret: null };
-const prove = { type: "Prove" as const, request: MERGE, prover: sealing("/v1/zolana/prove/merge_1_1") };
+const prove = { type: "Prove" as const, request: MERGE, prover: sealing("/prove/merge_1_1") };
 const SEALED = {
-  target: "/v1/zolana/prove/merge_1_1",
+  target: "/prove/merge_1_1",
   enc: "11".repeat(32),
   ciphertext: "0102",
   response_key: "22".repeat(32),
@@ -131,16 +127,16 @@ describe("request checks", () => {
   });
 
   it("seals only to the request's proving key route", () => {
-    for (const target of ["/prove/merge_1_1", "/v1/zolana/prove/merge_1_1"]) {
-      expect(checkProve({ ...prove, prover: sealing(target) }).prover.target).toBe(target);
-    }
+    expect(checkProve({ ...prove, prover: sealing("/prove/merge_1_1") }).prover.target).toBe(
+      "/prove/merge_1_1",
+    );
     for (const target of [
-      "/v1/zolana/prove/merge_8_1",
-      "/v1/zolana/prove/merge_1_1?jobId=1",
-      "/v1//prove/merge_1_1",
-      "/v1/../prove/merge_1_1",
-      "v1/prove/merge_1_1",
-      `/${"a".repeat(256)}/prove/merge_1_1`,
+      "/v1/spr/prove/merge_1_1",
+      "/prove/merge_8_1",
+      "/prove/merge_1_1?jobId=1",
+      "/prove/merge_1_1/",
+      "//prove/merge_1_1",
+      "prove/merge_1_1",
     ]) {
       expect(() => checkProve({ ...prove, prover: sealing(target) }), target).toThrowError(
         "InvalidProverRequest",
@@ -233,7 +229,7 @@ describe("result checks", () => {
       sealed: SEALED,
     });
     for (const [sealed, code] of [
-      [{ ...SEALED, target: "/prove/merge_1_1" }, "ReleaseBindingMismatch"],
+      [{ ...SEALED, target: "/prove/merge_8_1" }, "ReleaseBindingMismatch"],
       [{ ...SEALED, ciphertext: "" }, "ReleaseBindingMismatch"],
       [{ ...SEALED, enc: "11" }, "InvalidHex"],
       [{ ...SEALED, response_key: "22".repeat(31) }, "InvalidHex"],

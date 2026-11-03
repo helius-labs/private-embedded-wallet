@@ -34,7 +34,6 @@ pub enum ErrorCode {
     DiscoveryUntrusted,
     ProductionClaimRejected,
     ReleasePolicyInvalid,
-    ProverPolicyInvalid,
 }
 
 impl ErrorCode {
@@ -66,7 +65,6 @@ impl ErrorCode {
             Self::DiscoveryUntrusted => "DiscoveryUntrusted",
             Self::ProductionClaimRejected => "ProductionClaimRejected",
             Self::ReleasePolicyInvalid => "ReleasePolicyInvalid",
-            Self::ProverPolicyInvalid => "ProverPolicyInvalid",
         }
     }
 }

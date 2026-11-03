@@ -1,8 +1,8 @@
 //! Derives the shielded identity from the custodian's signature over the
 //! wallet's derivation message and seals the seed to the Quorum key.
 
+use spr_keypair::derivation;
 use zeroize::Zeroizing;
-use zolana_keypair::derivation;
 use zolana_tvc_protocol::types::{OperationRequest, OperationResult};
 
 use super::sealed::{seal, Roles};

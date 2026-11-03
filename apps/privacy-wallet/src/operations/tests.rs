@@ -1,18 +1,19 @@
 use std::sync::Arc;
 
+use ed25519_dalek::Signer as _;
 use qos_p256::P256Pair;
-use zolana_keypair::SigningKey;
-use zolana_prover_tee::{Anchors, FixtureProver, NitroFixture};
+use spr_keypair::SigningKey;
+use spr_prover_tee::{
+    Anchors, FixtureProver, NitroFixture, PolicyPayload, PolicySignature, PolicySigners,
+    SignedPolicyFile, TeePolicy, POLICY_DOMAIN,
+};
 use zolana_tvc_protocol::constants::{
     API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
     MAX_PROVE_INPUTS, TVC_APP_PROOF_TYPE,
 };
-use zolana_tvc_protocol::crypto::public_key_uncompressed;
-use zolana_tvc_protocol::sign_prover_policy;
 use zolana_tvc_protocol::types::{
     ClientAuthorization, ClientAuthorizationScheme, ClientGrant, DecryptItem, DecryptLabel,
-    DeriveItem, ProverPolicy, ProverSealing, ServiceInfo, SignedProverPolicy, TransactionKeyItem,
-    WalletDescriptor,
+    DeriveItem, ProverSealing, ServiceInfo, TransactionKeyItem, WalletDescriptor,
 };
 
 use zolana_tvc_protocol::digest::sealed_seed_digest;
@@ -32,7 +33,7 @@ fn test_wallet() -> TestWallet {
     let secret = *SigningKey::new_ed25519().secret_bytes();
     let key = ed25519_dalek::SigningKey::from_bytes(&secret);
     let public_key = key.verifying_key().to_bytes();
-    let message = zolana_keypair::derivation::ed25519_derivation_message(&public_key);
+    let message = spr_keypair::derivation::ed25519_derivation_message(&public_key);
     let seed = ed25519_dalek::Signer::sign(&key, &message).to_bytes();
     TestWallet {
         secret,
@@ -62,15 +63,19 @@ fn runtime() -> Runtime {
 }
 
 fn production_prover_trust() -> ProverTrust {
-    ProverTrust::devnet()
+    ProverTrust::image()
 }
 
-const POLICY_SECRET: [u8; 32] = [0x99; 32];
+const POLICY_SEED: [u8; 32] = [0x99; 32];
 const ATTESTED_AT_SECS: u64 = 1_800_000_000;
 const ATTESTED_AT_MS: u64 = ATTESTED_AT_SECS * 1_000;
 
+fn policy_signer() -> ed25519_dalek::SigningKey {
+    ed25519_dalek::SigningKey::from_bytes(&POLICY_SEED)
+}
+
 /// A fixture prover attested for one nonce, the trust that accepts it, and
-/// a sealing that names it under a policy `POLICY_SECRET` signed.
+/// a sealing that names it under a policy file `POLICY_SEED` signed.
 struct ProverCase {
     prover: FixtureProver,
     trust: ProverTrust,
@@ -83,16 +88,19 @@ fn prover_case(target: &str) -> ProverCase {
     let fixture =
         NitroFixture::at(nonce, ATTESTED_AT_SECS).with_hpke_public_key(prover.hpke_public_key());
     let policy = signed_policy(
-        serde_json::to_value(fixture.policy()).expect("policy"),
-        ATTESTED_AT_MS + 60_000,
+        &policy_signer(),
+        NETWORK,
+        fixture.policy().clone(),
+        ATTESTED_AT_SECS + 60,
     );
     ProverCase {
         trust: ProverTrust {
-            policy_public: public_key_uncompressed(
-                &p256::SecretKey::from_slice(&POLICY_SECRET)
-                    .expect("policy scalar")
-                    .public_key(),
-            ),
+            signers: PolicySigners::new(
+                NETWORK,
+                vec![policy_signer().verifying_key().to_bytes()],
+                1,
+            )
+            .expect("signers"),
             anchors: fixture.anchors(),
         },
         sealing: ProverSealing {
@@ -105,17 +113,38 @@ fn prover_case(target: &str) -> ProverCase {
     }
 }
 
-fn signed_policy(tee: serde_json::Value, expires_at_ms: u64) -> SignedProverPolicy {
-    sign_prover_policy(
-        ProverPolicy {
-            version: API_VERSION,
-            tee,
-            valid_from_ms: ATTESTED_AT_MS - 60_000,
-            expires_at_ms,
-        },
-        &POLICY_SECRET,
-    )
-    .expect("policy signature")
+/// A policy file as a network publishes it, signed by `signer`.
+fn signed_policy(
+    signer: &ed25519_dalek::SigningKey,
+    network: &str,
+    policy: TeePolicy,
+    expires_at: u64,
+) -> serde_json::Value {
+    let payload = serde_json::to_vec(&PolicyPayload {
+        network: network.to_owned(),
+        version: 1,
+        expires_at,
+        policy,
+    })
+    .expect("payload");
+    let signature = signer.sign(&[POLICY_DOMAIN, &payload].concat());
+    serde_json::to_value(SignedPolicyFile {
+        payload: hex::encode(&payload),
+        signatures: vec![PolicySignature {
+            public_key: hex::encode(signer.verifying_key().to_bytes()),
+            signature: hex::encode(signature.to_bytes()),
+        }],
+    })
+    .expect("policy file")
+}
+
+/// The policy a case's file approves, for a test that re-signs an edit of it.
+fn approved_policy(case: &ProverCase) -> TeePolicy {
+    let file: SignedPolicyFile =
+        serde_json::from_value(case.sealing.policy.clone()).expect("policy file");
+    let payload: PolicyPayload =
+        serde_json::from_slice(&file.payload_bytes().expect("payload")).expect("payload json");
+    payload.policy
 }
 
 fn merge_request() -> serde_json::Value {
@@ -286,7 +315,7 @@ fn derive_nothing() -> Operation {
 
 #[test]
 fn decrypt_applies_the_transfer_cipher_under_the_named_viewing_key() {
-    use zolana_keypair::{random_salt, ViewingKey};
+    use spr_keypair::{random_salt, ViewingKey};
 
     let wallet = test_wallet();
     let roles = Roles::from_seed(&wallet.public_key, &wallet.seed).expect("roles");
@@ -365,7 +394,7 @@ fn decrypt_applies_the_transfer_cipher_under_the_named_viewing_key() {
 
 #[test]
 fn derive_answers_the_nullifier_and_merge_derivations() {
-    use zolana_transaction::instructions::merge::{
+    use spr_transaction::instructions::merge::{
         merge_dummy_nullifier, merge_output_blinding, merge_output_key, merge_private_tx_blinding,
     };
 
@@ -422,7 +451,7 @@ fn derive_answers_the_nullifier_and_merge_derivations() {
 
 #[test]
 fn transaction_keys_are_the_per_transaction_viewing_secrets() {
-    use zolana_keypair::ViewingKey;
+    use spr_keypair::ViewingKey;
 
     let wallet = test_wallet();
     let roles = Roles::from_seed(&wallet.public_key, &wallet.seed).expect("roles");
@@ -568,35 +597,37 @@ fn prove_fills_only_the_open_secret_slots() {
     }
 }
 
-/// The policy tvc-wallet ships verifies under the key the image carries, and
-/// names a prover policy this enclave can read.
+/// The image builds the signer set zolana pins for its network.
 #[test]
-fn the_shipped_devnet_prover_policy_verifies_under_the_image_key() {
-    let signed: SignedProverPolicy = serde_json::from_str(include_str!(
-        "../../../../packages/tvc-wallet/src/devnet-prover-policy.json"
-    ))
-    .expect("devnet policy");
-    zolana_tvc_protocol::verify_signed_prover_policy(
-        &signed,
-        &PROVER_POLICY_PUBLIC,
-        signed.policy.valid_from_ms,
+fn the_image_trusts_the_networks_policy_signers() {
+    let image = ProverTrust::image();
+    let expected = PolicySigners::new(
+        NETWORK,
+        vec![hex::decode(POLICY_SIGNERS[0]).unwrap().try_into().unwrap()],
+        POLICY_THRESHOLD,
     )
-    .expect("signed by the devnet prover policy key");
-    let tee: zolana_prover_tee::TeePolicy =
-        serde_json::from_value(signed.policy.tee).expect("a prover-tee policy");
-    assert_eq!(tee.platform(), zolana_prover_tee::Platform::AwsNitro);
+    .unwrap();
+    assert_eq!(image.signers, expected);
 }
 
 #[test]
 fn prove_seals_the_completed_request_to_the_attested_prover() {
-    let case = prover_case("/v1/zolana/prove/merge_1_1");
+    let case = prover_case("/prove/merge_1_1");
     let sealed = seal_case(&case).expect("sealed");
-    assert_eq!(sealed.target, "/v1/zolana/prove/merge_1_1");
+    assert_eq!(sealed.target, "/prove/merge_1_1");
 
     let opened = case
         .prover
         .open("POST", &sealed.target, &sealed.enc, &sealed.ciphertext)
         .expect("opens on its route");
+    case.prover
+        .open(
+            "POST",
+            "/v1/spr/prove/merge_1_1",
+            &sealed.enc,
+            &sealed.ciphertext,
+        )
+        .expect("opens on its route under the gateway prefix");
     let witness: serde_json::Value = serde_json::from_slice(&opened.plaintext).expect("json");
     assert_eq!(
         witness["userNullifierSecret"],
@@ -605,12 +636,7 @@ fn prove_seals_the_completed_request_to_the_attested_prover() {
     assert_eq!(opened.response_key, sealed.response_key);
     assert!(case
         .prover
-        .open(
-            "POST",
-            "/v1/zolana/prove/merge_8_1",
-            &sealed.enc,
-            &sealed.ciphertext
-        )
+        .open("POST", "/prove/merge_8_1", &sealed.enc, &sealed.ciphertext)
         .is_err());
 }
 
@@ -619,19 +645,36 @@ fn prove_refuses_a_prover_outside_the_signed_policy() {
     type Edit = fn(&mut ProverCase);
     let cases: &[(&str, Edit)] = &[
         ("policy signed by another key", |case| {
-            case.trust.policy_public = PROVER_POLICY_PUBLIC
+            let other = ed25519_dalek::SigningKey::from_bytes(&[0x98; 32]);
+            let policy = approved_policy(case);
+            case.sealing.policy = signed_policy(&other, NETWORK, policy, ATTESTED_AT_SECS + 60);
+        }),
+        ("policy of another network", |case| {
+            let policy = approved_policy(case);
+            case.sealing.policy =
+                signed_policy(&policy_signer(), "localnet", policy, ATTESTED_AT_SECS + 60);
         }),
         ("expired policy", |case| {
-            let tee = case.sealing.policy.policy.tee.clone();
-            case.sealing.policy = signed_policy(tee, ATTESTED_AT_MS - 1);
+            let policy = approved_policy(case);
+            case.sealing.policy =
+                signed_policy(&policy_signer(), NETWORK, policy, ATTESTED_AT_SECS);
+        }),
+        ("edited payload", |case| {
+            let payload = case.sealing.policy["payload"].as_str().unwrap().to_owned();
+            case.sealing.policy["payload"] = serde_json::json!(payload.replacen("7b", "7b20", 1));
+        }),
+        ("the image's own signers", |case| {
+            case.trust.signers = ProverTrust::image().signers
         }),
         ("attestation for another nonce", |case| {
             case.sealing.nonce = [0x12; 32]
         }),
         ("measurement the policy does not pin", |case| {
-            let mut tee = case.sealing.policy.policy.tee.clone();
+            let mut tee = serde_json::to_value(approved_policy(case)).unwrap();
             tee["measurements"][0]["pcr0"] = serde_json::json!("04".repeat(48));
-            case.sealing.policy = signed_policy(tee, ATTESTED_AT_MS + 60_000);
+            let policy = serde_json::from_value(tee).unwrap();
+            case.sealing.policy =
+                signed_policy(&policy_signer(), NETWORK, policy, ATTESTED_AT_SECS + 60);
         }),
         ("evidence under a root the enclave does not trust", |case| {
             case.trust.anchors = Anchors::PRODUCTION
@@ -641,7 +684,7 @@ fn prove_refuses_a_prover_outside_the_signed_policy() {
         }),
     ];
     for (name, edit) in cases {
-        let mut case = prover_case("/v1/zolana/prove/merge_1_1");
+        let mut case = prover_case("/prove/merge_1_1");
         edit(&mut case);
         assert_eq!(
             failure(seal_case(&case)),
@@ -653,21 +696,17 @@ fn prove_refuses_a_prover_outside_the_signed_policy() {
 
 #[test]
 fn prove_binds_only_the_route_of_the_requests_proving_key() {
-    for target in ["/prove/merge_1_1", "/v1/zolana/prove/merge_1_1"] {
-        seal_case(&prover_case(target)).expect(target);
-    }
-    let long = format!("/{}/prove/merge_1_1", "a".repeat(256));
+    seal_case(&prover_case("/prove/merge_1_1")).expect("the route");
     for target in [
-        "/v1/zolana/prove/merge_8_1",
-        "/v1/zolana/prove/merge_1_1?jobId=1",
-        "/v1/zolana/prove/merge_1_1/",
-        "/v1/zolana/prove/merge_1_1/status",
-        "/v1//prove/merge_1_1",
-        "/v1/../prove/merge_1_1",
-        "v1/prove/merge_1_1",
+        "/v1/spr/prove/merge_1_1",
+        "/v1/zolana/prove/merge_1_1",
+        "/prove/merge_8_1",
+        "/prove/merge_1_1?jobId=1",
+        "/prove/merge_1_1/",
+        "/prove/merge_1_1/status",
+        "//prove/merge_1_1",
         "prove/merge_1_1",
         "",
-        &long,
     ] {
         assert_eq!(
             failure(seal_case(&prover_case(target))),
@@ -747,9 +786,7 @@ mod local {
 
     use qos_p256::P256Pair;
     use serde::Deserialize;
-    use zolana_prover_tee::{
-        decrypt_response, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION,
-    };
+    use spr_prover_tee::{decrypt_response, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION};
     use zolana_tvc_protocol::auth::authorize_operation_request;
     use zolana_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
     use zolana_tvc_protocol::crypto::{
@@ -1122,7 +1159,7 @@ mod local {
                 .secret_bytes()]
         );
 
-        let prover_sealing = attest(&prover_url, "/v1/zolana/prove/merge_1_1").await;
+        let prover_sealing = attest(&prover_url, "/prove/merge_1_1").await;
         let prove = harness.request(
             Operation::Prove {
                 request: serde_json::json!({
@@ -1218,12 +1255,12 @@ mod local {
         );
     }
 
-    /// A local enclave trusting the devnet prover refuses the stand-in's
+    /// A local enclave trusting the image's network refuses the stand-in's
     /// fixture attestation and the testkit-signed policy it publishes.
     #[tokio::test]
-    async fn a_devnet_trusting_local_enclave_refuses_the_stand_in_prover() {
+    async fn an_image_trusting_local_enclave_refuses_the_stand_in_prover() {
         let prover = LocalProver::new("http://127.0.0.1:1");
-        let harness = Harness::new(LocalProverTrust::Devnet);
+        let harness = Harness::new(LocalProverTrust::Image);
         let prover_url = serve(prover.router()).await;
         let bootstrap = harness.request(Operation::Bootstrap, None);
         let OperationResult::Bootstrap { sealed_seed, .. } =

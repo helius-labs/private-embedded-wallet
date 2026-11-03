@@ -126,10 +126,11 @@ fn operations_parse_strictly() {
     assert_eq!(transaction_keys.kind(), OperationKind::TransactionKeys);
 
     // The prover request is carried whole; its shape is the prover's. The
-    // attestation is carried as the prover answered it.
+    // attestation and the signed policy file are carried as received.
     let prove: Operation = parse_strict_json(&format!(
-        r#"{{"type":"Prove","request":{{"circuitType":"merge","inputs":[{{"nullifier":"0x1"}}],"userNullifierSecret":null}},"prover":{{"target":"/v1/zolana/prove/merge_1_1","nonce":"{}","attestation":{{"platform":"aws-nitro"}},"policy":{{"policy":{{"version":1,"tee":{{}},"validFromMs":"1","expiresAtMs":"2"}},"scheme":"p256-sha256","signature":"{}"}}}}}}"#,
+        r#"{{"type":"Prove","request":{{"circuitType":"merge","inputs":[{{"nullifier":"0x1"}}],"userNullifierSecret":null}},"prover":{{"target":"/prove/merge_1_1","nonce":"{}","attestation":{{"platform":"aws-nitro"}},"policy":{{"payload":"7b7d","signatures":[{{"public_key":"{}","signature":"{}"}}]}}}}}}"#,
         "11".repeat(32),
+        "33".repeat(32),
         "22".repeat(64),
     ))
     .unwrap();
@@ -138,7 +139,7 @@ fn operations_parse_strictly() {
         panic!("expected a prove");
     };
     assert!(request["userNullifierSecret"].is_null());
-    assert_eq!(prover.target, "/v1/zolana/prove/merge_1_1");
+    assert_eq!(prover.target, "/prove/merge_1_1");
 
     // Retired operations, unknown fields, unknown labels, and non-canonical
     // integers are rejected.

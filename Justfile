@@ -61,7 +61,7 @@ build-ts:
 ci-ts:
     npx --yes pnpm@9.15.0 ci:ts
 
-# Fresh Zolana localnet plus the Rust testkit, then the client example's SOL, SPL and ring lifecycles; needs a sibling ../zolana checkout.
+# Fresh Zolana localnet plus the Rust testkit, then the client example's SOL and SPL lifecycles; needs a sibling ../zolana checkout.
 headless-e2e port_offset="200":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -111,15 +111,15 @@ headless-e2e port_offset="200":
     export TVC_LOCAL_PROVER_URL="http://127.0.0.1:44021"
     export TVC_SOLANA_KEYPAIR_PATH="$wallet_keypair" TVC_WALLET_PATH="$run_dir/wallet.tvc.json"
     export ZOLANA_ENDPOINT="$rpc_url" ZOLANA_INDEXER_URL="$indexer_url" ZOLANA_PROVER_URL="$prover_url"
-    export SPL_MINT SPL_ASSET_ID SPL_TOKEN_ACCOUNT RING_PROGRAM_ID
-    for example in deposit_transfer_withdraw spl_deposit_transfer_withdraw ring_deposit_transfer_exit; do
+    export SPL_MINT SPL_ASSET_ID SPL_TOKEN_ACCOUNT
+    for example in deposit_transfer_withdraw spl_deposit_transfer_withdraw; do
         npx --yes pnpm@9.15.0 --filter zolana-tvc-typescript-client-example example "examples/$example.ts"
     done
 
 ci: fmt-check lint test check-protocol-fixtures install-ts ci-ts
 
-image-privacy-wallet:
-    docker build --platform linux/amd64 --provenance=false -f apps/privacy-wallet/Dockerfile .
+image-privacy-wallet network="devnet":
+    docker build --platform linux/amd64 --provenance=false --build-arg SPR_NETWORK={{network}} -f apps/privacy-wallet/Dockerfile .
 
 image-tvc-gateway:
     docker build --platform linux/amd64 -f apps/tvc-gateway/Dockerfile .

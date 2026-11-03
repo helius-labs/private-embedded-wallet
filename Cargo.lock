@@ -126,9 +126,20 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d69eab57e8d2663efa5c63135b2af4f396d66424f88954c21104125ab6b3e6bc"
 dependencies = [
- "ark-ec",
- "ark-ff",
- "ark-std",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+]
+
+[[package]]
+name = "ark-bn254"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bc66f96ebe2a17a499475b4f94791d379817592ef494171586967ffdc6f95db"
+dependencies = [
+ "ark-ec 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-std 0.6.0",
 ]
 
 [[package]]
@@ -138,14 +149,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43d68f2d516162846c1238e755a7c4d131b892b70cc70c471a8e3ca3ed818fce"
 dependencies = [
  "ahash",
- "ark-ff",
- "ark-poly",
- "ark-serialize",
- "ark-std",
+ "ark-ff 0.5.0",
+ "ark-poly 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
  "educe",
  "fnv",
  "hashbrown 0.15.5",
  "itertools 0.13.0",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "zeroize",
+]
+
+[[package]]
+name = "ark-ec"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8352a2b2aedf6ba2cc38f7520fc51191d518dde96175c729af19f2d059f191c4"
+dependencies = [
+ "ahash",
+ "ark-ff 0.6.0",
+ "ark-poly 0.6.0",
+ "ark-serialize 0.6.0",
+ "ark-std 0.6.0",
+ "educe",
+ "fnv",
+ "hashbrown 0.17.1",
+ "itertools 0.14.0",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -158,10 +190,10 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a177aba0ed1e0fbb62aa9f6d0502e9b46dad8c2eab04c14258a1212d2557ea70"
 dependencies = [
- "ark-ff-asm",
- "ark-ff-macros",
- "ark-serialize",
- "ark-std",
+ "ark-ff-asm 0.5.0",
+ "ark-ff-macros 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
  "arrayvec",
  "digest 0.10.7",
  "educe",
@@ -173,10 +205,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-ff"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7a806ac6c8307b929df4645776290a50ee2aac754ad09d8bdf73391309e43af"
+dependencies = [
+ "ark-ff-asm 0.6.0",
+ "ark-ff-macros 0.6.0",
+ "ark-serialize 0.6.0",
+ "ark-std 0.6.0",
+ "digest 0.10.7",
+ "educe",
+ "num-bigint",
+ "num-traits",
+ "zeroize",
+]
+
+[[package]]
 name = "ark-ff-asm"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62945a2f7e6de02a31fe400aa489f0e0f5b2502e69f95f853adb82a96c7a6b60"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "ark-ff-asm"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1479009684adc073dff49a1025d3a7065b317a9ead25aaaca38cdc70058ba8a2"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -196,18 +255,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-ff-macros"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a0691ed21ef00ef89c1e9bda832eba493dda3ec2f8d892fb25b705f73f06bb8"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "ark-poly"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "579305839da207f02b89cd1679e50e67b4331e2f9294a57693e5051b7703fe27"
 dependencies = [
  "ahash",
- "ark-ff",
- "ark-serialize",
- "ark-std",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
  "educe",
  "fnv",
  "hashbrown 0.15.5",
+]
+
+[[package]]
+name = "ark-poly"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75f55af10b672002b8d953e230282c51206842e20e5791a94432219b4201de5c"
+dependencies = [
+ "ahash",
+ "ark-ff 0.6.0",
+ "ark-serialize 0.6.0",
+ "ark-std 0.6.0",
+ "educe",
+ "fnv",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -216,9 +303,21 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f4d068aaf107ebcd7dfb52bc748f8030e0fc930ac8e360146ca54c1203088f7"
 dependencies = [
- "ark-serialize-derive",
- "ark-std",
+ "ark-serialize-derive 0.5.0",
+ "ark-std 0.5.0",
  "arrayvec",
+ "digest 0.10.7",
+ "num-bigint",
+]
+
+[[package]]
+name = "ark-serialize"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a74dd304fd536fb95d0a328e72be759209cc496a9da094c5bc56e5fea4f9e86b"
+dependencies = [
+ "ark-serialize-derive 0.6.0",
+ "ark-std 0.6.0",
  "digest 0.10.7",
  "num-bigint",
 ]
@@ -235,10 +334,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-serialize-derive"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f153690697a2b91e5e1251ff98411ee5371500a111a0fd317a70e588eb300f9"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "ark-std"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "246a225cc6131e9ee4f24619af0f19d67761fff15d7ccc22e42b80846e69449a"
+dependencies = [
+ "num-traits",
+ "rand 0.8.8",
+]
+
+[[package]]
+name = "ark-std"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "367c9c827ed431bff6868b7aa926e05b16eb46603cc8b6e768e4a5553fa1d155"
 dependencies = [
  "num-traits",
  "rand 0.8.8",
@@ -1537,12 +1657,13 @@ dependencies = [
 
 [[package]]
 name = "groth16-solana"
-version = "0.2.0"
-source = "git+https://github.com/Lightprotocol/groth16-solana?rev=70a93803e5f55b8425301d506c625169ef557c9d#70a93803e5f55b8425301d506c625169ef557c9d"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3445d72a7fe1f2d06aa93ae5ade8ad8900bce0559fd098ae3433e04173bc8d20"
 dependencies = [
- "ark-bn254",
- "ark-ff",
- "ark-serialize",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-serialize 0.6.0",
  "pinocchio",
  "sha2 0.10.9",
  "solana-bn254",
@@ -1645,6 +1766,9 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+]
 
 [[package]]
 name = "heapless"
@@ -2043,6 +2167,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2156,12 +2289,12 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "light-poseidon"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47a1ccadd0bb5a32c196da536fd72c59183de24a055f6bf0513bf845fefab862"
+checksum = "1a8988878057561648d6ff78522edf4fc0b43b75ca88d0f4da33c052880d6abf"
 dependencies = [
- "ark-bn254",
- "ark-ff",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
  "num-bigint",
  "thiserror 1.0.69",
 ]
@@ -3538,10 +3671,10 @@ version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62ff13a8867fcc7b0f1114764e1bf6191b4551dcaf93729ddc676cd4ec6abc9f"
 dependencies = [
- "ark-bn254",
- "ark-ec",
- "ark-ff",
- "ark-serialize",
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
  "bytemuck",
  "solana-define-syscall 5.2.0",
  "thiserror 2.0.18",
@@ -3715,6 +3848,142 @@ checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
 dependencies = [
  "base64ct",
  "der 0.8.2",
+]
+
+[[package]]
+name = "spr-event"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "borsh",
+ "wincode",
+]
+
+[[package]]
+name = "spr-hasher"
+version = "0.1.1"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "light-poseidon",
+ "num-bigint",
+ "sha2 0.10.9",
+ "sha3",
+ "solana-program-error",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "spr-instruction"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "solana-address",
+ "solana-instruction",
+ "solana-pubkey",
+ "spr-hasher",
+ "spr-interface",
+ "thiserror 2.0.18",
+ "wincode",
+]
+
+[[package]]
+name = "spr-interface"
+version = "0.1.1"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "arrayvec",
+ "borsh",
+ "bytemuck",
+ "groth16-solana",
+ "solana-address",
+ "solana-program-error",
+ "solana-pubkey",
+ "spr-event",
+ "spr-hasher",
+ "spr-tree",
+ "thiserror 2.0.18",
+ "wincode",
+]
+
+[[package]]
+name = "spr-keypair"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "aes",
+ "bs58",
+ "ctr",
+ "ed25519-dalek",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "hkdf",
+ "rand 0.8.8",
+ "sha2 0.10.9",
+ "solana-address",
+ "solana-keypair",
+ "solana-signer",
+ "spr-hasher",
+ "thiserror 2.0.18",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
+name = "spr-prover-tee"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "aes-gcm",
+ "ciborium",
+ "ciborium-ll",
+ "coset",
+ "dcap-qvl",
+ "ed25519-dalek",
+ "form_urlencoded",
+ "hex",
+ "hpke",
+ "p384 0.14.0",
+ "rand_core 0.9.5",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "x509-cert 0.3.0",
+ "zeroize",
+]
+
+[[package]]
+name = "spr-transaction"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "borsh",
+ "num-bigint",
+ "solana-address",
+ "solana-signature",
+ "spr-event",
+ "spr-hasher",
+ "spr-instruction",
+ "spr-interface",
+ "spr-keypair",
+ "thiserror 2.0.18",
+ "wincode",
+]
+
+[[package]]
+name = "spr-tree"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana.git?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
+dependencies = [
+ "borsh",
+ "bytemuck",
+ "spr-event",
+ "spr-hasher",
+ "thiserror 2.0.18",
+ "wincode",
+ "zerocopy",
 ]
 
 [[package]]
@@ -4686,142 +4955,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
-name = "zolana-event"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "borsh",
- "wincode",
-]
-
-[[package]]
-name = "zolana-hasher"
-version = "5.0.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "ark-bn254",
- "ark-ff",
- "light-poseidon",
- "num-bigint",
- "sha2 0.10.9",
- "sha3",
- "solana-program-error",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "zolana-instruction"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "solana-address",
- "solana-instruction",
- "solana-pubkey",
- "thiserror 2.0.18",
- "wincode",
- "zolana-hasher",
- "zolana-interface",
- "zolana-tree",
-]
-
-[[package]]
-name = "zolana-interface"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "arrayvec",
- "borsh",
- "bytemuck",
- "groth16-solana",
- "solana-address",
- "solana-program-error",
- "solana-pubkey",
- "thiserror 2.0.18",
- "wincode",
- "zolana-event",
- "zolana-hasher",
- "zolana-tree",
-]
-
-[[package]]
-name = "zolana-keypair"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "aes",
- "bs58",
- "ctr",
- "ed25519-dalek",
- "getrandom 0.2.17",
- "getrandom 0.3.4",
- "hkdf",
- "rand 0.8.8",
- "sha2 0.10.9",
- "solana-address",
- "solana-keypair",
- "solana-signer",
- "thiserror 2.0.18",
- "x25519-dalek",
- "zeroize",
- "zolana-hasher",
-]
-
-[[package]]
-name = "zolana-prover-tee"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "aes-gcm",
- "ciborium",
- "ciborium-ll",
- "coset",
- "dcap-qvl",
- "form_urlencoded",
- "hex",
- "hpke",
- "p384 0.14.0",
- "rand_core 0.9.5",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "x509-cert 0.3.0",
- "zeroize",
-]
-
-[[package]]
-name = "zolana-transaction"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "borsh",
- "num-bigint",
- "solana-address",
- "solana-signature",
- "thiserror 2.0.18",
- "wincode",
- "zolana-event",
- "zolana-hasher",
- "zolana-instruction",
- "zolana-interface",
- "zolana-keypair",
-]
-
-[[package]]
-name = "zolana-tree"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana.git?rev=40c457e00dd518e627905fd8f928a8b7a90d2693#40c457e00dd518e627905fd8f928a8b7a90d2693"
-dependencies = [
- "borsh",
- "bytemuck",
- "thiserror 2.0.18",
- "wincode",
- "zerocopy",
- "zolana-event",
- "zolana-hasher",
-]
-
-[[package]]
 name = "zolana-tvc-privacy-wallet"
 version = "0.1.0"
 dependencies = [
@@ -4841,15 +4974,15 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solana-pubkey",
+ "spr-keypair",
+ "spr-prover-tee",
+ "spr-transaction",
  "tokio",
  "tower",
  "turnkey_api_key_stamper",
  "turnkey_client",
  "uuid",
  "zeroize",
- "zolana-keypair",
- "zolana-prover-tee",
- "zolana-transaction",
  "zolana-tvc-protocol",
 ]
 

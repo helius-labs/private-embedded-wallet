@@ -34,13 +34,13 @@ import type { ShieldedIdentity, TvcClient } from "./client.js";
 import { shieldedAddressOf } from "./identity.js";
 import { MAX_ITEMS_PER_BATCH, type OperationOptions } from "./operations.js";
 import {
-  attestationReuseMs,
   fetchAttestation,
   sealingFor,
   submitSealed,
   type ProverAttestation,
   type TvcProverConfig,
 } from "./prover.js";
+import { attestationReuseMs, type HeldProverPolicy } from "./prover-policy.js";
 
 export type TvcKeysInput = {
   readonly client: TvcClient;
@@ -204,52 +204,60 @@ export class TvcKeys implements WalletKeys {
   /**
    * Has the enclave seal the completed request to the attested prover and
    * posts it. One attestation serves every proof within the policy's
-   * `max_age_secs`. A cached attestation the enclave refuses is fetched again
-   * once; a prover that rebooted onto a new key is attested again and the
-   * request sealed once more.
+   * `max_age_secs`. A cached attestation or policy file the enclave refuses
+   * is fetched again once; a prover that moved to a new key is attested
+   * again under a freshly downloaded policy and the request sealed once more.
    */
   async #sealAndProve(request: ProverRequest, options: OperationOptions): Promise<unknown> {
     let fresh = false;
     for (let attempt = 0; ; attempt += 1) {
-      const { attested, cached } = await this.#attestation(fresh, options.signal);
+      const policy = await this.#prover.policy.current(options.signal);
+      const attested = await this.#attestation(policy, fresh, options.signal);
       let sealed;
       try {
         sealed = await this.#client.prove(
           this.#connection,
           this.#sealedSeed,
           request,
-          sealingFor(this.#prover, attested, request),
+          sealingFor(policy, attested, request),
           options,
         );
       } catch (error) {
-        if (!cached || !isProverStage(error)) throw error;
-        this.#attested = undefined;
+        if (fresh || !isProverStage(error)) throw error;
+        this.#forgetProver();
         fresh = true;
         continue;
       }
       const answer = await submitSealed(this.#prover, sealed, options.signal);
       if (answer.kind === "proof") return answer.body;
-      this.#attested = undefined;
+      this.#forgetProver();
       if (attempt > 0) throw new TvcError("ProverKeyLost");
       fresh = true;
     }
   }
 
   async #attestation(
+    policy: HeldProverPolicy,
     fresh: boolean,
     signal?: AbortSignal,
-  ): Promise<{ attested: ProverAttestation; cached: boolean }> {
+  ): Promise<ProverAttestation> {
     const cached = this.#attested;
     if (
       !fresh &&
       cached &&
-      Date.now() - cached.fetchedAtMs < attestationReuseMs(this.#prover.policy, cached.fetchedAtMs)
+      Date.now() - cached.fetchedAtMs < attestationReuseMs(policy, cached.fetchedAtMs)
     ) {
-      return { attested: cached, cached: true };
+      return cached;
     }
     const attested = await fetchAttestation(this.#prover, signal);
     this.#attested = attested;
-    return { attested, cached: false };
+    return attested;
+  }
+
+  /** The prover likely changed release: attest again under a new policy download. */
+  #forgetProver(): void {
+    this.#attested = undefined;
+    this.#prover.policy.invalidate();
   }
 
   /** Respect both the item ceiling and the executor's serialized byte budget. */

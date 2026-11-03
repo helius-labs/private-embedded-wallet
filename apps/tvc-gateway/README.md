@@ -8,7 +8,7 @@ Helius customer the private-wallet backend with only an API key, at
 - Turnkey (Boot Proofs and wallet ownership),
 
 and holds the provisioning key that signs wallet descriptors. The Zolana
-indexer and prover are gatekeeper's own `/v1/zolana/*` routes.
+indexer and prover are gatekeeper's own `/v1/spr/*` routes.
 
 Devnet only: the enclave accepts `development` descriptors only.
 
