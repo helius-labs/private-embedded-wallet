@@ -4,7 +4,7 @@
  */
 export const PRIVATE_WALLET_DEPLOYMENT = Object.freeze({
   /** tvc-gateway, which the host's server reaches with its Helius API key. */
-  gatewayUrl: "https://d2mwa6adbrijsr.cloudfront.net",
+  gatewayUrl: "https://d1m3jjkvr41idm.cloudfront.net",
   /** Photon. */
   indexerUrl: "https://d34xe1hqb2ibg2.cloudfront.net",
   /** The attested Nitro prover in eu-north-1. */
