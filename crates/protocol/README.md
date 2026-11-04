@@ -66,7 +66,7 @@ Bodies are at most 262,144 bytes each way. A request expires within 300 s of
 
 `POST /v1/operations` serves five operations. They are exactly the Zolana
 SDK's `ShieldedKeys` and `ProofAuthority` methods, so `TvcKeys` in
-`@zolana/tvc-wallet` implements the SDK's `WalletKeys` over them.
+`@heliuslabs/spr-embedded-wallet` implements the SDK's `WalletKeys` over them.
 
 | Operation | Sealed seed | Returns |
 | --- | --- | --- |
@@ -164,7 +164,7 @@ empty, duplicate, or unknown key. A re-signed policy is a new authority set
 every client must accept.
 
 The trust material a client pins is the policy, the authority public keys,
-and the QOS identity PCRs. `connectAndVerify()` in `@zolana/tvc-wallet`
+and the QOS identity PCRs. `connectAndVerify()` in `@heliuslabs/spr-embedded-wallet`
 verifies the policy, binds every security field of `GET /v1/info` to it,
 completes the Quorum-encrypted `POST /v1/ping`, and verifies the Nitro Boot
 Proof against the PCRs and the accepted manifest digests. Wallet calls take

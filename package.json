@@ -10,10 +10,10 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "build:ts": "pnpm --filter @zolana/tvc-wallet build",
+    "build:ts": "pnpm --filter @heliuslabs/spr-embedded-wallet build",
     "lint:ts": "eslint packages/tvc-wallet examples/typescript-client/src examples/typescript-client/examples apps/tvc-gateway/e2e eslint.config.js --max-warnings 0",
-    "test:ts": "pnpm --filter @zolana/tvc-wallet test",
-    "typecheck:ts": "pnpm --filter @zolana/tvc-wallet typecheck",
+    "test:ts": "pnpm --filter @heliuslabs/spr-embedded-wallet test",
+    "typecheck:ts": "pnpm --filter @heliuslabs/spr-embedded-wallet typecheck",
     "ci:ts": "pnpm lint:ts && pnpm typecheck:ts && pnpm test:ts && pnpm build:ts && pnpm typecheck:examples && pnpm test:examples && pnpm typecheck:e2e",
     "typecheck:examples": "pnpm --filter zolana-tvc-typescript-client-example typecheck",
     "test:examples": "pnpm --filter zolana-tvc-typescript-client-example test",

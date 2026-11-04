@@ -1,6 +1,6 @@
-# `@zolana/tvc-wallet`
+# `@heliuslabs/spr-embedded-wallet`
 
-Client for the Zolana TVC privacy wallet. It verifies the signed release policy
+Client for the TVC privacy wallet of Solana Privacy Rings. It verifies the signed release policy
 and the AWS Nitro Boot Proof before handing out a `VerifiedConnection`, wraps
 every operation in a QOS P-256 envelope, checks the proof-bound result, and
 answers the Zolana SDK's `WalletKeys` interface through `TvcKeys`, so every
@@ -29,7 +29,7 @@ import {
   createTvcClient,
   identityOf,
   shieldedAddressOf,
-} from "@zolana/tvc-wallet";
+} from "@heliuslabs/spr-embedded-wallet";
 
 const tvc = createTvcClient({ ...DEVNET_RELEASE, ...config }); // + backend, descriptor, authorizer
 const connection = await tvc.connectAndVerify();
@@ -167,10 +167,10 @@ gateway answers `{descriptor}` for the enrollment's client key. See
 
 ## Entry points
 
-- `@zolana/tvc-wallet`: client, `TvcKeys`, `snapshotCipher`, release-policy
+- `@heliuslabs/spr-embedded-wallet`: client, `TvcKeys`, `snapshotCipher`, release-policy
   verification, and `createTvcOperationAuthorizer` for a caller-held P-256
   request key outside the browser.
-- `@zolana/tvc-wallet/protocol`: wire types, `TvcError`, hex codecs,
+- `@heliuslabs/spr-embedded-wallet/protocol`: wire types, `TvcError`, hex codecs,
   `clientKeyIdFor`, and the provisioner's side of a wallet descriptor:
   `signWalletDescriptor` builds and signs the grant for one client key from the
   release policy, `verifyWalletDescriptor` checks one, `provisioningSecret` reads the provisioning key and refuses
@@ -180,12 +180,12 @@ gateway answers `{descriptor}` for the enrollment's client key. See
   self-hosted issuer's renewal (`walletGrantRenewalMessage`).
   `walletEnrollmentMessage` is the Sign-In With Solana message a wallet owner
   signs to enroll with tvc-gateway.
-- `@zolana/tvc-wallet/browser`: non-exportable P-256 request signer, which
+- `@heliuslabs/spr-embedded-wallet/browser`: non-exportable P-256 request signer, which
   also signs grant renewals for its own descriptor (`signWalletGrantRenewal`),
   the persisted enclave-state parser, and IndexedDB record helpers.
-- `@zolana/tvc-wallet/react`: `TvcWalletProvider` / `useTvcWallet` for the
+- `@heliuslabs/spr-embedded-wallet/react`: `TvcWalletProvider` / `useTvcWallet` for the
   connection lifecycle.
-- `@zolana/tvc-wallet/testing`: loopback-only unattested testkit client. The
+- `@heliuslabs/spr-embedded-wallet/testing`: loopback-only unattested testkit client. The
   build fails if it becomes reachable from a production entry.
 
 ## Verification

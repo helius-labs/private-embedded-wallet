@@ -9,7 +9,7 @@ import {
   syncWallet,
 } from "@heliuslabs/spr";
 import { MERGE_INPUT_COUNT } from "@heliuslabs/spr/interface";
-import { TvcKeys, shieldedAddressOf } from "@zolana/tvc-wallet";
+import { TvcKeys, shieldedAddressOf } from "@heliuslabs/spr-embedded-wallet";
 
 import {
   expectBalance,

@@ -48,7 +48,7 @@ cargo run -p zolana-tvc-privacy-wallet --features local-dev \
 ```
 
 Clients prove through `http://127.0.0.1:44021` (`localProverConfig` in
-`@zolana/tvc-wallet/testing`).
+`@heliuslabs/spr-embedded-wallet/testing`).
 
 `--live-prover` starts no stand-in: the local enclave seals witnesses only to a
 prover whose Nitro attestation chains to the production AWS root and passes

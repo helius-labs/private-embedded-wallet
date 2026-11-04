@@ -8,7 +8,7 @@ import {
   buildWithdrawalTransaction,
   syncWallet,
 } from "@heliuslabs/spr";
-import { TvcKeys, shieldedAddressOf } from "@zolana/tvc-wallet";
+import { TvcKeys, shieldedAddressOf } from "@heliuslabs/spr-embedded-wallet";
 
 import {
   expectBalance,

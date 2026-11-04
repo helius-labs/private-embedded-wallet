@@ -97,7 +97,7 @@ Resources:
 ```
 
 The first line names `enrollment.domain`, so a signature enrolls at one
-gateway only. `walletEnrollmentMessage` in `@zolana/tvc-wallet/protocol`
+gateway only. `walletEnrollmentMessage` in `@heliuslabs/spr-embedded-wallet/protocol`
 builds the message. `fixtures/wallet-enrollment.json`, from
 `createSignInMessageText` in `@solana/wallet-standard-util`, is its test
 vector.
@@ -211,7 +211,7 @@ wallets and resends, and descriptors this gateway did not provision. CI runs it 
 directory the run prints.
 
 `fixtures/wallet-enrollment.json` is the enrollment message test vector that
-both this crate and `walletEnrollmentMessage` in `@zolana/tvc-wallet` check.
+both this crate and `walletEnrollmentMessage` in `@heliuslabs/spr-embedded-wallet` check.
 
 ## Deployment
 

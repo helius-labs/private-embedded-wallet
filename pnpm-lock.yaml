@@ -26,15 +26,15 @@ importers:
 
   apps/tvc-gateway/e2e:
     dependencies:
+      '@heliuslabs/spr-embedded-wallet':
+        specifier: workspace:*
+        version: link:../../../packages/tvc-wallet
       '@noble/curves':
         specifier: 1.8.1
         version: 1.8.1
       '@solana/kit':
         specifier: ^8.3.0
         version: 8.3.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@zolana/tvc-wallet':
-        specifier: workspace:*
-        version: link:../../../packages/tvc-wallet
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -51,15 +51,15 @@ importers:
       '@heliuslabs/spr':
         specifier: 0.9.0-alpha
         version: 0.9.0-alpha(@solana/kit@8.3.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)
+      '@heliuslabs/spr-embedded-wallet':
+        specifier: workspace:*
+        version: link:../../packages/tvc-wallet
       '@solana/kit':
         specifier: ^8.3.0
         version: 8.3.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
       '@turnkey/sdk-server':
         specifier: ^8.3.0
         version: 8.3.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@zolana/tvc-wallet':
-        specifier: workspace:*
-        version: link:../../packages/tvc-wallet
       dotenv:
         specifier: ^17.0.0
         version: 17.4.2

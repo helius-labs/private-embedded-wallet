@@ -13,7 +13,7 @@
     "@heliuslabs/spr": "0.9.0-alpha",
     "@solana/kit": "^8.3.0",
     "@turnkey/sdk-server": "^8.3.0",
-    "@zolana/tvc-wallet": "workspace:*",
+    "@heliuslabs/spr-embedded-wallet": "workspace:*",
     "dotenv": "^17.0.0"
   },
   "devDependencies": {

@@ -44,7 +44,7 @@ import {
   TvcProverPolicy,
   type WalletDescriptor,
   type VerifiedConnection,
-} from "@zolana/tvc-wallet";
+} from "@heliuslabs/spr-embedded-wallet";
 import {
   clientKeyIdFor,
   encodeLowerHex,
@@ -52,8 +52,8 @@ import {
   walletGrantSecret,
   type PinnedReleaseAuthorities,
   type SignedReleasePolicy,
-} from "@zolana/tvc-wallet/protocol";
-import { createLocalTvcClient, localProverConfig } from "@zolana/tvc-wallet/testing";
+} from "@heliuslabs/spr-embedded-wallet/protocol";
+import { createLocalTvcClient, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
 import { bootstrapWithApproval } from "./bootstrap-approval.js";
 
 export type Client = Awaited<ReturnType<typeof createSprClient>>;

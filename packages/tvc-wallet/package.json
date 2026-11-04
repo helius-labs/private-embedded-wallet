@@ -1,7 +1,7 @@
 {
-  "name": "@zolana/tvc-wallet",
+  "name": "@heliuslabs/spr-embedded-wallet",
   "version": "0.0.0",
-  "description": "TVC client for attested Zolana private wallets: verified connection, bootstrap, and the Zolana SDK's WalletKeys answered by the enclave.",
+  "description": "TVC client for attested Solana Privacy Rings wallets: verified connection, bootstrap, and the SDK's WalletKeys answered by the enclave.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {

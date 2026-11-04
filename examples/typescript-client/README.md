@@ -1,7 +1,7 @@
 # TypeScript client with a TVC wallet
 
 A client example for `@heliuslabs/spr` with the shielded keys held by a TVC
-enclave (`@zolana/tvc-wallet`), in the layout of
+enclave (`@heliuslabs/spr-embedded-wallet`), in the layout of
 [zolana-examples](https://github.com/helius-labs/zolana-examples).
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw, with the enclave as the key holder
@@ -176,7 +176,7 @@ at `TVC_WALLET_GRANT_KEY_PATH` (`{"private_key": "<hex>"}`), whose public half i
 The examples run against the local testkit and a fresh Zolana localnet, with
 a disposable keypair as the wallet in place of Turnkey and pinned process keys
 in place of Nitro attestation. The Rust testkit runs the real handlers of the
-five operations; the `@zolana/tvc-wallet/testing` client still verifies
+five operations; the `@heliuslabs/spr-embedded-wallet/testing` client still verifies
 envelopes, signatures and bindings, and accepts loopback HTTP only. It needs a
 sibling `../zolana` checkout at the commit
 [`headless-local-e2e.yml`](../../.github/workflows/headless-local-e2e.yml)
@@ -217,7 +217,7 @@ provides the snapshot key, so no secret is kept on the device:
 
 ```ts
 import { loadPersistedWallet, syncPersistedWallet } from "@heliuslabs/spr";
-import { snapshotCipher } from "@zolana/tvc-wallet";
+import { snapshotCipher } from "@heliuslabs/spr-embedded-wallet";
 
 const cipher = await snapshotCipher(keys);
 const wallet =
@@ -243,4 +243,4 @@ IndexedDB.
 - [Connect](https://www.helius.dev/docs/privacy/connect)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)
-- [`@zolana/tvc-wallet`](../../packages/tvc-wallet/README.md)
+- [`@heliuslabs/spr-embedded-wallet`](../../packages/tvc-wallet/README.md)
