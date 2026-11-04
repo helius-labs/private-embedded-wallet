@@ -36,8 +36,8 @@ just image-privacy-wallet mainnet    # linux/amd64 image; prints the /tvc_app SH
 Unattested. Real handlers, pinned local QOS keys instead of Nitro, a local
 Ed25519 key instead of Turnkey, and a stand-in attested prover on
 `--prover-tee-port` (default 44021). The stand-in signs Nitro documents under a
-fixture root the local enclave trusts, publishes a policy file signed by the
-testkit's policy signer at `/local/prover-policy`, opens sealed requests and
+fixture root the local enclave trusts, publishes a two-part policy file whose
+release the testkit's policy signer signs at `/local/prover-policy`, opens sealed requests and
 forwards them to the plaintext prover at `--prover-url`. `just headless-e2e`
 runs it end to end; to run it by hand:
 

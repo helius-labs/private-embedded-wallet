@@ -199,8 +199,8 @@ pub(super) fn seal(
 /// passes a current policy enough of the network's signers signed.
 ///
 /// The enclave keeps no state, so it cannot refuse a file older than one it
-/// accepted before; the file's expiry bounds how long a superseded policy
-/// stays usable.
+/// accepted before; the earlier of the release and freshness expiries bounds
+/// how long a superseded policy stays usable.
 fn attested_key(
     sealing: &ProverSealing,
     trust: &ProverTrust,
@@ -211,9 +211,9 @@ fn attested_key(
     if file.len() > MAX_SIGNED_POLICY_BYTES {
         return Err(refused());
     }
-    let (approved, _) =
+    let verified =
         SignedPolicyFile::verify(&file, &trust.signers, now_ms / 1_000).map_err(|_| refused())?;
-    let policy = approved.policy;
+    let policy = verified.release.policy;
     let attestation: Attestation =
         serde_json::from_value(sealing.attestation.clone()).map_err(|_| refused())?;
     verify_with(

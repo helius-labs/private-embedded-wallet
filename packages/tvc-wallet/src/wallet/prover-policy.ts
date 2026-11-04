@@ -2,7 +2,7 @@ import { fetchWithSignal, httpError, readBoundedText } from "../client/http.js";
 import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex } from "../protocol/hex.js";
-import type { SignedProverPolicyFile } from "../protocol/types.js";
+import type { SignedProverPolicyFile, SignedProverPolicyPart } from "../protocol/types.js";
 
 /**
  * Where each network publishes its signed prover policy, as the Zolana SDK
@@ -20,12 +20,15 @@ export type TvcProverNetwork = keyof typeof PROVER_POLICY_URLS;
 const MAX_POLICY_BYTES = 64n << 10n;
 const LOWER_HEX = /^(?:[0-9a-f]{2})*$/;
 
-/** A downloaded file and what the client reads from its payload. */
+/** A downloaded file and what the client reads from its payloads. */
 export type HeldProverPolicy = Readonly<{
   file: SignedProverPolicyFile;
+  /** The release version. */
   version: number;
   maxAgeSecs: number;
-  /** Unix seconds. */
+  /** When the freshness part was issued, Unix seconds. */
+  issuedAt: number;
+  /** The earlier of the release and freshness expiries, Unix seconds. */
   expiresAt: number;
   fetchedAtMs: number;
 }>;
@@ -33,10 +36,12 @@ export type HeldProverPolicy = Readonly<{
 /**
  * A network's signed prover policy file, which the client carries to the
  * enclave on every `Prove`. The enclave checks its signatures, network and
- * expiry; the client reads its payload only to know when to download it
+ * expiries; the client reads its payloads only to know when to download it
  * again: once it is `max_age_secs` old, and after the prover lost its key or
- * the enclave refused it. A failed download keeps a file that has not
- * expired, and a file older than the one held is refused.
+ * the enclave refused it. A failed download keeps a file until either part
+ * expires, and a file older than the one held is refused: an older release,
+ * another release under the same version, or an older freshness part of the
+ * same release.
  */
 export class TvcProverPolicy {
   readonly #url: URL;
@@ -80,7 +85,12 @@ export class TvcProverPolicy {
       next = { ...held, fetchedAtMs: Date.now() };
     }
     if (held !== undefined) {
-      if (next.version < held.version || (next.version === held.version && next.file.payload !== held.file.payload)) {
+      const same = next.file.release.payload === held.file.release.payload;
+      if (
+        next.version < held.version ||
+        (next.version === held.version && !same) ||
+        (same && next.issuedAt < held.issuedAt)
+      ) {
         throw new TvcError("ProverPolicyRollback");
       }
     }
@@ -118,41 +128,66 @@ function expired(held: HeldProverPolicy, nowMs: number): boolean {
 /** The file's shape and the payload fields the client schedules by. */
 function readPolicy(file: unknown): HeldProverPolicy {
   const invalid = (): TvcError => new TvcError("ProverPolicyInvalid");
-  if (typeof file !== "object" || file === null || Array.isArray(file)) throw invalid();
-  const { payload, signatures, ...rest } = file as Record<string, unknown>;
+  if (!isRecord(file)) throw invalid();
+  const { release, freshness, ...rest } = file;
+  if (Object.keys(rest).length > 0) throw invalid();
+  const releasePart = readPart(release, invalid);
+  const freshnessPart = readPart(freshness, invalid);
+  const approved = readPayload(releasePart.payload, invalid);
+  const fresh = readPayload(freshnessPart.payload, invalid);
+  const { version, expires_at: releaseExpiresAt, policy } = approved;
+  const maxAgeSecs = isRecord(policy) ? policy["max_age_secs"] : undefined;
+  const { issued_at: issuedAt, expires_at: freshUntil } = fresh;
+  if (![version, releaseExpiresAt, maxAgeSecs, freshUntil].every((value) => isInteger(value) && (value as number) >= 1)) {
+    throw invalid();
+  }
+  if (!isInteger(issuedAt) || (issuedAt as number) >= (freshUntil as number)) throw invalid();
+  const expiresAt = Math.min(releaseExpiresAt as number, freshUntil as number);
+  if (Date.now() >= expiresAt * 1_000) throw new TvcError("ProverPolicyExpired");
+  return {
+    file: { release: releasePart, freshness: freshnessPart },
+    version: version as number,
+    maxAgeSecs: maxAgeSecs as number,
+    issuedAt: issuedAt as number,
+    expiresAt,
+    fetchedAtMs: Date.now(),
+  };
+}
+
+function readPart(part: unknown, invalid: () => TvcError): SignedProverPolicyPart {
+  if (!isRecord(part)) throw invalid();
+  const { payload, signatures, ...rest } = part;
   if (Object.keys(rest).length > 0 || typeof payload !== "string" || !LOWER_HEX.test(payload)) throw invalid();
   if (
     !Array.isArray(signatures) ||
     !signatures.every(
       (entry: unknown) =>
-        typeof entry === "object" &&
-        entry !== null &&
+        isRecord(entry) &&
         Object.keys(entry).length === 2 &&
-        typeof (entry as Record<string, unknown>)["public_key"] === "string" &&
-        typeof (entry as Record<string, unknown>)["signature"] === "string",
+        typeof entry["public_key"] === "string" &&
+        typeof entry["signature"] === "string",
     )
   ) {
     throw invalid();
   }
-  let approved: unknown;
+  return { payload, signatures: signatures as SignedProverPolicyPart["signatures"] };
+}
+
+function readPayload(payload: string, invalid: () => TvcError): Record<string, unknown> {
+  let decoded: unknown;
   try {
-    approved = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(decodeLowerHex(payload)));
+    decoded = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(decodeLowerHex(payload)));
   } catch {
     throw invalid();
   }
-  if (typeof approved !== "object" || approved === null) throw invalid();
-  const { version, expires_at: expiresAt, policy } = approved as Record<string, unknown>;
-  const maxAgeSecs =
-    typeof policy === "object" && policy !== null ? (policy as Record<string, unknown>)["max_age_secs"] : undefined;
-  if (![version, expiresAt, maxAgeSecs].every((value) => Number.isSafeInteger(value) && (value as number) >= 1)) {
-    throw invalid();
-  }
-  if (Date.now() >= (expiresAt as number) * 1_000) throw new TvcError("ProverPolicyExpired");
-  return {
-    file: { payload, signatures: signatures as SignedProverPolicyFile["signatures"] },
-    version: version as number,
-    maxAgeSecs: maxAgeSecs as number,
-    expiresAt: expiresAt as number,
-    fetchedAtMs: Date.now(),
-  };
+  if (!isRecord(decoded)) throw invalid();
+  return decoded;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }

@@ -117,7 +117,8 @@ export function checkTransactionKeys(
 }
 
 const SEALING_KEYS = ["target", "nonce", "attestation", "policy"] as const;
-const SIGNED_POLICY_KEYS = ["payload", "signatures"] as const;
+const SIGNED_POLICY_KEYS = ["release", "freshness"] as const;
+const SIGNED_PART_KEYS = ["payload", "signatures"] as const;
 const SEALED_KEYS = ["target", "enc", "ciphertext", "response_key"] as const;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -133,14 +134,14 @@ export function checkProve(operation: ProveOperation): ProveOperation {
   const sealing = operation.prover;
   assertExactObjectKeys(sealing, SEALING_KEYS, "InvalidProverRequest");
   assertExactObjectKeys(sealing.policy, SIGNED_POLICY_KEYS, "InvalidProverRequest");
-  requireHex(sealing.nonce, 32);
-  if (
-    !isObject(sealing.attestation) ||
-    typeof sealing.policy.payload !== "string" ||
-    !Array.isArray(sealing.policy.signatures)
-  ) {
-    throw new TvcError("InvalidProverRequest");
+  for (const part of [sealing.policy.release, sealing.policy.freshness]) {
+    assertExactObjectKeys(part, SIGNED_PART_KEYS, "InvalidProverRequest");
+    if (typeof part.payload !== "string" || !Array.isArray(part.signatures)) {
+      throw new TvcError("InvalidProverRequest");
+    }
   }
+  requireHex(sealing.nonce, 32);
+  if (!isObject(sealing.attestation)) throw new TvcError("InvalidProverRequest");
   const body = operation.request;
   const circuit = body["circuitType"];
   if (typeof circuit !== "string" || !PROVE_CIRCUITS.has(circuit)) {

@@ -100,7 +100,7 @@ completed request is sealed to:
 | `target` | The route the request is sealed to: `/prove/<key>`, where `<key>` is the request's proving key (`<family>_<inputs>_<outputs>`, merges with 1 output). The client posts it below whatever prover URL it uses. No prefix or query; at most 256 bytes. |
 | `nonce` | 32 bytes, the nonce the client fetched the attestation with. |
 | `attestation` | The prover's answer to `GET <prover URL>/attestation?nonce=<nonce>`, as received. |
-| `policy` | The network's signed policy file as published, `{ payload, signatures: [{ public_key, signature }] }` (zolana `prover/tee/WIRE_CONTRACT.md`, "Signed policy"). |
+| `policy` | The network's signed policy file as published, `{ release, freshness }`, each part `{ payload, signatures: [{ public_key, signature }] }` (zolana `prover/tee/WIRE_CONTRACT.md`, "Signed policy"). |
 
 The enclave accepts the file only when enough of the policy signers compiled
 into the image sign its payload, the payload names the image's network, and

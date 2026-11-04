@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use ed25519_dalek::Signer as _;
 use qos_p256::P256Pair;
 use spr_keypair::SigningKey;
 use spr_prover_tee::{
-    Anchors, FixtureProver, NitroFixture, PolicyPayload, PolicySignature, PolicySigners,
-    SignedPolicyFile, TeePolicy, POLICY_DOMAIN,
+    Anchors, FixtureProver, FreshnessSigners, NitroFixture, PolicySigners, ReleasePayload,
+    SignedPolicyFile, TeePolicy,
 };
 use zolana_tvc_protocol::constants::{
     API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
@@ -120,31 +119,31 @@ fn signed_policy(
     policy: TeePolicy,
     expires_at: u64,
 ) -> serde_json::Value {
-    let payload = serde_json::to_vec(&PolicyPayload {
+    const FRESHNESS_SECS: u64 = 3_600;
+    // A freshness key the release names, distinct from its signer.
+    let mut seed = signer.to_bytes();
+    seed[0] ^= 0xff;
+    let freshness = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let release = ReleasePayload {
         network: network.to_owned(),
         version: 1,
         expires_at,
+        freshness: FreshnessSigners::of(std::slice::from_ref(&freshness), FRESHNESS_SECS),
         policy,
-    })
-    .expect("payload");
-    let signature = signer.sign(&[POLICY_DOMAIN, &payload].concat());
-    serde_json::to_value(SignedPolicyFile {
-        payload: hex::encode(&payload),
-        signatures: vec![PolicySignature {
-            public_key: hex::encode(signer.verifying_key().to_bytes()),
-            signature: hex::encode(signature.to_bytes()),
-        }],
-    })
-    .expect("policy file")
+    };
+    let fresh = (expires_at.saturating_sub(FRESHNESS_SECS), expires_at);
+    let file = SignedPolicyFile::sign(&release, std::slice::from_ref(signer), fresh, &[freshness])
+        .expect("policy file");
+    serde_json::to_value(file).expect("policy file")
 }
 
 /// The policy a case's file approves, for a test that re-signs an edit of it.
 fn approved_policy(case: &ProverCase) -> TeePolicy {
     let file: SignedPolicyFile =
         serde_json::from_value(case.sealing.policy.clone()).expect("policy file");
-    let payload: PolicyPayload =
-        serde_json::from_slice(&file.payload_bytes().expect("payload")).expect("payload json");
-    payload.policy
+    let release: ReleasePayload =
+        serde_json::from_slice(&hex::decode(&file.release.payload).expect("hex")).expect("release");
+    release.policy
 }
 
 fn merge_request() -> serde_json::Value {
@@ -659,9 +658,10 @@ fn prove_refuses_a_prover_outside_the_signed_policy() {
             case.sealing.policy =
                 signed_policy(&policy_signer(), NETWORK, policy, ATTESTED_AT_SECS);
         }),
-        ("edited payload", |case| {
-            let payload = case.sealing.policy["payload"].as_str().unwrap().to_owned();
-            case.sealing.policy["payload"] = serde_json::json!(payload.replacen("7b", "7b20", 1));
+        ("edited release payload", |case| {
+            let release = &mut case.sealing.policy["release"];
+            let payload = release["payload"].as_str().unwrap().to_owned();
+            release["payload"] = serde_json::json!(payload.replacen("7b", "7b20", 1));
         }),
         ("the image's own signers", |case| {
             case.trust.signers = ProverTrust::image().signers
