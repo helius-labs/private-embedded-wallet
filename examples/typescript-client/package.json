@@ -10,7 +10,7 @@
     "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "0.8.0-alpha",
+    "@heliuslabs/spr": "0.9.0-alpha",
     "@solana/kit": "^8.3.0",
     "@turnkey/sdk-server": "^8.3.0",
     "@zolana/tvc-wallet": "workspace:*",

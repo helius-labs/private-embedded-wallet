@@ -143,7 +143,7 @@ export type TransactionKeyItem = {
 /**
  * The prover's request body as the Zolana SDK encodes it, with `null` in every
  * nullifier secret slot the enclave is to fill (`proverRequestBody` and
- * `mergeProverRequestBody` from `@heliuslabs/zolana/client`).
+ * `mergeProverRequestBody` from `@heliuslabs/spr/client`).
  */
 export type ProverRequest = Readonly<Record<string, unknown>>;
 

@@ -5,7 +5,7 @@ import {
   type Bytes32,
   type RequestContext,
   type WalletStateCipher,
-} from "@heliuslabs/zolana";
+} from "@heliuslabs/spr";
 import { sha256 } from "@noble/hashes/sha256";
 
 import type { TvcKeys } from "./keys.js";

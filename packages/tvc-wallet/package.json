@@ -59,7 +59,7 @@
     "@turnkey/sdk-types": "1.5.1"
   },
   "peerDependencies": {
-    "@heliuslabs/zolana": ">=0.8.0-alpha",
+    "@heliuslabs/spr": ">=0.9.0-alpha",
     "@solana/kit": "^8.3.0",
     "react": ">=18.0.0"
   },
@@ -69,7 +69,7 @@
     }
   },
   "devDependencies": {
-    "@heliuslabs/zolana": "0.8.0-alpha",
+    "@heliuslabs/spr": "0.9.0-alpha",
     "@solana/kit": "^8.3.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.2",

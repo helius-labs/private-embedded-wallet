@@ -7,7 +7,7 @@ import {
   buildTransferTransaction,
   buildWithdrawalTransaction,
   syncWallet,
-} from "@heliuslabs/zolana";
+} from "@heliuslabs/spr";
 import { TvcKeys, shieldedAddressOf } from "@zolana/tvc-wallet";
 
 import {

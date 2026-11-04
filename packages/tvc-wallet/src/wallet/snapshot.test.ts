@@ -7,7 +7,7 @@ import {
   serializeWallet,
   walletSnapshotCipher,
   type ShieldedAddress,
-} from "@heliuslabs/zolana";
+} from "@heliuslabs/spr";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { TvcProverPolicy } from "./prover-policy.js";
 

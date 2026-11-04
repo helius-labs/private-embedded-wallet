@@ -79,7 +79,7 @@ export default defineConfig({
   // the crypto stack twice.
   splitting: true,
   treeshake: true,
-  external: ["@heliuslabs/zolana", "@solana/kit", "react", "react-dom"],
+  external: ["@heliuslabs/spr", "@solana/kit", "react", "react-dom"],
   onSuccess: async () => {
     restoreClientDirectives();
     verifyProductionBoundary();

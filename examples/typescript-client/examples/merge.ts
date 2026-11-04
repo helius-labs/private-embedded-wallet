@@ -7,8 +7,8 @@ import {
   buildRegistrationTransaction,
   buildSetMergeEncryptionTransaction,
   syncWallet,
-} from "@heliuslabs/zolana";
-import { MERGE_INPUT_COUNT } from "@heliuslabs/zolana/interface";
+} from "@heliuslabs/spr";
+import { MERGE_INPUT_COUNT } from "@heliuslabs/spr/interface";
 import { TvcKeys, shieldedAddressOf } from "@zolana/tvc-wallet";
 
 import {

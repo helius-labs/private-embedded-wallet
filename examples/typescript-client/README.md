@@ -1,6 +1,6 @@
 # TypeScript client with a TVC wallet
 
-A client example for `@heliuslabs/zolana` with the shielded keys held by a TVC
+A client example for `@heliuslabs/spr` with the shielded keys held by a TVC
 enclave (`@zolana/tvc-wallet`), in the layout of
 [zolana-examples](https://github.com/helius-labs/zolana-examples).
 
@@ -216,7 +216,7 @@ reopens a wallet often can store the SDK wallet snapshot instead. The enclave
 provides the snapshot key, so no secret is kept on the device:
 
 ```ts
-import { loadPersistedWallet, syncPersistedWallet } from "@heliuslabs/zolana";
+import { loadPersistedWallet, syncPersistedWallet } from "@heliuslabs/spr";
 import { snapshotCipher } from "@zolana/tvc-wallet";
 
 const cipher = await snapshotCipher(keys);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { address, getAddressEncoder } from "@solana/kit";
-import { ed25519DerivationMessage, type Bytes32 } from "@heliuslabs/zolana/keypair";
+import { ed25519DerivationMessage, type Bytes32 } from "@heliuslabs/spr/keypair";
 import { approveBootstrapActivity, bootstrapWithApproval } from "./bootstrap-approval.js";
 
 type Api = Parameters<typeof bootstrapWithApproval>[0];

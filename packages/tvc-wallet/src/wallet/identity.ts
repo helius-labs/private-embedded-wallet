@@ -1,5 +1,5 @@
-import { ShieldedAddress, ShieldedPublicKey, type Bytes32 } from "@heliuslabs/zolana";
-import { X25519PublicKey } from "@heliuslabs/zolana/keypair";
+import { ShieldedAddress, ShieldedPublicKey, type Bytes32 } from "@heliuslabs/spr";
+import { X25519PublicKey } from "@heliuslabs/spr/keypair";
 import { address, getAddressEncoder } from "@solana/kit";
 
 import { TvcError } from "../protocol/error.js";

@@ -4,9 +4,9 @@ Client for the Zolana TVC privacy wallet. It verifies the signed release policy
 and the AWS Nitro Boot Proof before handing out a `VerifiedConnection`, wraps
 every operation in a QOS P-256 envelope, checks the proof-bound result, and
 answers the Zolana SDK's `WalletKeys` interface through `TvcKeys`, so every
-`@heliuslabs/zolana` flow runs over the enclave unchanged.
+`@heliuslabs/spr` flow runs over the enclave unchanged.
 
-Pre-production. Requires `@heliuslabs/zolana` 0.8.0-alpha or later, which
+Pre-production. Requires `@heliuslabs/spr` 0.9.0-alpha or later, which
 speaks the `/v1/spr` prover contract and its signed policies.
 
 ## Usage
@@ -16,11 +16,11 @@ import {
   Wallet,
   buildDepositTransaction,
   buildTransferTransaction,
-  createZolanaClient,
+  createSprClient,
   syncWallet,
-} from "@heliuslabs/zolana";
-import { SignedTeePolicy } from "@heliuslabs/zolana/client";
-import { AssetRegistry } from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr";
+import { SignedTeePolicy } from "@heliuslabs/spr/client";
+import { AssetRegistry } from "@heliuslabs/spr/transaction";
 import {
   DEVNET_RELEASE,
   TvcKeys,
@@ -54,7 +54,7 @@ const keys = new TvcKeys({
 });
 // The enclave completes resolved proof inputs; it has no indexed proving, so the
 // client fetches the proof data itself.
-const zolana = await createZolanaClient({
+const zolana = await createSprClient({
   solanaRpcUrl,
   indexerUrl,
   proverUrl,

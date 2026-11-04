@@ -22,12 +22,12 @@ import {
   type TransactionPartialSigner,
 } from "@solana/kit";
 import {
-  createZolanaClient,
+  createSprClient,
   initializePoseidon,
-  type ZolanaClientConfig,
-} from "@heliuslabs/zolana";
-import { SignedTeePolicy } from "@heliuslabs/zolana/client";
-import type { AssetBalance } from "@heliuslabs/zolana/transaction";
+  type SprClientConfig,
+} from "@heliuslabs/spr";
+import { SignedTeePolicy } from "@heliuslabs/spr/client";
+import type { AssetBalance } from "@heliuslabs/spr/transaction";
 import { DEFAULT_SOLANA_ACCOUNTS, Turnkey } from "@turnkey/sdk-server";
 import {
   createTvcClient,
@@ -56,7 +56,7 @@ import {
 import { createLocalTvcClient, localProverConfig } from "@zolana/tvc-wallet/testing";
 import { bootstrapWithApproval } from "./bootstrap-approval.js";
 
-export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
+export type Client = Awaited<ReturnType<typeof createSprClient>>;
 
 export interface ExampleSetup {
   readonly zolana: Client;
@@ -128,7 +128,7 @@ function networkFromEnv(): TvcProverNetwork {
   return network;
 }
 
-function clientConfigFromEnv(network: TvcProverNetwork): ZolanaClientConfig {
+function clientConfigFromEnv(network: TvcProverNetwork): SprClientConfig {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
   const apiKey = process.env["API_KEY"]?.trim();
   const solanaRpcUrl =
@@ -568,7 +568,7 @@ async function localTestkit(endpoint: string): Promise<{
 export async function setup(): Promise<ExampleSetup> {
   await initializePoseidon();
   const network = networkFromEnv();
-  const zolana = await createZolanaClient(clientConfigFromEnv(network));
+  const zolana = await createSprClient(clientConfigFromEnv(network));
   const walletPath = env("TVC_WALLET_PATH");
   const testkit = process.env["TVC_LOCAL_TESTKIT_ENDPOINT"]?.trim();
   if (testkit) {
