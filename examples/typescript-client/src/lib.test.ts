@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { clientKey, grantEnclaveBootstrap } from "./lib.js";
+import { clientKey, grantEnclaveBootstrap, heliusUrl } from "./lib.js";
 
 test("client keys are created only for missing files and survive reload", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tvc-client-key-"));
@@ -98,4 +98,22 @@ test("enrollment reconciles every existing grant after quorum rotation", async (
   policies[0]!.consensus = "old-user";
   api.updatePolicy = async () => { throw new Error("update failed"); };
   await assert.rejects(grant(), /update failed/);
+});
+
+test("gatekeeper routes take the network's Helius host and the API key", () => {
+  const saved = process.env["API_KEY"];
+  process.env["API_KEY"] = "key&1";
+  try {
+    assert.equal(heliusUrl("devnet", "/v1/spr"), "https://devnet.helius-rpc.com/v1/spr?api-key=key%261");
+    assert.equal(
+      heliusUrl("mainnet", "/v1/private-wallet"),
+      "https://mainnet.helius-rpc.com/v1/private-wallet?api-key=key%261",
+    );
+    assert.equal(heliusUrl("devnet", "/"), "https://devnet.helius-rpc.com/?api-key=key%261");
+    delete process.env["API_KEY"];
+    assert.throws(() => heliusUrl("devnet", "/v1/spr"), /set API_KEY/);
+  } finally {
+    if (saved === undefined) delete process.env["API_KEY"];
+    else process.env["API_KEY"] = saved;
+  }
 });

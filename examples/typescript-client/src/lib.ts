@@ -30,6 +30,7 @@ import { SignedTeePolicy } from "@heliuslabs/spr/client";
 import type { AssetBalance } from "@heliuslabs/spr/transaction";
 import { DEFAULT_SOLANA_ACCOUNTS, Turnkey } from "@turnkey/sdk-server";
 import {
+  DEVNET_RELEASE,
   createTvcClient,
   createTvcOperationAuthorizer,
   identityOf,
@@ -49,6 +50,7 @@ import {
   clientKeyIdFor,
   encodeLowerHex,
   signWalletGrant,
+  walletEnrollmentMessage,
   walletGrantSecret,
   type PinnedReleaseAuthorities,
   type SignedReleasePolicy,
@@ -88,20 +90,12 @@ interface TrustMaterial {
   readonly qosIdentityPcrs: QosIdentityPcrs;
 }
 
-// Each network's Solana RPC, Photon indexer and eu-north-1 TEE prover. SPR_NETWORK
-// picks one; it must be the network the enclave image was built for. The SDK
-// and the enclave both accept the provers that network's signed policy admits.
+// Each network's Helius RPC. SPR_NETWORK picks one; it must be the network the
+// enclave image was built for. Its gatekeeper serves the indexer and the TEE
+// prover at /v1/spr and the hosted tvc-gateway at /v1/private-wallet.
 const NETWORKS = {
-  devnet: {
-    rpc: "https://devnet.helius-rpc.com",
-    indexer: "https://d34xe1hqb2ibg2.cloudfront.net",
-    prover: "https://dd73hh473h6ha.cloudfront.net",
-  },
-  mainnet: {
-    rpc: "https://mainnet.helius-rpc.com",
-    indexer: "https://dgcj4pjarvo65.cloudfront.net",
-    prover: "https://d3ky2kt0ntqxt1.cloudfront.net",
-  },
+  devnet: { rpc: "https://devnet.helius-rpc.com" },
+  mainnet: { rpc: "https://mainnet.helius-rpc.com" },
 } as const satisfies Record<TvcProverNetwork, unknown>;
 const LOCAL_PROVER_URL = "http://127.0.0.1:44021";
 const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
@@ -128,18 +122,19 @@ function networkFromEnv(): TvcProverNetwork {
   return network;
 }
 
+/** `path` on the network's Helius host, with `API_KEY`. */
+export function heliusUrl(network: TvcProverNetwork, path: string): string {
+  const url = new URL(path, NETWORKS[network].rpc);
+  url.searchParams.set("api-key", env("API_KEY"));
+  return url.toString();
+}
+
 function clientConfigFromEnv(network: TvcProverNetwork): SprClientConfig {
-  const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
-  const apiKey = process.env["API_KEY"]?.trim();
-  const solanaRpcUrl =
-    endpoint || (apiKey ? `${NETWORKS[network].rpc}/?api-key=${apiKey}` : undefined);
-  if (!solanaRpcUrl) {
-    throw new Error("set API_KEY or ZOLANA_ENDPOINT");
-  }
-  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim() || NETWORKS[network].prover;
+  const solanaRpcUrl = process.env["ZOLANA_ENDPOINT"]?.trim() || heliusUrl(network, "/");
+  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim() || heliusUrl(network, "/v1/spr");
   return Object.freeze({
     solanaRpcUrl,
-    indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || NETWORKS[network].indexer,
+    indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || heliusUrl(network, "/v1/spr"),
     proverUrl,
     // A local network's plaintext prover is the only one without a policy.
     ...(LOOPBACK_HOSTS.includes(new URL(proverUrl).hostname)
@@ -255,6 +250,107 @@ async function bootProofResolver(): Promise<BootProofResolver> {
       .bootProof;
 }
 
+/** Operations signed with the enrolled client key. */
+function requestAuthorizer(key: { privateKey: webcrypto.CryptoKey; publicKey: Uint8Array }) {
+  return createTvcOperationAuthorizer({
+    clientKeyId: clientKeyIdFor(key.publicKey),
+    sign: async (message) =>
+      new Uint8Array(
+        await webcrypto.subtle.sign(
+          { name: "ECDSA", hash: "SHA-256" },
+          key.privateKey,
+          message,
+        ),
+      ),
+  });
+}
+
+/** The hosted tvc-gateway: `TVC_GATEWAY_URL`, else the network's `/v1/private-wallet`. */
+function gatewayEndpoint(network: TvcProverNetwork): URL {
+  return new URL(process.env["TVC_GATEWAY_URL"]?.trim() || heliusUrl(network, "/v1/private-wallet"));
+}
+
+/**
+ * The stored descriptor for this client key, or one the gateway issues: the
+ * wallet owner signs a Sign-In With Solana message for the gateway's host
+ * through Turnkey, and `POST /enroll` answers the descriptor.
+ */
+async function gatewayDescriptor(
+  owner: TurnkeyApi,
+  organizationId: string,
+  endpoint: URL,
+  clientPublicKey: string,
+  path: string,
+): Promise<WalletDescriptor> {
+  try {
+    return await walletDescriptor(path, clientPublicKey);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith("no wallet descriptor")) throw error;
+  }
+  const account = await walletAccount(owner, organizationId);
+  const enrollment = {
+    organizationId,
+    turnkeyWalletId: account.walletId,
+    solanaAddress: account.address,
+    clientPublicKey,
+    issuedAtMs: Date.now(),
+  };
+  const signed = await owner.signRawPayload({
+    signWith: account.address,
+    payload: walletEnrollmentMessage({ domain: endpoint.host, ...enrollment }),
+    encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
+    hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",
+  });
+  const url = new URL(endpoint);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/enroll`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...enrollment,
+      ownerSignature: signed.r.padStart(64, "0") + signed.s.padStart(64, "0"),
+    }),
+  });
+  const answer = (await response.json()) as unknown;
+  if (!response.ok || !isRecord(answer) || !isRecord(answer["descriptor"])) {
+    throw new Error(`enroll: HTTP ${response.status} ${JSON.stringify(answer)}`);
+  }
+  await writeFile(path, JSON.stringify(answer["descriptor"], null, 2));
+  console.log(`enrolled client key with the gateway; descriptor saved at ${path}`);
+  return walletDescriptor(path, clientPublicKey);
+}
+
+/**
+ * The enclave through the hosted tvc-gateway. Any Helius API key reaches it;
+ * the wallet's Turnkey sub-organization must be named after the key's project.
+ */
+async function gatewayClientFromEnv(network: TvcProverNetwork): Promise<{
+  tvc: TvcClient;
+  descriptor: WalletDescriptor;
+  servicePublicKey: string;
+}> {
+  const trustPath = process.env["TVC_TRUST_PATH"]?.trim();
+  const trust = trustPath ? await trustMaterial(trustPath) : DEVNET_RELEASE;
+  const key = await clientKey(env("TVC_CLIENT_KEY_PATH"));
+  const organizationId = env("TURNKEY_ORGANIZATION_ID");
+  const endpoint = gatewayEndpoint(network);
+  const descriptor = await gatewayDescriptor(
+    await turnkeyClient(organizationId),
+    organizationId,
+    endpoint,
+    encodeLowerHex(key.publicKey),
+    env("TVC_DESCRIPTOR_PATH"),
+  );
+  const tvc = createTvcClient({
+    backend: { kind: "gateway", endpoint },
+    releasePolicy: trust.releasePolicy,
+    releaseAuthorities: trust.releaseAuthorities,
+    qosIdentityPcrs: trust.qosIdentityPcrs,
+    operations: { walletDescriptor: descriptor, authorizer: requestAuthorizer(key) },
+  });
+  return { tvc, descriptor, servicePublicKey: enclaveServicePublicKey(trust.releasePolicy.policy.quorumPublicKey) };
+}
+
 async function tvcClientFromEnv(): Promise<{
   tvc: TvcClient;
   descriptor: WalletDescriptor;
@@ -267,17 +363,7 @@ async function tvcClientFromEnv(): Promise<{
     env("TVC_DESCRIPTOR_PATH"),
     clientPublicKey,
   );
-  const authorizer = createTvcOperationAuthorizer({
-    clientKeyId: clientKeyIdFor(key.publicKey),
-    sign: async (message) =>
-      new Uint8Array(
-        await webcrypto.subtle.sign(
-          { name: "ECDSA", hash: "SHA-256" },
-          key.privateKey,
-          message,
-        ),
-      ),
-  });
+  const authorizer = requestAuthorizer(key);
   const grantSecret = await loadWalletGrantSecret(env("TVC_WALLET_GRANT_KEY_PATH"));
   const walletGrant = () =>
     Promise.resolve(signWalletGrant({
@@ -582,7 +668,11 @@ export async function setup(): Promise<ExampleSetup> {
       : localProverConfig(process.env["TVC_LOCAL_PROVER_URL"]?.trim() || LOCAL_PROVER_URL);
     return Object.freeze({ zolana, walletPath, ...local, connection, prover });
   }
-  const { tvc: enclave, descriptor, servicePublicKey } = await tvcClientFromEnv();
+  // TVC_ENDPOINT names the enclave itself, for an operator holding the trust
+  // material and grant key; otherwise the hosted gateway.
+  const { tvc: enclave, descriptor, servicePublicKey } = process.env["TVC_ENDPOINT"]?.trim()
+    ? await tvcClientFromEnv()
+    : await gatewayClientFromEnv(network);
   const connection = await enclave.connectAndVerify();
   const organizationId = descriptor.turnkey_organization_id;
   const owner = await turnkeyClient(organizationId);
@@ -602,7 +692,7 @@ export async function setup(): Promise<ExampleSetup> {
     signer: turnkeySigner(owner, descriptor),
     walletPath,
     prover: {
-      url: process.env["TVC_PROVER_URL"]?.trim() || NETWORKS[network].prover,
+      url: process.env["TVC_PROVER_URL"]?.trim() || heliusUrl(network, "/v1/spr"),
       policy: TvcProverPolicy.forNetwork(network),
     },
   });

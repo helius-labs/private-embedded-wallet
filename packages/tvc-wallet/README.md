@@ -7,7 +7,8 @@ answers the Zolana SDK's `WalletKeys` interface through `TvcKeys`, so every
 `@heliuslabs/spr` flow runs over the enclave unchanged.
 
 Pre-production. Requires `@heliuslabs/spr` 0.9.0-alpha or later, which
-speaks the `/v1/spr` prover contract and its signed policies.
+speaks the `/v1/spr` prover contract and reads the signed prover policy file
+the enclave checks.
 
 ## Usage
 
@@ -140,8 +141,8 @@ a failed operation automatically.
 `backend` says where the client reaches the enclave. Through either, the
 client verifies the same evidence.
 
-- `{ kind: "gateway", endpoint }` is a tvc-gateway, such as
-  `https://beta-devnet.helius-rpc.com/v1/private-wallet?api-key=…`. One
+- `{ kind: "gateway", endpoint }` is a tvc-gateway, such as Helius's
+  `https://devnet.helius-rpc.com/v1/private-wallet?api-key=…`. One
   `/session` request answers discovery, the ping and the Boot Proof, every
   operation response carries its replica's Boot Proof, and the gateway grants
   each operation.
@@ -162,7 +163,8 @@ const tvc = createTvcClient({
 A gateway descriptor comes from `POST {endpoint}/enroll`: the wallet owner
 signs `walletEnrollmentMessage(enrollment)`, a Sign-In With Solana message
 whose `domain` is the endpoint's host, with the wallet's Solana key, and the
-gateway answers `{descriptor}` for the enrollment's client key. See
+gateway answers `{descriptor}` for the enrollment's client key. The wallet's
+Turnkey sub-organization must be named after the API key's Helius project. See
 [`apps/tvc-gateway`](../../apps/tvc-gateway/README.md#enrollment).
 
 ## Entry points

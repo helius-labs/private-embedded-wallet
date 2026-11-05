@@ -96,8 +96,8 @@ Resources:
 - urn:zolana-tvc:client-key:<clientPublicKey>
 ```
 
-The first line names `enrollment.domain`, so a signature enrolls at one
-gateway only. `walletEnrollmentMessage` in `@heliuslabs/spr-embedded-wallet/protocol`
+The first line names the host the client called, one of
+`enrollment.domains`, so a signature enrolls at this gateway only. `walletEnrollmentMessage` in `@heliuslabs/spr-embedded-wallet/protocol`
 builds the message. `fixtures/wallet-enrollment.json`, from
 `createSignInMessageText` in `@solana/wallet-standard-util`, is its test
 vector.
@@ -161,8 +161,9 @@ environment variables, with nested fields joined by `__`:
 | `TVC_GATEWAY_TURNKEY__BOOT_PROOF_API_KEY__{PUBLIC,PRIVATE}_KEY`   | Turnkey API key in the TVC organization that can read Boot Proofs.                        |
 | `TVC_GATEWAY_TURNKEY__WAAS_API_KEY__{PUBLIC,PRIVATE}_KEY`         | Turnkey API key in the Helius WaaS parent organization, with read access to its sub-orgs. |
 
-`enrollment.domain` is the host clients reach the gateway at, which enrollment
-messages name. `dev_api.base_url` is the Helius dev-api that resolves a direct
+`enrollment.domains` are the hosts clients reach the gateway at, gatekeeper's
+`devnet.helius-rpc.com` and `beta-devnet.helius-rpc.com`; an enrollment message
+names the one the client called. `dev_api.base_url` is the Helius dev-api that resolves a direct
 caller's API key.
 
 `configs/release-policy.json` and `configs/release-authorities.json` hold the
@@ -215,15 +216,16 @@ both this crate and `walletEnrollmentMessage` in `@heliuslabs/spr-embedded-walle
 
 ## Deployment
 
-The service runs on AWS as one ECS Fargate task in the zolnet devnet stack
-(`helius-labs/zolana-infra`, `infra/modules/zolnet/ecs_tvc_gateway.tf`), behind
-that stack's ALB and a CloudFront distribution of its own.
+The service runs on AWS as two ECS Fargate tasks in zolana-infra's devnet-e
+stack (`infra/modules/zolnet/ecs_tvc_gateway.tf`), behind that stack's ALB and
+a CloudFront distribution of its own.
 
 1. Run the `publish-tvc-gateway-image` workflow. It pushes to the zolnet ECR
    repository `zolnet-tvc-gateway`, and its summary prints the `tvc_gateway_image`
    digest reference.
-2. Pin that reference in the zolana-infra env's `terraform.tfvars` with
-   `enable_tvc_gateway = true`, then deploy the env.
+2. Pin that reference as `tvc_gateway_image` in zolana-infra's
+   `infra/envs/devnet-e/main.tf`, with `enable_tvc_gateway = true`, then deploy
+   the env.
 3. Populate the `zolnet-<env>/tvc-gateway` secret, as described in zolana-infra's
    `infra/README.md`.
 
