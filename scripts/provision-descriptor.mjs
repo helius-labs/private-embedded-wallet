@@ -14,8 +14,8 @@
 // key compiled into the enclave, used for one signature and wiped.
 //
 // A descriptor is not a secret: it names public keys and identifiers. Send it
-// to the client, which stores it at its TVC_DESCRIPTOR_PATH. It needs
-// `pnpm build:ts` for the tvc-wallet entries it imports.
+// to the client. The script needs `pnpm build:ts` for the tvc-wallet entries it
+// imports.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";

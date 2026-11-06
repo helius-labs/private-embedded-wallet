@@ -23,7 +23,7 @@ Helius API key.
 | [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet`: one-request sessions with Boot Proofs, enrollment, and wallet grants. |
 | [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
-| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles and a merge, through the hosted gateway, directly against an enclave, or against the local testkit. |
+| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: releases, wallet descriptors, the localnet for `just headless-e2e`. |
 
 ## Responsibility split

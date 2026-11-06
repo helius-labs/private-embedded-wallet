@@ -35,8 +35,6 @@ import {
   createTvcOperationAuthorizer,
   identityOf,
   sealedSeedOf,
-  type BootProofResolver,
-  type QosIdentityPcrs,
   type ShieldedIdentity,
   type TvcClient,
   type TvcProverConfig,
@@ -44,14 +42,11 @@ import {
   TvcProverPolicy,
   type VerifiedConnection,
 } from "@heliuslabs/spr-embedded-wallet";
-import { signWalletGrant, walletGrantSecret } from "@heliuslabs/spr-embedded-wallet/operator";
 import {
   clientKeyIdFor,
   encodeLowerHex,
   walletEnrollmentMessage,
-  type PinnedReleaseAuthorities,
   type SealedSeed,
-  type SignedReleasePolicy,
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import { createLocalTvcClient, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
@@ -80,13 +75,6 @@ export interface ConfirmedTransaction {
 export interface StoredWallet {
   readonly identity: ShieldedIdentity;
   readonly sealedSeed: SealedSeed;
-}
-
-/** Independently pinned trust material for one TVC release. */
-interface TrustMaterial {
-  readonly releasePolicy: SignedReleasePolicy;
-  readonly releaseAuthorities: PinnedReleaseAuthorities;
-  readonly qosIdentityPcrs: QosIdentityPcrs;
 }
 
 // Each network's Helius RPC. SPR_NETWORK picks one; it must be the network the
@@ -144,22 +132,6 @@ function clientConfigFromEnv(network: TvcProverNetwork): SprClientConfig {
   });
 }
 
-/** Load operator-published trust pins independently of the service. */
-async function trustMaterial(path: string): Promise<TrustMaterial> {
-  const parsed = await readJson(path);
-  if (
-    !isRecord(parsed) ||
-    !isRecord(parsed["releasePolicy"]) ||
-    !isRecord(parsed["releaseAuthorities"]) ||
-    !isRecord(parsed["qosIdentityPcrs"])
-  ) {
-    throw new Error(
-      `${path} must hold releasePolicy, releaseAuthorities and qosIdentityPcrs`,
-    );
-  }
-  return parsed as unknown as TrustMaterial;
-}
-
 /** Load or create the request-signing key enrolled in the wallet descriptor. */
 export async function clientKey(
   path: string,
@@ -190,12 +162,7 @@ export async function clientKey(
   return { privateKey, publicKey };
 }
 
-/** Load the operator-signed descriptor and check that it enrolls this client key. */
-/** The operator's wallet-grant key, `{"private_key": hex}`, checked to be the one the enclave pins. */
-async function loadWalletGrantSecret(path: string): Promise<Uint8Array> {
-  return walletGrantSecret(await readFile(path, "utf8"));
-}
-
+/** The stored descriptor, checked to enroll this client key. */
 async function walletDescriptor(
   path: string,
   clientPublicKey: string,
@@ -222,31 +189,6 @@ async function walletDescriptor(
     );
   }
   return descriptor;
-}
-
-/**
- * Read Boot Proof via the operator proxy, or directly with a TVC organization key.
- * Verification always uses the client's own pins.
- */
-async function bootProofResolver(): Promise<BootProofResolver> {
-  const url = process.env["TVC_BOOT_PROOF_URL"]?.trim();
-  if (url) {
-    return async ({ bootProofLookupKey }) => {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ephemeralKey: bootProofLookupKey }),
-      });
-      if (!response.ok) throw new Error(`boot proof: HTTP ${response.status}`);
-      return response.json();
-    };
-  }
-  const organizationId = process.env["TVC_ORGANIZATION_ID"]?.trim();
-  if (!organizationId) throw new Error("set TVC_BOOT_PROOF_URL or TVC_ORGANIZATION_ID");
-  const turnkey = await turnkeyClient(organizationId);
-  return async ({ bootProofLookupKey }) =>
-    (await turnkey.getBootProof({ organizationId, ephemeralKey: bootProofLookupKey }))
-      .bootProof;
 }
 
 /** Operations signed with the enrolled client key. */
@@ -328,8 +270,6 @@ async function gatewayClientFromEnv(network: TvcProverNetwork): Promise<{
   descriptor: WalletDescriptor;
   servicePublicKey: string;
 }> {
-  const trustPath = process.env["TVC_TRUST_PATH"]?.trim();
-  const trust = trustPath ? await trustMaterial(trustPath) : DEVNET_RELEASE;
   const key = await clientKey(env("TVC_CLIENT_KEY_PATH"));
   const organizationId = env("TURNKEY_ORGANIZATION_ID");
   const endpoint = gatewayEndpoint(network);
@@ -342,49 +282,14 @@ async function gatewayClientFromEnv(network: TvcProverNetwork): Promise<{
   );
   const tvc = createTvcClient({
     backend: { kind: "gateway", endpoint },
-    releasePolicy: trust.releasePolicy,
-    releaseAuthorities: trust.releaseAuthorities,
-    qosIdentityPcrs: trust.qosIdentityPcrs,
+    ...DEVNET_RELEASE,
     operations: { walletDescriptor: descriptor, authorizer: requestAuthorizer(key) },
   });
-  return { tvc, descriptor, servicePublicKey: enclaveServicePublicKey(trust.releasePolicy.policy.quorumPublicKey) };
-}
-
-async function tvcClientFromEnv(): Promise<{
-  tvc: TvcClient;
-  descriptor: WalletDescriptor;
-  servicePublicKey: string;
-}> {
-  const trust = await trustMaterial(env("TVC_TRUST_PATH"));
-  const key = await clientKey(env("TVC_CLIENT_KEY_PATH"));
-  const clientPublicKey = encodeLowerHex(key.publicKey);
-  const descriptor = await walletDescriptor(
-    env("TVC_DESCRIPTOR_PATH"),
-    clientPublicKey,
-  );
-  const authorizer = requestAuthorizer(key);
-  const grantSecret = await loadWalletGrantSecret(env("TVC_WALLET_GRANT_KEY_PATH"));
-  const walletGrant = () =>
-    Promise.resolve(signWalletGrant({
-      descriptor,
-      clientKeyId: clientKeyIdFor(key.publicKey),
-      projectId: "self-hosted",
-      issuedAtMs: BigInt(Date.now()),
-      lifetimeMs: 900_000n,
-    }, grantSecret));
-  const tvc = createTvcClient({
-    backend: {
-      kind: "enclave",
-      endpoint: new URL(env("TVC_ENDPOINT")),
-      resolveBootProof: await bootProofResolver(),
-      walletGrant,
-    },
-    releasePolicy: trust.releasePolicy,
-    releaseAuthorities: trust.releaseAuthorities,
-    qosIdentityPcrs: trust.qosIdentityPcrs,
-    operations: { walletDescriptor: descriptor, authorizer },
-  });
-  return { tvc, descriptor, servicePublicKey: enclaveServicePublicKey(trust.releasePolicy.policy.quorumPublicKey) };
+  return {
+    tvc,
+    descriptor,
+    servicePublicKey: enclaveServicePublicKey(DEVNET_RELEASE.releasePolicy.policy.quorumPublicKey),
+  };
 }
 
 function sameBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
@@ -427,15 +332,6 @@ async function turnkeyClient(organizationId: string) {
 
 type TurnkeyApi = Awaited<ReturnType<typeof turnkeyClient>>;
 export type BootstrapApprovalApi = Pick<TurnkeyApi, "getActivity" | "getActivities" | "approveActivity">;
-
-/** What the operator needs to sign this client's descriptor. */
-export interface Enrollment {
-  readonly organizationId: string;
-  readonly walletId: string;
-  readonly address: string;
-  readonly clientPublicKey: string;
-  readonly trustPath: string;
-}
 
 /** Turnkey uses the compressed signing point (the second of two quorum P-256 points). */
 function enclaveServicePublicKey(quorumPublicKey: string): string {
@@ -563,29 +459,6 @@ async function walletAccount(
   return { walletId: created.walletId, address };
 }
 
-/** Enroll the client and enclave keys; return the inputs for an operator-signed descriptor. */
-export async function enroll(): Promise<Enrollment> {
-  const trustPath = env("TVC_TRUST_PATH");
-  const trust = await trustMaterial(trustPath);
-  const key = await clientKey(env("TVC_CLIENT_KEY_PATH"));
-  const organizationId = env("TURNKEY_ORGANIZATION_ID");
-  const turnkey = await turnkeyClient(organizationId);
-  const account = await walletAccount(turnkey, organizationId);
-  await grantEnclaveBootstrap(
-    turnkey,
-    organizationId,
-    enclaveServicePublicKey(trust.releasePolicy.policy.quorumPublicKey),
-    account.address,
-  );
-  return Object.freeze({
-    organizationId,
-    walletId: account.walletId,
-    address: account.address,
-    clientPublicKey: encodeLowerHex(key.publicKey),
-    trustPath,
-  });
-}
-
 /** Adapt Turnkey to a Solana signer, verifying the returned message and wallet signature. */
 function turnkeySigner(turnkey: TurnkeyApi, descriptor: WalletDescriptor): TransactionPartialSigner {
   const signer: Address = address(descriptor.address);
@@ -667,11 +540,7 @@ export async function setup(): Promise<ExampleSetup> {
       : localProverConfig(process.env["TVC_LOCAL_PROVER_URL"]?.trim() || LOCAL_PROVER_URL);
     return Object.freeze({ zolana, walletPath, ...local, connection, prover });
   }
-  // TVC_ENDPOINT names the enclave itself, for an operator holding the trust
-  // material and grant key; otherwise the hosted gateway.
-  const { tvc: enclave, descriptor, servicePublicKey } = process.env["TVC_ENDPOINT"]?.trim()
-    ? await tvcClientFromEnv()
-    : await gatewayClientFromEnv(network);
+  const { tvc: enclave, descriptor, servicePublicKey } = await gatewayClientFromEnv(network);
   const connection = await enclave.connectAndVerify();
   const organizationId = descriptor.turnkey_organization_id;
   const owner = await turnkeyClient(organizationId);

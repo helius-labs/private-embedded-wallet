@@ -50,8 +50,7 @@ every client must accept.
 A wallet descriptor is the operator's grant that lets one client key drive the
 enclave operations of one Turnkey wallet. tvc-gateway signs one on each
 `POST /v1/private-wallet/enroll`. For a client that talks to the enclave
-directly, the client reports the values (`examples/typescript-client` prints
-them from `pnpm example examples/enroll.ts`) and the operator signs:
+directly, the client reports the values and the operator signs:
 
 ```sh
 node scripts/provision-descriptor.mjs --organization-id <org> --wallet-id <id> \
@@ -65,9 +64,9 @@ names exactly the release the client pins. The provisioning key comes from
 `TVC_PROVISIONING_KEY_JSON` or `--provisioning-key <path>`, in the Turnkey API
 key file format, and is checked against the public half compiled into the
 image before it signs. Treat it as release material. The descriptor itself is
-public data; the client stores it at its `TVC_DESCRIPTOR_PATH`.
+public data for the client to keep.
 
-The script imports the protocol package, so run `pnpm build:ts` first.
+The script imports the built tvc-wallet package, so run `pnpm build:ts` first.
 
 ## Localnet
 

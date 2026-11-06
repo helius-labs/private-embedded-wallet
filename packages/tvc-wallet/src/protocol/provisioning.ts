@@ -1,9 +1,10 @@
+import { p256 } from "@noble/curves/p256";
+
 import { signP256Prehash } from "../crypto/p256.js";
 import { SEC1_UNCOMPRESSED_LEN } from "./constants.js";
 import { descriptorDigest } from "./digest.js";
 import { TvcError } from "./error.js";
-import { p256SecretFromKeyFile } from "./key-file.js";
-import { encodeLowerHex } from "./hex.js";
+import { decodeLowerHex, encodeLowerHex } from "./hex.js";
 import type { ReleasePolicy, WalletDescriptor } from "./types.js";
 
 /**
@@ -40,10 +41,25 @@ export function provisioningSecret(
   apiKeyJson: string,
   expectedPublicKey: string = DEVELOPMENT_PROVISIONING_PUBLIC_KEY,
 ): Uint8Array {
-  return p256SecretFromKeyFile(apiKeyJson, expectedPublicKey, {
-    invalid: "InvalidProvisioningKey",
-    wrong: "WrongProvisioningKey",
-  });
+  let stored: unknown;
+  try {
+    stored = JSON.parse(apiKeyJson);
+  } catch {
+    throw new TvcError("InvalidProvisioningKey", "not JSON");
+  }
+  const privateKey =
+    typeof stored === "object" && stored !== null && "private_key" in stored
+      ? stored.private_key
+      : undefined;
+  if (typeof privateKey !== "string" || !/^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new TvcError("InvalidProvisioningKey", "private_key must be 32-byte hex");
+  }
+  const secret = decodeLowerHex(privateKey.replace(/^0x/, "").toLowerCase());
+  if (encodeLowerHex(p256.getPublicKey(secret, false)) !== expectedPublicKey) {
+    secret.fill(0);
+    throw new TvcError("WrongProvisioningKey");
+  }
+  return secret;
 }
 
 /**

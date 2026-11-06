@@ -179,8 +179,7 @@ Turnkey sub-organization must be named after the API key's Helius project. See
 - `@heliuslabs/spr-embedded-wallet/operator`: signing with the operator's keys, which no
   wallet client holds. `signWalletDescriptor` builds and signs the descriptor
   for one client key from the release policy, and `provisioningSecret` reads the
-  provisioning key and refuses one the enclave was not built with;
-  `signWalletGrant` and `walletGrantSecret` do the same for wallet grants.
+  provisioning key and refuses one the enclave was not built with.
 - `@heliuslabs/spr-embedded-wallet/browser`: non-exportable P-256 request signer,
   the persisted enclave-state parser, and IndexedDB record helpers.
 - `@heliuslabs/spr-embedded-wallet/testing`: loopback-only unattested testkit client. The
