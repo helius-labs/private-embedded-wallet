@@ -1,1 +1,60 @@
-null
+{
+  "releasePolicy": {
+    "authoritySetId": "private-wallet-mainnet-e9bb190-2026-11",
+    "policy": {
+      "acceptedExecutableDigests": [
+        "9477a5501590f1f8e38a4d44013304a9b35c3ca1118ae9371eb7e3d52ff9fe13"
+      ],
+      "acceptedManifestDigests": [
+        "f3ad7e0f43ead3cc6b96ef286da6bf21b76d2b600d8cb395fc15cb812cf99580"
+      ],
+      "allowedOperations": [
+        "Bootstrap",
+        "Decrypt",
+        "Derive",
+        "TransactionKeys",
+        "Prove"
+      ],
+      "expiresAtMs": "1825538567218",
+      "maxEncryptedRequestBytes": 262144,
+      "maxEncryptedResponseBytes": 262144,
+      "network": "mainnet",
+      "quorumKeyEpoch": "1",
+      "quorumKeyId": "4d7e49f7-a9dd-4346-880c-cd7e5c2dfc40",
+      "quorumPublicKey": "04fdb9a5b354317929ea59c0a0250968bc660370f2d74408a05fea1ad997e31bc70dc8d1408965930231b836bea434f2159e3cc8ac515625d4323c00589d65f6e3043d2d5b778469d11f4e42b2fb1d76a258522b4e5dc14215c36e9d4414aa4796439174535508e96a92110d179975ca60c208729cfa6ec1746e14fcd15172036e4f",
+      "releaseId": "private-wallet-mainnet-e9bb190",
+      "revocationEpoch": "0",
+      "securityDomainId": "641b217b63e63594f4323b714cb7a08a4ae801333dde8be87a9dea404021519a",
+      "turnkeyProofSchemaVersions": [
+        "turnkey.boot_proof.v1"
+      ],
+      "turnkeyTrustRootId": "aws-nitro-root-g1",
+      "tvcApplicationId": "8a2523d7-feb8-41ee-9587-c202048816ec",
+      "validFromMs": "1794002567218",
+      "version": 1
+    },
+    "signatures": [
+      {
+        "keyId": "private-wallet-mainnet-e9bb190-authority-1",
+        "signature": "df90ce9c1cb60cfd8ca445b6bebd64dac2a7f1e04a804692f0abee65062868a5619fd87153c0aea245e7e196bb34e8de833343fa5e07a0f4bf3d6b4bf238c7a6"
+      }
+    ]
+  },
+  "releaseAuthorities": {
+    "authoritySetId": "private-wallet-mainnet-e9bb190-2026-11",
+    "keys": [
+      {
+        "keyId": "private-wallet-mainnet-e9bb190-authority-1",
+        "publicKey": "042d7a4b5071d864112737f132a1c1b49457ffdc4256daba652c24bf6555d5d4e314dd6479db243786285860c66a849136068162c6cfd627a68e9977b8fe735681"
+      }
+    ],
+    "minimumRevocationEpoch": "0",
+    "threshold": 1
+  },
+  "qosIdentityPcrs": {
+    "0": "0f02ff921eb7189479dba97937eaa8c94e5297026d27fe47f277614d6f03d0ad9e31ddf6679a267d84730890bfefceb4",
+    "1": "0f02ff921eb7189479dba97937eaa8c94e5297026d27fe47f277614d6f03d0ad9e31ddf6679a267d84730890bfefceb4",
+    "2": "21b9efbc184807662e966d34f390821309eeac6802309798826296bf3e8bec7c10edb30948c90ba67310f7b964fc500a",
+    "3": "321c3cd57bd9dc5549f349c315b93167fca1adbaf19fbb9c548101bae757970fe269e530ba684826e2f5fb043319a20f"
+  }
+}

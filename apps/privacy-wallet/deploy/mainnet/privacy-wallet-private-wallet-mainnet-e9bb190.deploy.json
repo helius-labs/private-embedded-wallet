@@ -1,0 +1,12 @@
+{
+  "deployId": "3326ae4a-4453-43d1-991c-1ea6524aac84",
+  "approved": [
+    "a9346f7c-e66f-4ee2-9b02-312d8021af36",
+    "a17d5aa4-79d6-4a4b-9852-74ad4e3b13e3"
+  ],
+  "provisioned": [
+    "a9346f7c-e66f-4ee2-9b02-312d8021af36",
+    "a17d5aa4-79d6-4a4b-9852-74ad4e3b13e3"
+  ],
+  "live": true
+}
