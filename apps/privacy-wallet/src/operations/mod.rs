@@ -11,7 +11,8 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::http::{Response, StatusCode};
+use axum::http::Response;
+use axum::response::IntoResponse;
 use solana_pubkey::Pubkey;
 use zeroize::Zeroizing;
 use zolana_tvc_protocol::constants::{
@@ -22,16 +23,15 @@ use zolana_tvc_protocol::crypto::{parse_uncompressed_sec1, qos_encrypt, verify_p
 use zolana_tvc_protocol::digest::{descriptor_digest, request_digest, result_digest};
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
-    parse_encrypted_request, parse_operation_request, AppProof, EncryptedResponse, Environment,
-    FailureStage, Operation, OperationKind, OperationProofPayload, OperationRequest,
-    OperationResult,
+    parse_encrypted_request, parse_operation_request, AppProof, EncryptedResponse, FailureStage,
+    Operation, OperationKind, OperationProofPayload, OperationRequest, OperationResult,
 };
 use zolana_tvc_protocol::{client_key_id, verify_wallet_grant};
 
-use self::bindings::{check_encrypted_request_bindings, check_request_bindings, RunningEnclave};
+use self::bindings::{check_encrypted_request_bindings, check_request_bindings};
 use crate::custody::{CustodyError, WalletKey};
-use crate::http::{public_http_error, PublicError, PublicHttpResponse};
-use crate::{into_response, sign_ephemeral_low_s, AppState, Runtime};
+use crate::http::{self, PublicError};
+use crate::{sign_ephemeral_low_s, AppState};
 
 mod bindings;
 mod bootstrap;
@@ -41,6 +41,8 @@ mod sealed;
 #[cfg(test)]
 mod tests;
 
+#[cfg(any(test, feature = "local-dev"))]
+pub(crate) use prove::sign_policy;
 pub(crate) use prove::ProverTrust;
 
 /// Every operation this application serves. A descriptor grants the whole set.
@@ -68,8 +70,10 @@ const _: () = assert!(
 /// Who signs each network's prover policy, as zolana pins them in
 /// `sdk-libs/client/src/prover/tee/signers.json`: today one KMS key for both.
 /// A change here is a new release.
-pub(crate) const POLICY_SIGNERS: [&str; 1] =
-    ["1fe5d29c79064ea17a16308452040b799df8aeaaae588d44a527a8da9ffa924a"];
+pub(crate) const POLICY_SIGNERS: [[u8; 32]; 1] = [[
+    0x1f, 0xe5, 0xd2, 0x9c, 0x79, 0x06, 0x4e, 0xa1, 0x7a, 0x16, 0x30, 0x84, 0x52, 0x04, 0x0b, 0x79,
+    0x9d, 0xf8, 0xae, 0xaa, 0xae, 0x58, 0x8d, 0x44, 0xa5, 0x27, 0xa8, 0xda, 0x9f, 0xfa, 0x92, 0x4a,
+]];
 pub(crate) const POLICY_THRESHOLD: usize = 1;
 
 const fn eq(a: &str, b: &str) -> bool {
@@ -128,24 +132,17 @@ impl From<CustodyError> for Failure {
 
 pub(crate) async fn handle(state: &AppState, body: &[u8]) -> Response<Body> {
     match execute(state, body).await {
-        Ok(response) => into_response(PublicHttpResponse {
-            status: StatusCode::OK.as_u16(),
-            content_type: "application/json",
-            body: response.into_bytes(),
-        }),
-        Err(Failure::Invalid) => into_response(public_http_error(PublicError::InvalidRequest)),
-        Err(Failure::Unavailable | Failure::Stage(_)) => {
-            into_response(public_http_error(PublicError::Unavailable))
-        }
+        Ok(response) => http::ok(response),
+        Err(Failure::Invalid) => PublicError::InvalidRequest.into_response(),
+        Err(Failure::Unavailable | Failure::Stage(_)) => PublicError::Unavailable.into_response(),
     }
 }
 
 async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
-    let runtime = state.runtime.as_ref().ok_or(Failure::Unavailable)?;
+    let runtime = &state.runtime;
     let body = std::str::from_utf8(body).map_err(|_| Failure::Invalid)?;
     let encrypted = parse_encrypted_request(body).map_err(|_| Failure::Invalid)?;
-    let running = running_enclave(state);
-    check_encrypted_request_bindings(&encrypted, &running).map_err(|_| Failure::Invalid)?;
+    check_encrypted_request_bindings(&encrypted, &state.info).map_err(|_| Failure::Invalid)?;
 
     let plaintext = Zeroizing::new(
         runtime
@@ -158,7 +155,7 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
         return Err(Failure::Invalid);
     }
     let request = parse_operation_request(plaintext).map_err(|_| Failure::Invalid)?;
-    let wallet = validate(&request, &running, state, runtime)?;
+    let wallet = validate(&request, state)?;
     let grant = encrypted.wallet_grant.as_ref().ok_or(Failure::Invalid)?;
     verify_wallet_grant(
         grant,
@@ -257,34 +254,17 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
     .map_err(|_| Failure::Unavailable)
 }
 
-fn running_enclave(state: &AppState) -> RunningEnclave {
-    RunningEnclave {
-        release_id: state.info.release_id.clone(),
-        manifest_digest: state.info.manifest_digest,
-        executable_digest: state.info.executable_digest,
-        security_domain_id: state.info.security_domain_id,
-        quorum_key_id: state.info.quorum_key_id.clone(),
-        quorum_key_epoch: state.info.quorum_key_epoch,
-        environment: state.info.environment,
-    }
-}
-
 /// Binds the request to this release, checks its freshness, verifies the
 /// provisioner's signature over the descriptor and the client's signature over
 /// the request, and returns the Turnkey key the descriptor names.
-fn validate<'a>(
-    request: &'a OperationRequest,
-    running: &RunningEnclave,
-    state: &AppState,
-    runtime: &Runtime,
-) -> Result<WalletKey<'a>, Failure> {
-    check_request_bindings(request, running).map_err(|_| Failure::Invalid)?;
+fn validate<'a>(request: &'a OperationRequest, state: &AppState) -> Result<WalletKey<'a>, Failure> {
+    // Also refuses a production descriptor and an empty Turnkey wallet ID.
+    check_request_bindings(request, &state.info).map_err(|_| Failure::Invalid)?;
     let kind = request.operation.kind();
     // Bootstrap derives a fresh state; every other operation answers against
     // the presented one.
     let expects_seed = kind != OperationKind::Bootstrap;
-    if running.environment != Environment::Development
-        || !state.info.supported_operations.contains(&kind)
+    if !state.info.supported_operations.contains(&kind)
         || request.sealed_seed.is_some() != expects_seed
     {
         return Err(Failure::Invalid);
@@ -303,16 +283,14 @@ fn validate<'a>(
     let address = Pubkey::from_str(&descriptor.address).map_err(|_| Failure::Invalid)?;
     if descriptor.version != API_VERSION
         || !is_canonical_uuid(&descriptor.turnkey_organization_id)
-        || descriptor.turnkey_wallet_id.is_empty()
         || descriptor.turnkey_wallet_id.len() > 128
-        || descriptor.environment != Environment::Development
         || descriptor.allowed_clients.len() != 1
     {
         return Err(Failure::Invalid);
     }
     let digest = descriptor_digest(descriptor).map_err(|_| Failure::Invalid)?;
     verify_p256_prehash(
-        &runtime.provisioning_public,
+        &state.runtime.provisioning_public,
         &digest,
         &descriptor.provisioning_signature,
     )

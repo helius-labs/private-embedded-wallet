@@ -16,7 +16,7 @@ use std::sync::Arc;
 use axum::body::{to_bytes, Body};
 use axum::extract::State;
 use axum::http::header::CONTENT_TYPE;
-use axum::http::{Method, Request, Response, StatusCode};
+use axum::http::{Request, Response};
 use axum::response::IntoResponse;
 use axum::Router;
 use p256::ecdsa::Signature;
@@ -29,11 +29,11 @@ use zolana_tvc_protocol::constants::{
 };
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
-    parse_qos_ping_challenge, parse_qos_ping_request, AppProof, Environment, QosPingResponse,
-    ServiceInfo,
+    parse_qos_ping_challenge, parse_qos_ping_request, AppProof, Environment, HealthResponse,
+    HealthStatus, QosPingResponse, ServiceInfo,
 };
 
-use crate::http::{handle_public_http, public_http_error, PublicError, PublicHttpResponse};
+use crate::http::PublicError;
 
 mod custody;
 mod http;
@@ -59,6 +59,37 @@ pub struct DiscoveryConfig {
     pub quorum_key_epoch: u64,
 }
 
+impl DiscoveryConfig {
+    /// What `/v1/info` advertises for this release running under these QOS
+    /// keys.
+    fn service_info(
+        self,
+        manifest_digest: [u8; 32],
+        executable_digest: [u8; 32],
+        quorum: &P256Pair,
+        ephemeral: &P256Pair,
+    ) -> ServiceInfo {
+        let ephemeral_public_key = ephemeral.public_key().to_bytes();
+        ServiceInfo {
+            version: API_VERSION,
+            environment: Environment::Development,
+            security_domain_id: self.security_domain_id,
+            release_id: self.release_id,
+            manifest_digest,
+            executable_digest,
+            quorum_public_key: quorum.public_key().to_bytes(),
+            quorum_key_id: self.quorum_key_id,
+            quorum_key_epoch: self.quorum_key_epoch,
+            ephemeral_public_key: ephemeral_public_key.clone(),
+            supported_operations: OPERATIONS.to_vec(),
+            max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
+            max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
+            proof_type: TVC_APP_PROOF_TYPE.to_owned(),
+            boot_proof_lookup_key: ephemeral_public_key,
+        }
+    }
+}
+
 /// Everything a running enclave needs to answer an operation.
 struct Runtime {
     ephemeral: Arc<P256Pair>,
@@ -75,7 +106,7 @@ struct Runtime {
 #[derive(Clone)]
 pub struct AppState {
     info: Arc<ServiceInfo>,
-    runtime: Option<Arc<Runtime>>,
+    runtime: Arc<Runtime>,
 }
 
 impl AppState {
@@ -83,21 +114,14 @@ impl AppState {
         let quorum = Arc::new(quorum);
         Self {
             info: Arc::new(info),
-            runtime: Some(Arc::new(Runtime {
+            runtime: Arc::new(Runtime {
                 ephemeral: Arc::new(ephemeral),
                 custody: Arc::new(custody::TurnkeyCustody::new(Arc::clone(&quorum))),
                 quorum,
                 provisioning_public: operations::PROVISIONING_PUBLIC,
                 grant_public: operations::GRANT_PUBLIC,
                 prover: operations::ProverTrust::image(),
-            })),
-        }
-    }
-
-    pub fn unavailable(info: ServiceInfo) -> Self {
-        Self {
-            info: Arc::new(info),
-            runtime: None,
+            }),
         }
     }
 }
@@ -130,32 +154,13 @@ pub fn load_qos_state(config: DiscoveryConfig) -> io::Result<AppState> {
 
     let manifest_digest = envelope.manifest_hash();
     let executable_digest = *envelope.pivot_hash();
-    let quorum_public_key = quorum.public_key().to_bytes();
-    if envelope.manifest().namespace().quorum_key != quorum_public_key {
+    if envelope.manifest().namespace().quorum_key != quorum.public_key().to_bytes() {
         return Err(io::Error::other(
             "QOS quorum key does not match the approved manifest",
         ));
     }
 
-    let ephemeral_public_key = ephemeral.public_key().to_bytes();
-    let info = ServiceInfo {
-        version: API_VERSION,
-        environment: Environment::Development,
-        security_domain_id: config.security_domain_id,
-        release_id: config.release_id,
-        manifest_digest,
-        executable_digest,
-        quorum_public_key,
-        quorum_key_id: config.quorum_key_id,
-        quorum_key_epoch: config.quorum_key_epoch,
-        ephemeral_public_key: ephemeral_public_key.clone(),
-        supported_operations: OPERATIONS.to_vec(),
-        max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
-        max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
-        proof_type: TVC_APP_PROOF_TYPE.to_owned(),
-        boot_proof_lookup_key: ephemeral_public_key,
-    };
-
+    let info = config.service_info(manifest_digest, executable_digest, &quorum, &ephemeral);
     Ok(AppState::ready(info, ephemeral, quorum))
 }
 
@@ -163,6 +168,9 @@ pub fn router(state: AppState) -> Router {
     Router::new().fallback(dispatch).with_state(state)
 }
 
+/// `/v1/ping` and `/v1/operations` take JSON posts. `/health` is process
+/// readiness only and MUST NOT include release, key, or deployment
+/// identifiers; `/v1/info` is discovery data, not a trust root.
 async fn dispatch(State(state): State<AppState>, request: Request<Body>) -> Response<Body> {
     let (parts, body) = request.into_parts();
     let body_limit = usize::try_from(
@@ -173,31 +181,30 @@ async fn dispatch(State(state): State<AppState>, request: Request<Body>) -> Resp
     )
     .unwrap_or(usize::MAX);
     let Ok(body) = to_bytes(body, body_limit).await else {
-        return into_response(public_http_error(PublicError::RequestTooLarge));
+        return PublicError::RequestTooLarge.into_response();
     };
 
-    let path = parts.uri.path();
-    if path == "/v1/ping" || path == "/v1/operations" {
-        if parts.method != Method::POST {
-            return into_response(public_http_error(PublicError::MethodNotAllowed));
+    match (parts.method.as_str(), parts.uri.path()) {
+        ("POST", "/v1/ping" | "/v1/operations") if !has_json_content_type(&parts.headers) => {
+            PublicError::InvalidRequest.into_response()
         }
-        if !has_json_content_type(&parts.headers) {
-            return into_response(public_http_error(PublicError::InvalidRequest));
+        ("POST", "/v1/ping") => handle_ping(&state, &body),
+        ("POST", "/v1/operations") => operations::handle(&state, &body).await,
+        ("GET", "/health") => match jcs_serialize(&HealthResponse {
+            status: HealthStatus::Healthy,
+        }) {
+            Ok(body) => http::ok(body),
+            Err(_) => PublicError::Unavailable.into_response(),
+        },
+        ("GET", "/v1/info") => match jcs_serialize(&*state.info) {
+            Ok(body) => http::ok(body),
+            Err(_) => PublicError::InvalidRequest.into_response(),
+        },
+        (_, "/v1/ping" | "/v1/operations" | "/health" | "/v1/info") => {
+            PublicError::MethodNotAllowed.into_response()
         }
-        return if path == "/v1/ping" {
-            handle_ping(&state, &body)
-        } else {
-            operations::handle(&state, &body).await
-        };
+        _ => PublicError::NotFound.into_response(),
     }
-
-    into_response(handle_public_http(
-        parts.method.as_str(),
-        path,
-        &body,
-        state.runtime.is_some(),
-        &state.info,
-    ))
 }
 
 fn has_json_content_type(headers: &axum::http::HeaderMap) -> bool {
@@ -209,10 +216,8 @@ fn has_json_content_type(headers: &axum::http::HeaderMap) -> bool {
 }
 
 fn handle_ping(state: &AppState, body: &[u8]) -> Response<Body> {
-    let Some(runtime) = state.runtime.as_ref() else {
-        return into_response(public_http_error(PublicError::Unavailable));
-    };
-    let invalid = || into_response(public_http_error(PublicError::InvalidRequest));
+    let runtime = &state.runtime;
+    let invalid = || PublicError::InvalidRequest.into_response();
     let Ok(body) = std::str::from_utf8(body) else {
         return invalid();
     };
@@ -239,7 +244,7 @@ fn handle_ping(state: &AppState, body: &[u8]) -> Response<Body> {
     }
 
     let Ok(signature) = sign_ephemeral_low_s(&runtime.ephemeral, proof_payload.as_bytes()) else {
-        return into_response(public_http_error(PublicError::Unavailable));
+        return PublicError::Unavailable.into_response();
     };
     let response = QosPingResponse {
         version: API_VERSION,
@@ -250,14 +255,10 @@ fn handle_ping(state: &AppState, body: &[u8]) -> Response<Body> {
             signature,
         },
     };
-    let Ok(body) = jcs_serialize(&response) else {
-        return into_response(public_http_error(PublicError::Unavailable));
-    };
-    into_response(PublicHttpResponse {
-        status: StatusCode::OK.as_u16(),
-        content_type: "application/json",
-        body: body.into_bytes(),
-    })
+    match jcs_serialize(&response) {
+        Ok(body) => http::ok(body),
+        Err(_) => PublicError::Unavailable.into_response(),
+    }
 }
 
 fn sign_ephemeral_low_s(ephemeral: &P256Pair, message: &[u8]) -> Result<Vec<u8>, ()> {
@@ -265,16 +266,6 @@ fn sign_ephemeral_low_s(ephemeral: &P256Pair, message: &[u8]) -> Result<Vec<u8>,
     let signature = Signature::from_slice(&raw).map_err(|_| ())?;
     let normalized = signature.normalize_s().unwrap_or(signature);
     Ok(normalized.to_bytes().to_vec())
-}
-
-pub(crate) fn into_response(response: PublicHttpResponse) -> Response<Body> {
-    let status = StatusCode::from_u16(response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    (
-        status,
-        [(CONTENT_TYPE, response.content_type)],
-        response.body,
-    )
-        .into_response()
 }
 
 /// Resolves on SIGINT or SIGTERM, the signals QOS and a shell send.
@@ -291,36 +282,25 @@ pub async fn shutdown_signal() {
 mod tests {
     use axum::body::Body;
     use axum::http::Request;
+    use axum::http::StatusCode;
     use http_body_util::BodyExt as _;
     use tower::ServiceExt as _;
     use zeroize::Zeroizing;
     use zolana_tvc_protocol::constants::{QOS_P256_PUBLIC_LEN, RAW_P256_SIGNATURE_LEN};
     use zolana_tvc_protocol::crypto::{verify_p256_message, QosP256Public};
     use zolana_tvc_protocol::encoding::{jcs_serialize, parse_strict_json};
-    use zolana_tvc_protocol::types::{
-        Environment, QosPingChallenge, QosPingRequest, QosPingResponse,
-    };
+    use zolana_tvc_protocol::types::{QosPingChallenge, QosPingRequest, QosPingResponse};
 
     use super::*;
 
     fn info(quorum: &P256Pair, ephemeral: &P256Pair) -> ServiceInfo {
-        ServiceInfo {
-            version: API_VERSION,
-            environment: Environment::Development,
+        let config = DiscoveryConfig {
             security_domain_id: [0x11; 32],
             release_id: "tvc-pet-test".to_owned(),
-            manifest_digest: [0x22; 32],
-            executable_digest: [0x33; 32],
-            quorum_public_key: quorum.public_key().to_bytes(),
             quorum_key_id: "quorum-test".to_owned(),
             quorum_key_epoch: 1,
-            ephemeral_public_key: ephemeral.public_key().to_bytes(),
-            supported_operations: Vec::new(),
-            max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
-            max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
-            proof_type: TVC_APP_PROOF_TYPE.to_owned(),
-            boot_proof_lookup_key: ephemeral.public_key().to_bytes(),
-        }
+        };
+        config.service_info([0x22; 32], [0x33; 32], quorum, ephemeral)
     }
 
     async fn response_body(response: Response<Body>) -> String {
@@ -329,24 +309,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn health_is_exact_and_unavailable_is_generic() {
+    async fn health_is_exact() {
         let quorum = P256Pair::generate().unwrap();
         let ephemeral = P256Pair::generate().unwrap();
-        let service_info = info(&quorum, &ephemeral);
-
-        let response = router(AppState::ready(service_info.clone(), ephemeral, quorum))
-            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let response = router(AppState::ready(
+            info(&quorum, &ephemeral),
+            ephemeral,
+            quorum,
+        ))
+        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
         assert_eq!(response_body(response).await, r#"{"status":"Healthy"}"#);
-
-        let response = router(AppState::unavailable(service_info))
-            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(response_body(response).await, r#"{"error":"Unavailable"}"#);
     }
 
     #[tokio::test]

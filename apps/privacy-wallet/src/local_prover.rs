@@ -15,13 +15,13 @@ use axum::routing::get;
 use axum::Router;
 use serde_json::Value;
 use spr_prover_tee::{
-    seal_response, Anchors, FixtureProver, FreshnessSigners, NitroFixture, ReleasePayload,
-    SignedPolicyFile, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION,
+    seal_response, Anchors, FixtureProver, NitroFixture, SignedPolicyFile, ATTESTATION_PATH,
+    HEADER_ENC, HEADER_VERSION, VERSION,
 };
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
 
 use crate::local_dev::testkit_prover_keys;
-use crate::operations::NETWORK;
+use crate::operations::{sign_policy, NETWORK};
 
 /// Serves the signed policy the local enclave accepts, for the local client.
 pub const POLICY_PATH: &str = "/local/prover-policy";
@@ -50,25 +50,13 @@ impl LocalProver {
             .duration_since(UNIX_EPOCH)
             .expect("clock after 1970")
             .as_secs();
-        // A freshness key the release names, distinct from the release signer.
-        let mut seed = signer.to_bytes();
-        seed[0] ^= 0xff;
-        let freshness = ed25519_dalek::SigningKey::from_bytes(&seed);
-        let expires_at = epoch_secs + POLICY_LIFETIME_SECS;
-        let release = ReleasePayload {
-            network: NETWORK.to_owned(),
-            version: 1,
-            expires_at,
-            freshness: FreshnessSigners::of(std::slice::from_ref(&freshness), POLICY_LIFETIME_SECS),
-            policy: NitroFixture::at([0; 32], epoch_secs).policy().clone(),
-        };
-        let policy = SignedPolicyFile::sign(
-            &release,
-            std::slice::from_ref(&signer),
-            (epoch_secs, expires_at),
-            std::slice::from_ref(&freshness),
-        )
-        .expect("fixture policy");
+        let policy = sign_policy(
+            &signer,
+            NETWORK,
+            NitroFixture::at([0; 32], epoch_secs).policy().clone(),
+            epoch_secs,
+            epoch_secs + POLICY_LIFETIME_SECS,
+        );
         Self {
             prover,
             epoch_secs,

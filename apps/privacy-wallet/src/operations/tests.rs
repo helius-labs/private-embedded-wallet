@@ -3,16 +3,13 @@ use std::sync::Arc;
 use qos_p256::P256Pair;
 use spr_keypair::SigningKey;
 use spr_prover_tee::{
-    Anchors, FixtureProver, FreshnessSigners, NitroFixture, PolicySigners, ReleasePayload,
-    SignedPolicyFile, TeePolicy,
+    Anchors, FixtureProver, NitroFixture, PolicySigners, ReleasePayload, SignedPolicyFile,
+    TeePolicy,
 };
-use zolana_tvc_protocol::constants::{
-    API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, MAX_ENCRYPTED_RESPONSE_BYTES, MAX_PROVE_INPUTS,
-    TVC_APP_PROOF_TYPE,
-};
+use zolana_tvc_protocol::constants::{API_VERSION, MAX_PROVE_INPUTS};
 use zolana_tvc_protocol::types::{
     ClientAuthorization, ClientAuthorizationScheme, ClientGrant, DecryptItem, DecryptLabel,
-    DeriveItem, ProverSealing, ServiceInfo, TransactionKeyItem, WalletDescriptor,
+    DeriveItem, Environment, ProverSealing, TransactionKeyItem, WalletDescriptor,
 };
 
 use zolana_tvc_protocol::digest::sealed_seed_digest;
@@ -20,6 +17,7 @@ use zolana_tvc_protocol::digest::sealed_seed_digest;
 use super::sealed::{seal, unseal, Roles};
 use super::*;
 use crate::custody::TurnkeyCustody;
+use crate::{DiscoveryConfig, Runtime};
 
 /// A wallet key plus the seed its derivation message signs to.
 struct TestWallet {
@@ -119,21 +117,7 @@ fn signed_policy(
     policy: TeePolicy,
     expires_at: u64,
 ) -> serde_json::Value {
-    const FRESHNESS_SECS: u64 = 3_600;
-    // A freshness key the release names, distinct from its signer.
-    let mut seed = signer.to_bytes();
-    seed[0] ^= 0xff;
-    let freshness = ed25519_dalek::SigningKey::from_bytes(&seed);
-    let release = ReleasePayload {
-        network: network.to_owned(),
-        version: 1,
-        expires_at,
-        freshness: FreshnessSigners::of(std::slice::from_ref(&freshness), FRESHNESS_SECS),
-        policy,
-    };
-    let fresh = (expires_at.saturating_sub(FRESHNESS_SECS), expires_at);
-    let file = SignedPolicyFile::sign(&release, std::slice::from_ref(signer), fresh, &[freshness])
-        .expect("policy file");
+    let file = sign_policy(signer, network, policy, expires_at - 3_600, expires_at);
     serde_json::to_value(file).expect("policy file")
 }
 
@@ -596,17 +580,16 @@ fn prove_fills_only_the_open_secret_slots() {
     }
 }
 
-/// The image builds the signer set zolana pins for its network.
+/// The image builds the signer set zolana pins for its network, in
+/// `sdk-libs/client/src/prover/tee/signers.json`.
 #[test]
 fn the_image_trusts_the_networks_policy_signers() {
-    let image = ProverTrust::image();
-    let expected = PolicySigners::new(
-        NETWORK,
-        vec![hex::decode(POLICY_SIGNERS[0]).unwrap().try_into().unwrap()],
-        POLICY_THRESHOLD,
-    )
-    .unwrap();
-    assert_eq!(image.signers, expected);
+    assert_eq!(
+        POLICY_SIGNERS.map(hex::encode),
+        ["1fe5d29c79064ea17a16308452040b799df8aeaaae588d44a527a8da9ffa924a"]
+    );
+    let expected = PolicySigners::new(NETWORK, POLICY_SIGNERS.to_vec(), POLICY_THRESHOLD).unwrap();
+    assert_eq!(ProverTrust::image().signers, expected);
 }
 
 #[test]
@@ -716,36 +699,23 @@ fn prove_binds_only_the_route_of_the_requests_proving_key() {
     }
 }
 
-fn unavailable_state() -> AppState {
-    AppState::unavailable(ServiceInfo {
-        version: API_VERSION,
-        environment: Environment::Development,
-        security_domain_id: [0; 32],
-        release_id: "test".to_owned(),
-        manifest_digest: [0; 32],
-        executable_digest: [0; 32],
-        quorum_public_key: Vec::new(),
-        quorum_key_id: "quorum".to_owned(),
-        quorum_key_epoch: 1,
-        ephemeral_public_key: Vec::new(),
-        supported_operations: OPERATIONS.to_vec(),
-        max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
-        max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
-        proof_type: TVC_APP_PROOF_TYPE.to_owned(),
-        boot_proof_lookup_key: Vec::new(),
-    })
-}
-
-/// The release [`request`] is bound to.
-fn running() -> RunningEnclave {
-    RunningEnclave {
-        release_id: "test".to_owned(),
-        manifest_digest: [0x33; 32],
-        executable_digest: [0x44; 32],
+/// An enclave running the release [`request`] is bound to.
+fn state() -> AppState {
+    let runtime = runtime();
+    let config = DiscoveryConfig {
         security_domain_id: [0x11; 32],
+        release_id: "test".to_owned(),
         quorum_key_id: "quorum".to_owned(),
         quorum_key_epoch: 1,
-        environment: Environment::Development,
+    };
+    AppState {
+        info: Arc::new(config.service_info(
+            [0x33; 32],
+            [0x44; 32],
+            &runtime.quorum,
+            &runtime.ephemeral,
+        )),
+        runtime: Arc::new(runtime),
     }
 }
 
@@ -753,7 +723,7 @@ fn running() -> RunningEnclave {
 fn a_request_bound_to_another_release_or_quorum_key_is_refused() {
     use zolana_tvc_protocol::error::ErrorCode;
 
-    let running = running();
+    let running = state().info;
     let bound = request(derive_nothing(), descriptor([0x07; 32]));
     assert_eq!(check_request_bindings(&bound, &running), Ok(()));
     type Edit = fn(&mut OperationRequest);
@@ -795,15 +765,10 @@ fn a_request_bound_to_another_release_or_quorum_key_is_refused() {
 
 #[test]
 fn bootstrap_refuses_a_presented_state_and_the_rest_require_one() {
-    let runtime = runtime();
+    let state = state();
     let wallet = test_wallet();
-    let running = running();
-    let state = unavailable_state();
-    let with_state = sealed_request(&runtime, &wallet, Operation::Bootstrap);
-    assert_eq!(
-        failure(validate(&with_state, &running, &state, &runtime)),
-        Failure::Invalid
-    );
+    let with_state = sealed_request(&state.runtime, &wallet, Operation::Bootstrap);
+    assert_eq!(failure(validate(&with_state, &state)), Failure::Invalid);
     for operation in [
         derive_nothing(),
         Operation::Decrypt { items: Vec::new() },
@@ -814,10 +779,7 @@ fn bootstrap_refuses_a_presented_state_and_the_rest_require_one() {
         },
     ] {
         let without_state = request(operation, descriptor(wallet.public_key));
-        assert_eq!(
-            failure(validate(&without_state, &running, &state, &runtime)),
-            Failure::Invalid
-        );
+        assert_eq!(failure(validate(&without_state, &state)), Failure::Invalid);
     }
 }
 
@@ -833,6 +795,7 @@ fn organization_ids_must_be_canonical_uuids() {
 mod local {
     //! The whole encrypted path against the testkit's local custody.
 
+    use axum::http::StatusCode;
     use qos_p256::P256Pair;
     use serde::Deserialize;
     use spr_prover_tee::{decrypt_response, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION};

@@ -12,16 +12,14 @@ use ed25519_dalek::{Signer as _, SigningKey};
 use qos_p256::P256Pair;
 use serde::Deserialize;
 use spr_prover_tee::{Anchors, PolicySigners};
-use zolana_tvc_protocol::constants::{
-    API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, MAX_ENCRYPTED_RESPONSE_BYTES, TVC_APP_PROOF_TYPE,
-};
+use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::digest::sha256;
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
-use zolana_tvc_protocol::types::{Environment, OperationKind, ServiceInfo};
+use zolana_tvc_protocol::types::OperationKind;
 
 use crate::custody::{Custody, CustodyError, Evidence, RawSignature, WalletKey};
 use crate::operations::{ProverTrust, NETWORK};
-use crate::{AppState, Runtime, OPERATIONS};
+use crate::{AppState, DiscoveryConfig, Runtime, OPERATIONS};
 
 const TESTKIT_JSON: &str = include_str!("../../../packages/tvc-wallet/src/local-testkit.json");
 
@@ -138,27 +136,21 @@ pub fn local_unattested_state(
     prover: LocalProverTrust,
 ) -> AppState {
     let testkit = testkit();
-    let ephemeral_public_key = ephemeral.public_key().to_bytes();
-    let info = ServiceInfo {
-        version: API_VERSION,
-        environment: Environment::Development,
+    let config = DiscoveryConfig {
         security_domain_id: sha256(testkit.security_domain_label.as_bytes()),
         release_id: testkit.release_id.clone(),
-        manifest_digest: sha256(testkit.manifest_label.as_bytes()),
-        executable_digest: sha256(testkit.executable_label.as_bytes()),
-        quorum_public_key: quorum.public_key().to_bytes(),
         quorum_key_id: testkit.quorum_key_id.clone(),
         quorum_key_epoch: 1,
-        ephemeral_public_key: ephemeral_public_key.clone(),
-        supported_operations: testkit.operations.clone(),
-        max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
-        max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
-        proof_type: TVC_APP_PROOF_TYPE.to_owned(),
-        boot_proof_lookup_key: ephemeral_public_key,
     };
+    let info = config.service_info(
+        sha256(testkit.manifest_label.as_bytes()),
+        sha256(testkit.executable_label.as_bytes()),
+        &quorum,
+        &ephemeral,
+    );
     AppState {
         info: Arc::new(info),
-        runtime: Some(Arc::new(Runtime {
+        runtime: Arc::new(Runtime {
             ephemeral: Arc::new(ephemeral),
             quorum: Arc::new(quorum),
             custody: Arc::new(LocalCustody {
@@ -167,7 +159,7 @@ pub fn local_unattested_state(
             provisioning_public: public_of(&testkit.provisioning_private_key_hex),
             grant_public: public_of(&testkit.grant_private_key_hex),
             prover: prover.trust(),
-        })),
+        }),
     }
 }
 

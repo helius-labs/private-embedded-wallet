@@ -1,25 +1,14 @@
-//! Request bindings against the running enclave / independently accepted release.
+//! Request bindings against the running release, as `/v1/info` describes it.
 
 use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::error::{ErrorCode, TvcError};
 use zolana_tvc_protocol::types::{
-    reject_production_environment, EncryptedRequest, Environment, OperationRequest,
+    reject_production_environment, EncryptedRequest, OperationRequest, ServiceInfo,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunningEnclave {
-    pub release_id: String,
-    pub manifest_digest: [u8; 32],
-    pub executable_digest: [u8; 32],
-    pub security_domain_id: [u8; 32],
-    pub quorum_key_id: String,
-    pub quorum_key_epoch: u64,
-    pub environment: Environment,
-}
-
-pub fn check_encrypted_request_bindings(
+pub(super) fn check_encrypted_request_bindings(
     outer: &EncryptedRequest,
-    running: &RunningEnclave,
+    running: &ServiceInfo,
 ) -> Result<(), TvcError> {
     if outer.version != API_VERSION {
         return Err(TvcError::new(ErrorCode::UnsupportedVersion));
@@ -33,9 +22,9 @@ pub fn check_encrypted_request_bindings(
     Ok(())
 }
 
-pub fn check_request_bindings(
+pub(super) fn check_request_bindings(
     request: &OperationRequest,
-    running: &RunningEnclave,
+    running: &ServiceInfo,
 ) -> Result<(), TvcError> {
     if request.version != API_VERSION {
         return Err(TvcError::new(ErrorCode::UnsupportedVersion));
