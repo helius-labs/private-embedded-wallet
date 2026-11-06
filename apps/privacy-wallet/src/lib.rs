@@ -29,14 +29,15 @@ use zolana_tvc_protocol::constants::{
 };
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
-    parse_qos_ping_challenge, parse_qos_ping_request, AppProof, Environment, HealthResponse,
-    HealthStatus, QosPingResponse, ServiceInfo,
+    parse_qos_ping_challenge, parse_qos_ping_request, AppProof, HealthResponse, HealthStatus,
+    QosPingResponse, ServiceInfo,
 };
 
 use crate::http::PublicError;
 
 mod custody;
 mod http;
+mod network;
 mod operations;
 mod turnkey;
 
@@ -49,7 +50,8 @@ pub use local_dev::{local_testkit_qos_seeds, local_unattested_state, LocalProver
 #[cfg(feature = "local-dev")]
 pub use local_prover::{LocalProver, POLICY_PATH};
 
-pub use operations::{NETWORK, OPERATIONS};
+pub use network::{Net, NET};
+pub use operations::OPERATIONS;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveryConfig {
@@ -69,10 +71,9 @@ impl DiscoveryConfig {
         quorum: &P256Pair,
         ephemeral: &P256Pair,
     ) -> ServiceInfo {
-        let ephemeral_public_key = ephemeral.public_key().to_bytes();
         ServiceInfo {
             version: API_VERSION,
-            environment: Environment::Development,
+            network: NET.network,
             security_domain_id: self.security_domain_id,
             release_id: self.release_id,
             manifest_digest,
@@ -80,12 +81,11 @@ impl DiscoveryConfig {
             quorum_public_key: quorum.public_key().to_bytes(),
             quorum_key_id: self.quorum_key_id,
             quorum_key_epoch: self.quorum_key_epoch,
-            ephemeral_public_key: ephemeral_public_key.clone(),
+            ephemeral_public_key: ephemeral.public_key().to_bytes(),
             supported_operations: OPERATIONS.to_vec(),
             max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
             max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
             proof_type: TVC_APP_PROOF_TYPE.to_owned(),
-            boot_proof_lookup_key: ephemeral_public_key,
         }
     }
 }
@@ -118,8 +118,8 @@ impl AppState {
                 ephemeral: Arc::new(ephemeral),
                 custody: Arc::new(custody::TurnkeyCustody::new(Arc::clone(&quorum))),
                 quorum,
-                provisioning_public: operations::PROVISIONING_PUBLIC,
-                grant_public: operations::GRANT_PUBLIC,
+                provisioning_public: NET.provisioning,
+                grant_public: NET.grant,
                 prover: operations::ProverTrust::image(),
             }),
         }
@@ -329,6 +329,7 @@ mod tests {
     async fn info_is_untrusted_discovery_bound_to_runtime_public_keys() {
         let quorum = P256Pair::generate().unwrap();
         let ephemeral = P256Pair::generate().unwrap();
+        let ephemeral_public_key = ephemeral.public_key().to_bytes();
         let expected = info(&quorum, &ephemeral);
         let response = router(AppState::ready(expected.clone(), ephemeral, quorum))
             .oneshot(Request::get("/v1/info").body(Body::empty()).unwrap())
@@ -338,7 +339,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let actual: ServiceInfo = parse_strict_json(&response_body(response).await).unwrap();
         assert_eq!(actual, expected);
-        assert_eq!(actual.boot_proof_lookup_key, actual.ephemeral_public_key);
+        assert_eq!(actual.network, NET.network);
+        assert_eq!(actual.ephemeral_public_key, ephemeral_public_key);
     }
 
     #[tokio::test]

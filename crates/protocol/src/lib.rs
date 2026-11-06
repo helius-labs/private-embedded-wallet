@@ -24,11 +24,10 @@ pub use release::{
     PinnedReleaseAuthorities, ReleaseAuthorityKey,
 };
 pub use types::{
-    AppProof, ClientAuthorization, ClientAuthorizationScheme, ClientGrant, DecryptItem,
-    DecryptLabel, DeriveItem, EncryptedRequest, EncryptedResponse, Environment, FailureStage,
-    HealthResponse, HealthStatus, Operation, OperationKind, OperationProofPayload,
-    OperationRequest, OperationResult, ProverSealing, QosPingChallenge, QosPingRequest,
-    QosPingResponse, ReleaseAuthoritySignature, ReleasePolicy, SealedProverRequest, SealedSeed,
-    ServiceInfo, SignedReleasePolicy, TransactionKeyItem, TurnkeyAppProof, WalletDescriptor,
-    WalletGrant,
+    AppProof, ClientAuthorization, ClientGrant, DecryptItem, DecryptLabel, DeriveItem,
+    EncryptedRequest, EncryptedResponse, FailureStage, HealthResponse, HealthStatus, Network,
+    Operation, OperationKind, OperationProofPayload, OperationRequest, OperationResult,
+    ProverSealing, QosPingChallenge, QosPingRequest, QosPingResponse, ReleaseAuthoritySignature,
+    ReleasePolicy, SealedProverRequest, SealedSeed, ServiceInfo, SignedReleasePolicy,
+    TransactionKeyItem, WalletDescriptor, WalletGrant,
 };

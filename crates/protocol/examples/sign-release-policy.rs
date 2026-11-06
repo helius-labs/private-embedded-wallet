@@ -13,10 +13,10 @@
 //! pins. The output is the two objects a client needs: the signed policy and
 //! the pinned authority set.
 //!
-//! `--local-testkit` signs a policy for the unattested local testkit
+//! `--local-testkit` signs a devnet policy for the unattested local testkit
 //! (`packages/tvc-wallet/src/local-testkit.json`), valid for 30 days, and
-//! writes `<out-dir>/release-policy.json` and
-//! `<out-dir>/release-authorities.json` for a local gateway. Never deploy it.
+//! writes `<out-dir>/release.json`, the release file a local gateway reads
+//! (`{releasePolicy, releaseAuthorities}`). Never deploy it.
 //!
 //! The signing key is generated here, used once, and never written anywhere.
 //! That is the property being bought: a policy cannot be quietly re-signed
@@ -45,8 +45,7 @@ use zolana_tvc_protocol::release::{
     ReleaseAuthorityKey,
 };
 use zolana_tvc_protocol::types::{
-    ClientAuthorizationScheme, Environment, OperationKind, ReleaseAuthoritySignature,
-    ReleasePolicy, SignedReleasePolicy,
+    Network, OperationKind, ReleaseAuthoritySignature, ReleasePolicy, SignedReleasePolicy,
 };
 
 const LOCAL_TESTKIT: &str = include_str!("../../../packages/tvc-wallet/src/local-testkit.json");
@@ -87,7 +86,6 @@ fn sign(
         authority_set_id: authority_set_id.clone(),
         signatures: vec![ReleaseAuthoritySignature {
             key_id: key_id.clone(),
-            scheme: ClientAuthorizationScheme::P256Sha256,
             signature: signature.to_vec(),
         }],
     };
@@ -102,7 +100,8 @@ fn sign(
     };
     // Verify before handing it out. The private half is gone the moment this
     // returns, so an output that does not verify could never be repaired.
-    verify_signed_release_policy(&signed, &authorities, signed.policy.valid_from_ms)
+    let network = signed.policy.network;
+    verify_signed_release_policy(&signed, &authorities, network, signed.policy.valid_from_ms)
         .map_err(|error| format!("signed policy failed its own verification: {error:?}"))?;
     Ok((signed, authorities))
 }
@@ -131,7 +130,7 @@ fn local_testkit_policy() -> Result<ReleasePolicy, String> {
     Ok(ReleasePolicy {
         version: API_VERSION,
         release_id: testkit.release_id,
-        environment: Environment::Development,
+        network: Network::Devnet,
         tvc_application_id: "local-testkit".to_owned(),
         security_domain_id: sha256(testkit.security_domain_label.as_bytes()),
         accepted_manifest_digests: vec![hex::encode(sha256(testkit.manifest_label.as_bytes()))],
@@ -156,6 +155,17 @@ fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> 
     fs::write(path, json).map_err(|error| format!("{}: {error}", path.display()))
 }
 
+/// The signed policy and its authority set, as a release file holds them.
+fn release_file(
+    signed: &SignedReleasePolicy,
+    authorities: &PinnedReleaseAuthorities,
+) -> serde_json::Value {
+    serde_json::json!({
+        "releasePolicy": signed,
+        "releaseAuthorities": authorities,
+    })
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
@@ -163,8 +173,10 @@ fn run() -> Result<(), String> {
             let (signed, authorities) = sign(local_testkit_policy()?, "local-testkit".to_owned())?;
             let out_dir = Path::new(out_dir);
             fs::create_dir_all(out_dir).map_err(|error| error.to_string())?;
-            write_json(&out_dir.join("release-policy.json"), &signed)?;
-            write_json(&out_dir.join("release-authorities.json"), &authorities)
+            write_json(
+                &out_dir.join("release.json"),
+                &release_file(&signed, &authorities),
+            )
         }
         [path, authority_set_id, ..] => {
             let policy: ReleasePolicy = serde_json::from_str(
@@ -172,11 +184,8 @@ fn run() -> Result<(), String> {
             )
             .map_err(|error| format!("{path}: {error}"))?;
             let (signed, authorities) = sign(policy, authority_set_id.clone())?;
-            let output = serde_json::to_string_pretty(&serde_json::json!({
-                "releasePolicy": signed,
-                "releaseAuthorities": authorities,
-            }))
-            .map_err(|error| error.to_string())?;
+            let output = serde_json::to_string_pretty(&release_file(&signed, &authorities))
+                .map_err(|error| error.to_string())?;
             println!("{output}");
             Ok(())
         }

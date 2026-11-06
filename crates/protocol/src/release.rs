@@ -2,7 +2,8 @@
 //!
 //! Signatures cover `RELEASE_POLICY_DOMAIN || 0x00 || JCS(policy)` with
 //! 64-byte raw low-S P-256. Empty signatures fail closed. Duplicate and
-//! unknown key IDs do not count toward the threshold.
+//! unknown key IDs do not count toward the threshold. A policy verifies only
+//! for the network its verifier expects.
 
 use std::collections::{HashMap, HashSet};
 
@@ -13,7 +14,7 @@ use crate::crypto::{sign_p256_prehash, verify_p256_prehash};
 use crate::digest::release_policy_digest;
 use crate::encoding::{decimal_u64, hex, jcs_serialize};
 use crate::error::{ErrorCode, TvcError};
-use crate::types::{ClientAuthorizationScheme, ReleasePolicy, SignedReleasePolicy};
+use crate::types::{Network, ReleasePolicy, SignedReleasePolicy};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -49,12 +50,15 @@ pub fn sign_release_policy(
 pub fn verify_signed_release_policy(
     signed: &SignedReleasePolicy,
     authorities: &PinnedReleaseAuthorities,
+    network: Network,
     now_ms: u64,
 ) -> Result<(), TvcError> {
     if signed.policy.version != API_VERSION {
         return Err(TvcError::new(ErrorCode::UnsupportedVersion));
     }
-    crate::types::reject_production_environment(signed.policy.environment)?;
+    if signed.policy.network != network {
+        return Err(TvcError::new(ErrorCode::NetworkMismatch));
+    }
     if authorities.threshold == 0 || authorities.keys.is_empty() {
         return Err(TvcError::new(ErrorCode::ReleasePolicyInvalid));
     }
@@ -101,9 +105,6 @@ pub fn verify_signed_release_policy(
         let Some(public) = by_id.get(signature.key_id.as_str()) else {
             continue;
         };
-        if signature.scheme != ClientAuthorizationScheme::P256Sha256 {
-            return Err(TvcError::new(ErrorCode::InvalidSignature));
-        }
         verify_p256_prehash(public, &digest, &signature.signature)?;
         accepted = accepted
             .checked_add(1)

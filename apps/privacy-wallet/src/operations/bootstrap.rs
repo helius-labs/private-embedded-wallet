@@ -31,8 +31,7 @@ pub(super) async fn run(
             shielded_nullifier_public_key: address.nullifier_pubkey,
             shielded_viewing_public_key: address.viewing_pubkey.as_bytes().to_vec(),
             sealed_seed,
-            turnkey_activity_id: signed.evidence.activity_id,
-            turnkey_app_proofs: signed.evidence.app_proofs,
+            turnkey_activity_id: signed.activity_id,
         },
         digest,
     ))

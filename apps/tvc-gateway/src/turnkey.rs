@@ -22,7 +22,8 @@ const MAX_CONCURRENT_TURNKEY_CALLS: usize = 32;
 const WALLET_ACCOUNTS_PAGE: &str = "100";
 const BOOT_PROOF_CACHE_CAPACITY: usize = 256;
 const OWNERSHIP_CACHE_CAPACITY: usize = 100_000;
-/// `boot_proof_lookup_key` from `/v1/info`: 130 bytes, lowercase hex.
+/// A replica's ephemeral key, which signs its answers and names its Boot
+/// Proof: 130 bytes, lowercase hex.
 const EPHEMERAL_KEY_HEX_LEN: usize = 260;
 const TURNKEY_PRIVATE_KEY_HEX_LEN: usize = 64;
 const TURNKEY_PUBLIC_KEY_HEX_LEN: usize = 66;
@@ -333,7 +334,6 @@ mod tests {
         TurnkeyConfig {
             api_base_url: "http://127.0.0.1:9".to_owned(),
             tvc_organization_id: "00000000-0000-4000-8000-000000000001".to_owned(),
-            waas_parent_organization_id: "00000000-0000-4000-8000-000000000002".to_owned(),
             boot_proof_api_key: key.clone(),
             waas_api_key: key,
             ownership_cache_secs: 600,

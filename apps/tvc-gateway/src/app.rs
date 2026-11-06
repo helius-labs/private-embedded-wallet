@@ -52,8 +52,8 @@ impl AppState {
             api_keys: ApiKeys::new(&config.dev_api)?,
             enclave: Enclave::new(config.enclave.clone())?,
             turnkey: Turnkey::new(&config.turnkey)?,
-            provisioner: Provisioner::new(&config.provisioning)?,
-            enrollment: Enrollment::new(&config.enrollment.domains),
+            provisioner: Provisioner::new(&config.provisioning, config.network)?,
+            enrollment: Enrollment::new(config.network, &config.enrollment.domains),
             wallet_grants: WalletGrants::new(&config.wallet_grant)?,
             limiter: InFlightLimiter::new(config.enclave.max_in_flight_per_project),
             replay: ReplayLedger::connect(
@@ -210,7 +210,9 @@ pub(crate) async fn enroll(
     Caller(project): Caller,
     ApiJson(request): ApiJson<EnrollmentRequest>,
 ) -> Result<Json<Enrolled>, ApiError> {
-    let input = state.enrollment.verify(&request, clock_ms()?)?;
+    let now_ms = clock_ms()?;
+    state.provisioner.check_current(now_ms)?;
+    let input = state.enrollment.verify(&request, now_ms)?;
     state
         .wallet_grants
         .check_client_key(&input.client_public_key)?;
@@ -388,7 +390,7 @@ mod tests {
             enclave,
             turnkey: Turnkey::for_tests(UNREACHABLE),
             provisioner: crate::provisioner::tests::provisioner(),
-            enrollment: Enrollment::new(&[crate::enrollment::tests::DOMAIN.to_owned()]),
+            enrollment: crate::enrollment::tests::enrollment(&[crate::enrollment::tests::DOMAIN]),
             wallet_grants: crate::wallet_grant::tests::grants(Vec::new()),
             limiter: InFlightLimiter::new(4),
             replay: ReplayLedger::Local(LocalLedger::new(Duration::from_secs(360), 1_000)),
@@ -439,7 +441,7 @@ mod tests {
         serde_json::json!({
             "descriptor": descriptor,
             "request": {
-                "version": 1,
+                "version": zolana_tvc_protocol::constants::API_VERSION,
                 "quorum_key_id": "q",
                 "quorum_key_epoch": "1",
                 "ciphertext": ciphertext,

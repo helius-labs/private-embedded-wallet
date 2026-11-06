@@ -15,14 +15,18 @@ Routes:
 Module map: `operations/` (request validation, `bootstrap.rs`, `keys.rs` for
 the three derivation operations, `prove.rs` for completing a prover request
 and sealing it to an attested prover, `sealed.rs` for the sealed seed),
-`custody.rs` (Turnkey signing of the derivation message behind one trait),
+`network.rs` (what the image trusts on each network), `custody.rs` (Turnkey
+signing of the derivation message behind one trait),
 `turnkey.rs` (Turnkey API stamping with the Quorum signing subkey),
 `local_dev.rs` and `local_prover.rs` (testkit, `local-dev` feature only).
 
 The only network origin is Turnkey, compiled in. A proof's witness is sealed to
 a prover the network's signed prover policy admits and posted by the client.
 The network is fixed at build time by `SPR_NETWORK` (`devnet`, the default for
-local builds, or `mainnet`); the image pins that network's policy signers.
+local builds, or `mainnet`), which picks one entry of `network.rs`: the
+network `/v1/info` names and descriptors must name, the provisioning and
+wallet-grant public keys of that network's tvc-gateway, and the network's
+prover policy signers.
 
 ## Build
 

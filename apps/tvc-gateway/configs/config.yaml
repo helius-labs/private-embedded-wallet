@@ -1,3 +1,5 @@
+# Settings every network shares. Run with one network's overlay beside this
+# file, `--config configs/devnet.yaml` or `--config configs/mainnet.yaml`.
 # Secrets come from the environment:
 #   TVC_GATEWAY_ORIGIN_AUTH_HEADER
 #   TVC_GATEWAY_PROVISIONING__PRIVATE_KEY
@@ -13,7 +15,6 @@ dev_api:
     base_url: https://dev-api.helius.xyz/v0
     project_cache_secs: 300
 enclave:
-    base_url: https://app-4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39.app.turnkey.cloud
     request_timeout_ms: 55000
     max_body_bytes: 524288
     max_in_flight_per_project: 16
@@ -21,18 +22,7 @@ enclave:
     replay_max_entries: 200000
 turnkey:
     api_base_url: https://api.turnkey.com
-    tvc_organization_id: 9b98a0d8-04a4-47a3-9dc3-afa84c686de4
-    waas_parent_organization_id: 9b98a0d8-04a4-47a3-9dc3-afa84c686de4
     ownership_cache_secs: 600
-provisioning:
-    expected_public_key: 046e852f2eb1bc79e2ed3cdb57fa7e2f75720fe53032f6aedcfbdfceb67f635691540564e208ca675f4d8b33291aa1388a0067dadc4f1d04519aab320bbd2cce64
-    release_policy_path: configs/release-policy.json
-    release_authorities_path: configs/release-authorities.json
 wallet_grant:
-    expected_public_key: 04d92dfa9ba9aafd471ff9ffbf454b9a11b14858a8c2edb4f79a4ea4b4dba8ca5cac9ec06d9bb5576db72d07e087ac6aadf72e4eb31323aafaf9dbd133d26f4dc7
     ttl_secs: 120
     revoked_client_key_ids: []
-enrollment:
-    domains:
-        - devnet.helius-rpc.com
-        - beta-devnet.helius-rpc.com

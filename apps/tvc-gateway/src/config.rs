@@ -1,8 +1,10 @@
-//! Service configuration: YAML file with `TVC_GATEWAY_` env overrides
-//! (nested fields split on `__`, e.g. `TVC_GATEWAY_PROVISIONING__PRIVATE_KEY`).
+//! Service configuration: the shared `config.yaml`, then one network's
+//! overlay (`devnet.yaml` or `mainnet.yaml` beside it), then `TVC_GATEWAY_`
+//! env overrides (nested fields split on `__`, e.g.
+//! `TVC_GATEWAY_PROVISIONING__PRIVATE_KEY`).
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use figment::Figment;
@@ -11,6 +13,10 @@ use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use serde::Deserialize;
 use zeroize::Zeroizing;
+use zolana_tvc_protocol::Network;
+
+/// The shared settings every network overlay sits on, in the overlay's directory.
+pub const BASE_FILE: &str = "config.yaml";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -22,6 +28,8 @@ pub enum Stage {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// The network this gateway serves; its release file must be for it too.
+    pub network: Network,
     pub stage: Stage,
     pub listen: SocketAddr,
     pub metrics: MetricsConfig,
@@ -81,11 +89,12 @@ pub struct EnclaveConfig {
 #[serde(deny_unknown_fields)]
 pub struct TurnkeyConfig {
     pub api_base_url: String,
-    /// Organization that owns the TVC application; Boot Proofs are read here.
+    /// Organization that owns the network's TVC application; Boot Proofs are
+    /// read here.
     pub tvc_organization_id: String,
-    /// Helius WaaS organization; every end-user wallet is in one of its sub-orgs.
-    pub waas_parent_organization_id: String,
     pub boot_proof_api_key: TurnkeyApiKey,
+    /// A key in the Helius WaaS organization, whose sub-orgs hold every
+    /// end-user wallet.
     pub waas_api_key: TurnkeyApiKey,
     pub ownership_cache_secs: u64,
 }
@@ -104,10 +113,10 @@ pub struct ProvisioningConfig {
     pub private_key: String,
     /// Uncompressed SEC1 hex of the key the enclave is built with.
     pub expected_public_key: String,
-    /// `SignedReleasePolicy` JSON the clients pin.
-    pub release_policy_path: PathBuf,
-    /// `PinnedReleaseAuthorities` JSON the policy must verify against.
-    pub release_authorities_path: PathBuf,
+    /// The network's release file, as clients pin it: the signed release
+    /// policy descriptors are issued under and the authority set it verifies
+    /// against. Relative to the working directory.
+    pub release_path: PathBuf,
 }
 
 #[derive(Clone, Deserialize)]
@@ -152,13 +161,26 @@ pub fn public_key_of(secret: &[u8; 32]) -> anyhow::Result<[u8; 65]> {
     Ok(point.as_bytes().try_into()?)
 }
 
-pub fn load(path: &str) -> anyhow::Result<Config> {
-    let config: Config = Figment::new()
-        .merge(Yaml::file(path))
+/// The shared config and the network overlay at `overlay`, such as
+/// `configs/devnet.yaml`, under the environment.
+pub fn load(overlay: &Path) -> anyhow::Result<Config> {
+    let config: Config = files(overlay)?
         .merge(Env::prefixed("TVC_GATEWAY_").split("__"))
         .extract()?;
     config.validate()?;
     Ok(config)
+}
+
+/// `config.yaml` beside `overlay`, then `overlay`. Both must exist.
+fn files(overlay: &Path) -> anyhow::Result<Figment> {
+    anyhow::ensure!(
+        overlay.file_name().is_some_and(|name| name != BASE_FILE),
+        "--config names a network overlay, such as configs/devnet.yaml, not {}",
+        overlay.display()
+    );
+    Ok(Figment::new()
+        .merge(Yaml::file_exact(overlay.with_file_name(BASE_FILE)))
+        .merge(Yaml::file_exact(overlay)))
 }
 
 impl Config {
@@ -166,6 +188,20 @@ impl Config {
         anyhow::ensure!(
             self.origin_auth_header.len() >= MIN_SECRET_LEN,
             "origin_auth_header must be at least {MIN_SECRET_LEN} bytes"
+        );
+        anyhow::ensure!(
+            ["https://", "http://"]
+                .iter()
+                .any(|scheme| self.enclave.base_url.starts_with(scheme)),
+            "enclave.base_url must be the {} enclave's URL, not {:?}",
+            self.network,
+            self.enclave.base_url
+        );
+        anyhow::ensure!(
+            is_canonical_uuid(&self.turnkey.tvc_organization_id),
+            "turnkey.tvc_organization_id must be the {} TVC application's organization, not {:?}",
+            self.network,
+            self.turnkey.tvc_organization_id
         );
         anyhow::ensure!(
             !self.enclave.base_url.ends_with('/'),
@@ -194,13 +230,29 @@ impl Config {
     }
 }
 
+/// A lowercase hyphenated UUID, as Turnkey writes its IDs.
+pub fn is_canonical_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => matches!(byte, b'0'..=b'9' | b'a'..=b'f'),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use figment::providers::Serialized;
 
     use super::*;
 
-    fn committed_config_with(origin_auth_header: &str) -> anyhow::Result<Config> {
+    /// A committed network overlay with the secrets the environment supplies
+    /// and `environment` on top, as a deployment loads it.
+    fn committed_config(
+        overlay: &str,
+        origin_auth_header: &str,
+        environment: serde_json::Value,
+    ) -> anyhow::Result<Config> {
         let secrets = serde_json::json!({
             "origin_auth_header": origin_auth_header,
             "provisioning": { "private_key": "11".repeat(32) },
@@ -210,21 +262,92 @@ mod tests {
                 "waas_api_key": { "public_key": "02", "private_key": "01" },
             },
         });
-        let config: Config = Figment::new()
-            .merge(Yaml::file("configs/config.yaml"))
+        let config: Config = files(Path::new(overlay))?
             .merge(Serialized::defaults(secrets))
+            .merge(Serialized::defaults(environment))
             .extract()?;
         config.validate()?;
         Ok(config)
     }
 
+    fn devnet_config_with(origin_auth_header: &str) -> anyhow::Result<Config> {
+        committed_config(
+            "configs/devnet.yaml",
+            origin_auth_header,
+            serde_json::json!({}),
+        )
+    }
+
     #[test]
-    fn the_committed_config_enrolls_at_both_gatekeeper_hosts() {
+    fn the_devnet_overlay_serves_devnet_at_both_gatekeeper_hosts() {
         let config =
-            committed_config_with(&"a".repeat(MIN_SECRET_LEN)).expect("the committed config loads");
+            devnet_config_with(&"a".repeat(MIN_SECRET_LEN)).expect("the committed config loads");
+        assert_eq!(config.network, Network::Devnet);
         assert_eq!(
             config.enrollment.domains,
             ["devnet.helius-rpc.com", "beta-devnet.helius-rpc.com"]
+        );
+        assert_eq!(
+            config.provisioning.release_path,
+            Path::new("releases/devnet.json")
+        );
+        assert_eq!(
+            config.provisioning.expected_public_key,
+            "046e852f2eb1bc79e2ed3cdb57fa7e2f75720fe53032f6aedcfbdfceb67f635691540564e208ca675f4d8b33291aa1388a0067dadc4f1d04519aab320bbd2cce64"
+        );
+        assert_eq!(
+            config.wallet_grant.expected_public_key,
+            "04d92dfa9ba9aafd471ff9ffbf454b9a11b14858a8c2edb4f79a4ea4b4dba8ca5cac9ec06d9bb5576db72d07e087ac6aadf72e4eb31323aafaf9dbd133d26f4dc7"
+        );
+    }
+
+    /// Mainnet has no Turnkey application yet: its overlay refuses to start
+    /// until the enclave URL and organization are filled in.
+    #[test]
+    fn the_mainnet_overlay_needs_its_turnkey_application() {
+        let secret = "a".repeat(MIN_SECRET_LEN);
+        let error = committed_config("configs/mainnet.yaml", &secret, serde_json::json!({}))
+            .err()
+            .expect("the mainnet overlay starts without an enclave");
+        assert!(
+            error
+                .to_string()
+                .starts_with("enclave.base_url must be the mainnet enclave's URL"),
+            "{error}"
+        );
+        let filled = serde_json::json!({
+            "enclave": { "base_url": "https://app-mainnet.example" },
+            "turnkey": { "tvc_organization_id": "00000000-0000-4000-8000-000000000001" },
+        });
+        let config = committed_config("configs/mainnet.yaml", &secret, filled)
+            .expect("the filled-in mainnet overlay loads");
+        assert_eq!(config.network, Network::Mainnet);
+        assert_eq!(
+            config.enrollment.domains,
+            ["mainnet.helius-rpc.com", "beta-mainnet.helius-rpc.com"]
+        );
+        assert_eq!(
+            config.provisioning.release_path,
+            Path::new("releases/mainnet.json")
+        );
+        assert_eq!(
+            config.provisioning.expected_public_key,
+            "04f87ca34fcd2b78f57321c662a66395e400744a1951655ed77fbd1482a84e7590359b5f9b157a84489db68b02984c90b641a05deec3cdfd67dd990aecc89a58e0"
+        );
+        assert_eq!(
+            config.wallet_grant.expected_public_key,
+            "048929b53b1b9d0b22be43a306583cdb9233e48da9e260cde61c6f93ceb1e5ea43973c01057c98779d47c03e5a5ed8e2ed1e0bc3d9685bc6deea2474d44fd57d5d"
+        );
+    }
+
+    #[test]
+    fn the_shared_config_alone_is_not_a_network() {
+        let error = files(Path::new("configs/config.yaml"))
+            .expect_err("the shared config loads as an overlay");
+        assert!(error.to_string().contains("network overlay"), "{error}");
+        assert!(
+            committed_config("configs/testnet.yaml", "", serde_json::json!({})).is_err(),
+            "a missing overlay loads"
         );
     }
 
@@ -253,8 +376,8 @@ mod tests {
 
     #[test]
     fn the_committed_config_requires_a_full_length_origin_secret() {
-        assert!(committed_config_with(&"a".repeat(MIN_SECRET_LEN)).is_ok());
-        assert!(committed_config_with("").is_err());
-        assert!(committed_config_with("Bearer short").is_err());
+        assert!(devnet_config_with(&"a".repeat(MIN_SECRET_LEN)).is_ok());
+        assert!(devnet_config_with("").is_err());
+        assert!(devnet_config_with("Bearer short").is_err());
     }
 }

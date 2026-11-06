@@ -1,19 +1,31 @@
 use std::fs;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
+use serde::Deserialize;
 use zeroize::Zeroizing;
 use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::crypto::{sign_p256_prehash, verify_p256_prehash};
 use zolana_tvc_protocol::digest::descriptor_digest;
 use zolana_tvc_protocol::{
-    ClientGrant, PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy, WalletDescriptor,
-    verify_signed_release_policy,
+    ClientGrant, ErrorCode, Network, PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy,
+    WalletDescriptor, verify_signed_release_policy,
 };
 
 use crate::config::{ProvisioningConfig, load_signing_key};
 use crate::enrollment::EnrollmentInput;
 use crate::error::ApiError;
+
+/// A network's release file, `packages/tvc-wallet/src/releases/<network>.json`,
+/// as clients pin it. Its `qosIdentityPcrs` check Boot Proofs, which is the
+/// clients' job, so they are not read here.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReleaseFile {
+    release_policy: SignedReleasePolicy,
+    release_authorities: PinnedReleaseAuthorities,
+}
 
 /// Holds the provisioning key and the release policy descriptors are issued
 /// under. Signed descriptors are the enclave's only grant of access to a wallet.
@@ -24,17 +36,55 @@ pub struct Provisioner {
 }
 
 impl Provisioner {
-    pub fn new(config: &ProvisioningConfig) -> anyhow::Result<Self> {
+    /// Refuses to start under a release file for another network, or one
+    /// that does not verify now.
+    pub fn new(config: &ProvisioningConfig, network: Network) -> anyhow::Result<Self> {
         let (secret, public_key) = signing_key(config)?;
-        let signed: SignedReleasePolicy = read_json(&config.release_policy_path)?;
-        let authorities: PinnedReleaseAuthorities = read_json(&config.release_authorities_path)?;
-        verify_signed_release_policy(&signed, &authorities, now_ms()?)
-            .map_err(|error| anyhow::anyhow!("release policy does not verify: {error:?}"))?;
+        let path = &config.release_path;
+        let release: ReleaseFile = read_json(path)?;
+        let policy = &release.release_policy.policy;
+        anyhow::ensure!(
+            policy.network == network,
+            "{} is the {} release, and this gateway serves {network}",
+            path.display(),
+            policy.network
+        );
+        verify_signed_release_policy(
+            &release.release_policy,
+            &release.release_authorities,
+            network,
+            now_ms()?,
+        )
+        .map_err(|error| match error.code {
+            ErrorCode::ExpiredRequest => anyhow::anyhow!(
+                "the release policy in {} is valid from {} to {} (Unix ms), not now",
+                path.display(),
+                policy.valid_from_ms,
+                policy.expires_at_ms
+            ),
+            code => anyhow::anyhow!(
+                "the release policy in {} does not verify: {code}",
+                path.display()
+            ),
+        })?;
         Ok(Self {
             secret,
             public_key,
-            policy: signed.policy,
+            policy: release.release_policy.policy,
         })
+    }
+
+    /// Refuses to issue descriptors once the release has expired: clients
+    /// would refuse its enclave. A new release and deploy fix it.
+    pub fn check_current(&self, now_ms: u64) -> Result<(), ApiError> {
+        if now_ms > self.policy.expires_at_ms {
+            tracing::error!(
+                expires_at_ms = self.policy.expires_at_ms,
+                "the release policy has expired"
+            );
+            return Err(ApiError::ReleaseExpired);
+        }
+        Ok(())
     }
 
     /// One client key may drive every operation the release allows, for one
@@ -43,7 +93,7 @@ impl Provisioner {
         let mut descriptor = WalletDescriptor {
             version: API_VERSION,
             security_domain_id: self.policy.security_domain_id,
-            environment: self.policy.environment,
+            network: self.policy.network,
             turnkey_organization_id: input.organization_id.clone(),
             turnkey_wallet_id: input.turnkey_wallet_id.clone(),
             address: input.solana_address.clone(),
@@ -70,7 +120,7 @@ impl Provisioner {
         let invalid = ApiError::InvalidDescriptor;
         if descriptor.version != API_VERSION
             || descriptor.security_domain_id != self.policy.security_domain_id
-            || descriptor.environment != self.policy.environment
+            || descriptor.network != self.policy.network
             || descriptor.allowed_clients.len() != 1
         {
             return Err(invalid);
@@ -101,7 +151,7 @@ fn signing_key(config: &ProvisioningConfig) -> anyhow::Result<(Zeroizing<[u8; 32
     )
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> anyhow::Result<T> {
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
     let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
 }
@@ -125,9 +175,9 @@ pub(crate) mod tests {
 
     pub fn test_policy() -> ReleasePolicy {
         ReleasePolicy {
-            version: 1,
+            version: API_VERSION,
             release_id: "test".to_owned(),
-            environment: zolana_tvc_protocol::Environment::Development,
+            network: Network::Devnet,
             tvc_application_id: "test".to_owned(),
             security_domain_id: [9; 32],
             accepted_manifest_digests: Vec::new(),
@@ -176,8 +226,7 @@ pub(crate) mod tests {
             expected_public_key: hex::encode(
                 crate::config::public_key_of(&TEST_SECRET).expect("valid key"),
             ),
-            release_policy_path: "unused".into(),
-            release_authorities_path: "unused".into(),
+            release_path: "unused".into(),
         };
         assert!(signing_key(&config(format!(" 0x{}\n", "07".repeat(32)))).is_ok());
         assert!(signing_key(&config("07".repeat(31))).is_err());
@@ -185,22 +234,119 @@ pub(crate) mod tests {
 }
 
 #[cfg(test)]
-mod committed_policy_tests {
+mod release_file_tests {
+    use zolana_tvc_protocol::release::{ReleaseAuthorityKey, sign_release_policy};
+    use zolana_tvc_protocol::{ReleaseAuthoritySignature, SignedReleasePolicy};
+
+    use super::tests::{TEST_SECRET, test_policy};
     use super::*;
 
+    const AUTHORITY_SECRET: [u8; 32] = [8; 32];
+
+    /// A release file for `policy`, signed by a test authority, with the PCRs
+    /// clients read, written where only this test reads it.
+    fn release_file(name: &str, policy: ReleasePolicy) -> std::path::PathBuf {
+        let signature = sign_release_policy(&policy, &AUTHORITY_SECRET).expect("signs");
+        let public_key = crate::config::public_key_of(&AUTHORITY_SECRET).expect("valid key");
+        let file = serde_json::json!({
+            "releasePolicy": SignedReleasePolicy {
+                policy,
+                authority_set_id: "test-set".to_owned(),
+                signatures: vec![ReleaseAuthoritySignature {
+                    key_id: "test-authority".to_owned(),
+                    signature: signature.to_vec(),
+                }],
+            },
+            "releaseAuthorities": PinnedReleaseAuthorities {
+                authority_set_id: "test-set".to_owned(),
+                threshold: 1,
+                keys: vec![ReleaseAuthorityKey {
+                    key_id: "test-authority".to_owned(),
+                    public_key: public_key.to_vec(),
+                }],
+                minimum_revocation_epoch: 0,
+            },
+            "qosIdentityPcrs": { "0": "00" },
+        });
+        let path = std::env::temp_dir().join(format!(
+            "tvc-gateway-release-{}-{name}.json",
+            std::process::id()
+        ));
+        fs::write(&path, file.to_string()).expect("the release file writes");
+        path
+    }
+
+    fn provisioner(path: std::path::PathBuf, network: Network) -> anyhow::Result<Provisioner> {
+        let config = ProvisioningConfig {
+            private_key: hex::encode(TEST_SECRET),
+            expected_public_key: hex::encode(
+                crate::config::public_key_of(&TEST_SECRET).expect("valid key"),
+            ),
+            release_path: path,
+        };
+        Provisioner::new(&config, network)
+    }
+
     #[test]
-    fn the_committed_release_policy_verifies_against_the_committed_authorities() {
-        let signed =
-            read_json::<SignedReleasePolicy>(std::path::Path::new("configs/release-policy.json"))
-                .expect("configs/release-policy.json does not parse");
-        let authorities = read_json::<PinnedReleaseAuthorities>(std::path::Path::new(
-            "configs/release-authorities.json",
-        ))
-        .expect("configs/release-authorities.json does not parse");
-        let during_validity = signed.policy.valid_from_ms.saturating_add(1);
-        assert_eq!(
-            verify_signed_release_policy(&signed, &authorities, during_validity),
-            Ok(())
+    fn a_release_file_for_the_gateways_network_starts_it() {
+        let path = release_file("devnet", test_policy());
+        let started = provisioner(path.clone(), Network::Devnet);
+        let refused = provisioner(path.clone(), Network::Mainnet);
+        let _ = fs::remove_file(path);
+        assert!(started.is_ok(), "{:?}", started.err());
+        let error = refused
+            .err()
+            .expect("a devnet release starts a mainnet gateway");
+        assert!(
+            error
+                .to_string()
+                .ends_with("is the devnet release, and this gateway serves mainnet"),
+            "{error}"
         );
+    }
+
+    #[test]
+    fn an_expired_or_unsigned_release_does_not_start() {
+        let expired = ReleasePolicy {
+            valid_from_ms: 1,
+            expires_at_ms: 2,
+            ..test_policy()
+        };
+        let path = release_file("expired", expired);
+        let error = provisioner(path.clone(), Network::Devnet).err();
+        let _ = fs::remove_file(path);
+        let error = error.expect("an expired release starts the gateway");
+        assert!(
+            error
+                .to_string()
+                .ends_with("valid from 1 to 2 (Unix ms), not now"),
+            "{error}"
+        );
+
+        let path = release_file("tampered", test_policy());
+        let tampered = fs::read_to_string(&path)
+            .expect("the release file reads")
+            .replace("\"releaseId\":\"test\"", "\"releaseId\":\"other\"");
+        fs::write(&path, tampered).expect("the release file writes");
+        let error = provisioner(path.clone(), Network::Devnet).err();
+        let _ = fs::remove_file(path);
+        let error = error.expect("a tampered release starts the gateway");
+        assert!(
+            error
+                .to_string()
+                .ends_with("does not verify: InvalidSignature"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn descriptors_stop_when_the_release_expires() {
+        let provisioner = super::tests::provisioner();
+        let expires = test_policy().expires_at_ms;
+        assert_eq!(provisioner.check_current(expires), Ok(()));
+        let mut expiring = provisioner;
+        expiring.policy.expires_at_ms = 10;
+        assert_eq!(expiring.check_current(10), Ok(()));
+        assert_eq!(expiring.check_current(11), Err(ApiError::ReleaseExpired));
     }
 }

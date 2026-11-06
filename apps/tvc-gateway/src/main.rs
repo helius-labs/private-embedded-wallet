@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tracing::info;
@@ -6,12 +7,12 @@ use tvc_gateway::app::{self, AppState};
 use tvc_gateway::config::{self, Stage};
 use tvc_gateway::metrics;
 
-fn config_path() -> String {
-    let mut args = std::env::args().skip(1);
-    match (args.next(), args.next()) {
-        (Some(flag), Some(path)) if flag == "--config" => path,
-        (Some(path), None) => path,
-        _ => "configs/config.yaml".to_owned(),
+/// The network overlay named by `--config`, such as `configs/devnet.yaml`.
+fn config_path() -> anyhow::Result<PathBuf> {
+    let mut args = std::env::args_os().skip(1);
+    match (args.next(), args.next(), args.next()) {
+        (Some(flag), Some(path), None) if flag == "--config" => Ok(path.into()),
+        _ => anyhow::bail!("usage: tvc-gateway --config configs/<devnet|mainnet>.yaml"),
     }
 }
 
@@ -42,7 +43,7 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = config::load(&config_path())?;
+    let config = config::load(&config_path()?)?;
     init_tracing(config.stage);
     metrics::init(&config.metrics)?;
     if rustls::crypto::aws_lc_rs::default_provider()
@@ -54,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState::new(&config).await?);
     let router = app::router(state, config.enclave.max_body_bytes);
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
-    info!(stage = ?config.stage, listen = %config.listen, "tvc-gateway starting");
+    info!(network = %config.network, stage = ?config.stage, listen = %config.listen, "tvc-gateway starting");
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await?;

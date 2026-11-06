@@ -1,0 +1,144 @@
+//! What an enclave image trusts, chosen at build time by `SPR_NETWORK`:
+//! `devnet` (the default) or `mainnet`. A change here is a new release.
+
+use zolana_tvc_protocol::types::Network;
+
+/// One network's trust: the network the image serves, the public halves of
+/// the gateway's provisioning and wallet-grant keys, and who signs the
+/// network's prover policy, as zolana pins them in
+/// `sdk-libs/client/src/prover/tee/signers.json`.
+pub struct Net {
+    pub network: Network,
+    /// Verifies wallet descriptors.
+    pub provisioning: [u8; 65],
+    /// Verifies wallet grants.
+    pub grant: [u8; 65],
+    pub policy_signers: &'static [[u8; 32]],
+    pub policy_threshold: usize,
+}
+
+/// The one KMS key that signs both networks' prover policies today.
+const POLICY_SIGNER: [u8; 32] = [
+    0x1f, 0xe5, 0xd2, 0x9c, 0x79, 0x06, 0x4e, 0xa1, 0x7a, 0x16, 0x30, 0x84, 0x52, 0x04, 0x0b, 0x79,
+    0x9d, 0xf8, 0xae, 0xaa, 0xae, 0x58, 0x8d, 0x44, 0xa5, 0x27, 0xa8, 0xda, 0x9f, 0xfa, 0x92, 0x4a,
+];
+
+const DEVNET: Net = Net {
+    network: Network::Devnet,
+    // The private half is the Secrets Manager secret zolnet-devnet-e/tvc-provisioning-key.
+    provisioning: [
+        0x04, 0x6e, 0x85, 0x2f, 0x2e, 0xb1, 0xbc, 0x79, 0xe2, 0xed, 0x3c, 0xdb, 0x57, 0xfa, 0x7e,
+        0x2f, 0x75, 0x72, 0x0f, 0xe5, 0x30, 0x32, 0xf6, 0xae, 0xdc, 0xfb, 0xdf, 0xce, 0xb6, 0x7f,
+        0x63, 0x56, 0x91, 0x54, 0x05, 0x64, 0xe2, 0x08, 0xca, 0x67, 0x5f, 0x4d, 0x8b, 0x33, 0x29,
+        0x1a, 0xa1, 0x38, 0x8a, 0x00, 0x67, 0xda, 0xdc, 0x4f, 0x1d, 0x04, 0x51, 0x9a, 0xab, 0x32,
+        0x0b, 0xbd, 0x2c, 0xce, 0x64,
+    ],
+    // The private half is the Secrets Manager secret zolnet-devnet-e/tvc-wallet-grant-key.
+    grant: [
+        0x04, 0xd9, 0x2d, 0xfa, 0x9b, 0xa9, 0xaa, 0xfd, 0x47, 0x1f, 0xf9, 0xff, 0xbf, 0x45, 0x4b,
+        0x9a, 0x11, 0xb1, 0x48, 0x58, 0xa8, 0xc2, 0xed, 0xb4, 0xf7, 0x9a, 0x4e, 0xa4, 0xb4, 0xdb,
+        0xa8, 0xca, 0x5c, 0xac, 0x9e, 0xc0, 0x6d, 0x9b, 0xb5, 0x57, 0x6d, 0xb7, 0x2d, 0x07, 0xe0,
+        0x87, 0xac, 0x6a, 0xad, 0xf7, 0x2e, 0x4e, 0xb3, 0x13, 0x23, 0xaa, 0xfa, 0xf9, 0xdb, 0xd1,
+        0x33, 0xd2, 0x6f, 0x4d, 0xc7,
+    ],
+    policy_signers: &[POLICY_SIGNER],
+    policy_threshold: 1,
+};
+
+const MAINNET: Net = Net {
+    network: Network::Mainnet,
+    // The private half is the Secrets Manager secret zolnet-mainnet/tvc-provisioning-key.
+    provisioning: [
+        0x04, 0xf8, 0x7c, 0xa3, 0x4f, 0xcd, 0x2b, 0x78, 0xf5, 0x73, 0x21, 0xc6, 0x62, 0xa6, 0x63,
+        0x95, 0xe4, 0x00, 0x74, 0x4a, 0x19, 0x51, 0x65, 0x5e, 0xd7, 0x7f, 0xbd, 0x14, 0x82, 0xa8,
+        0x4e, 0x75, 0x90, 0x35, 0x9b, 0x5f, 0x9b, 0x15, 0x7a, 0x84, 0x48, 0x9d, 0xb6, 0x8b, 0x02,
+        0x98, 0x4c, 0x90, 0xb6, 0x41, 0xa0, 0x5d, 0xee, 0xc3, 0xcd, 0xfd, 0x67, 0xdd, 0x99, 0x0a,
+        0xec, 0xc8, 0x9a, 0x58, 0xe0,
+    ],
+    // The private half is the Secrets Manager secret zolnet-mainnet/tvc-wallet-grant-key.
+    grant: [
+        0x04, 0x89, 0x29, 0xb5, 0x3b, 0x1b, 0x9d, 0x0b, 0x22, 0xbe, 0x43, 0xa3, 0x06, 0x58, 0x3c,
+        0xdb, 0x92, 0x33, 0xe4, 0x8d, 0xa9, 0xe2, 0x60, 0xcd, 0xe6, 0x1c, 0x6f, 0x93, 0xce, 0xb1,
+        0xe5, 0xea, 0x43, 0x97, 0x3c, 0x01, 0x05, 0x7c, 0x98, 0x77, 0x9d, 0x47, 0xc0, 0x3e, 0x5a,
+        0x5e, 0xd8, 0xe2, 0xed, 0x1e, 0x0b, 0xc3, 0xd9, 0x68, 0x5b, 0xc6, 0xde, 0xea, 0x24, 0x74,
+        0xd4, 0x4f, 0xd5, 0x7d, 0x5d,
+    ],
+    policy_signers: &[POLICY_SIGNER],
+    policy_threshold: 1,
+};
+
+const SPR_NETWORK: &str = match option_env!("SPR_NETWORK") {
+    Some(network) => network,
+    None => "devnet",
+};
+
+const _: () = assert!(
+    eq(SPR_NETWORK, "devnet") || eq(SPR_NETWORK, "mainnet"),
+    "SPR_NETWORK must be devnet or mainnet"
+);
+
+/// The network this image was built for.
+pub const NET: &Net = if eq(SPR_NETWORK, "mainnet") {
+    &MAINNET
+} else {
+    &DEVNET
+};
+
+const fn eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The keys each network's gateway signs with, and the policy signers
+    /// zolana pins for each network at the revision this crate builds
+    /// against.
+    #[test]
+    fn each_network_trusts_its_own_keys() {
+        let signer = "1fe5d29c79064ea17a16308452040b799df8aeaaae588d44a527a8da9ffa924a";
+        for (net, network, provisioning, grant) in [
+            (
+                &DEVNET,
+                Network::Devnet,
+                "046e852f2eb1bc79e2ed3cdb57fa7e2f75720fe53032f6aedcfbdfceb67f635691540564e208ca675f4d8b33291aa1388a0067dadc4f1d04519aab320bbd2cce64",
+                "04d92dfa9ba9aafd471ff9ffbf454b9a11b14858a8c2edb4f79a4ea4b4dba8ca5cac9ec06d9bb5576db72d07e087ac6aadf72e4eb31323aafaf9dbd133d26f4dc7",
+            ),
+            (
+                &MAINNET,
+                Network::Mainnet,
+                "04f87ca34fcd2b78f57321c662a66395e400744a1951655ed77fbd1482a84e7590359b5f9b157a84489db68b02984c90b641a05deec3cdfd67dd990aecc89a58e0",
+                "048929b53b1b9d0b22be43a306583cdb9233e48da9e260cde61c6f93ceb1e5ea43973c01057c98779d47c03e5a5ed8e2ed1e0bc3d9685bc6deea2474d44fd57d5d",
+            ),
+        ] {
+            assert_eq!(net.network, network);
+            assert_eq!(hex::encode(net.provisioning), provisioning, "{network}");
+            assert_eq!(hex::encode(net.grant), grant, "{network}");
+            assert_eq!(
+                net.policy_signers.iter().map(hex::encode).collect::<Vec<_>>(),
+                [signer],
+                "{network}"
+            );
+            assert_eq!(net.policy_threshold, 1);
+        }
+    }
+
+    #[test]
+    fn an_image_built_without_spr_network_is_devnet() {
+        if option_env!("SPR_NETWORK").is_none() {
+            assert_eq!(NET.network, Network::Devnet);
+        }
+    }
+}

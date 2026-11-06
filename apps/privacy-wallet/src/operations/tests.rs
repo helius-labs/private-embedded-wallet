@@ -8,8 +8,8 @@ use spr_prover_tee::{
 };
 use zolana_tvc_protocol::constants::{API_VERSION, MAX_PROVE_INPUTS};
 use zolana_tvc_protocol::types::{
-    ClientAuthorization, ClientAuthorizationScheme, ClientGrant, DecryptItem, DecryptLabel,
-    DeriveItem, Environment, ProverSealing, TransactionKeyItem, WalletDescriptor,
+    ClientAuthorization, ClientGrant, DecryptItem, DecryptLabel, DeriveItem, Network,
+    ProverSealing, TransactionKeyItem, WalletDescriptor,
 };
 
 use zolana_tvc_protocol::digest::sealed_seed_digest;
@@ -17,7 +17,11 @@ use zolana_tvc_protocol::digest::sealed_seed_digest;
 use super::sealed::{seal, unseal, Roles};
 use super::*;
 use crate::custody::TurnkeyCustody;
+use crate::network::NET;
 use crate::{DiscoveryConfig, Runtime};
+
+/// The network the image under test serves, as prover policies name it.
+const NETWORK: &str = NET.network.as_str();
 
 /// A wallet key plus the seed its derivation message signs to.
 struct TestWallet {
@@ -53,8 +57,8 @@ fn runtime() -> Runtime {
         ephemeral: Arc::new(P256Pair::generate().expect("ephemeral")),
         custody: Arc::new(TurnkeyCustody::new(Arc::clone(&quorum))),
         quorum,
-        provisioning_public: PROVISIONING_PUBLIC,
-        grant_public: GRANT_PUBLIC,
+        provisioning_public: NET.provisioning,
+        grant_public: NET.grant,
         prover: production_prover_trust(),
     }
 }
@@ -154,7 +158,7 @@ fn descriptor(address: [u8; 32]) -> WalletDescriptor {
     WalletDescriptor {
         version: API_VERSION,
         security_domain_id: [0x11; 32],
-        environment: Environment::Development,
+        network: NET.network,
         turnkey_organization_id: "00000000-0000-0000-0000-00000000000b".to_owned(),
         turnkey_wallet_id: "test".to_owned(),
         address: Pubkey::new_from_array(address).to_string(),
@@ -183,7 +187,6 @@ fn request(operation: Operation, descriptor: WalletDescriptor) -> OperationReque
         operation,
         authorization: ClientAuthorization {
             client_key_id: "tvc-browser-p256-test".to_owned(),
-            scheme: ClientAuthorizationScheme::P256Sha256,
             signature: vec![0u8; 64],
         },
     }
@@ -268,8 +271,8 @@ fn runtime_with_quorum(quorum: P256Pair) -> Runtime {
         ephemeral: Arc::new(P256Pair::generate().expect("ephemeral")),
         custody: Arc::new(TurnkeyCustody::new(Arc::clone(&quorum))),
         quorum,
-        provisioning_public: PROVISIONING_PUBLIC,
-        grant_public: GRANT_PUBLIC,
+        provisioning_public: NET.provisioning,
+        grant_public: NET.grant,
         prover: production_prover_trust(),
     }
 }
@@ -580,15 +583,11 @@ fn prove_fills_only_the_open_secret_slots() {
     }
 }
 
-/// The image builds the signer set zolana pins for its network, in
-/// `sdk-libs/client/src/prover/tee/signers.json`.
+/// The image trusts the policy signers of the network it was built for.
 #[test]
-fn the_image_trusts_the_networks_policy_signers() {
-    assert_eq!(
-        POLICY_SIGNERS.map(hex::encode),
-        ["1fe5d29c79064ea17a16308452040b799df8aeaaae588d44a527a8da9ffa924a"]
-    );
-    let expected = PolicySigners::new(NETWORK, POLICY_SIGNERS.to_vec(), POLICY_THRESHOLD).unwrap();
+fn the_image_trusts_its_networks_policy_signers() {
+    let expected =
+        PolicySigners::new(NETWORK, NET.policy_signers.to_vec(), NET.policy_threshold).unwrap();
     assert_eq!(ProverTrust::image().signers, expected);
 }
 
@@ -727,7 +726,16 @@ fn a_request_bound_to_another_release_or_quorum_key_is_refused() {
     let bound = request(derive_nothing(), descriptor([0x07; 32]));
     assert_eq!(check_request_bindings(&bound, &running), Ok(()));
     type Edit = fn(&mut OperationRequest);
-    let cases: [(Edit, ErrorCode); 6] = [
+    let cases: [(Edit, ErrorCode); 7] = [
+        (
+            |request| {
+                request.wallet_descriptor.network = match NET.network {
+                    Network::Devnet => Network::Mainnet,
+                    Network::Mainnet => Network::Devnet,
+                }
+            },
+            ErrorCode::NetworkMismatch,
+        ),
         (
             |request| request.quorum_key_epoch = 9,
             ErrorCode::QuorumKeyEpochMismatch,
@@ -874,7 +882,7 @@ mod local {
             let mut descriptor = WalletDescriptor {
                 version: API_VERSION,
                 security_domain_id: sha256(self.keys.security_domain_label.as_bytes()),
-                environment: Environment::Development,
+                network: NET.network,
                 turnkey_organization_id: self.keys.organization_id.clone(),
                 turnkey_wallet_id: self.keys.wallet_id.clone(),
                 address: Pubkey::new_from_array(self.wallet.public_key).to_string(),
@@ -922,7 +930,6 @@ mod local {
                 operation,
                 authorization: ClientAuthorization {
                     client_key_id,
-                    scheme: ClientAuthorizationScheme::P256Sha256,
                     signature: Vec::new(),
                 },
             };

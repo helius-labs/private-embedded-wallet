@@ -34,7 +34,7 @@ pub enum ErrorCode {
     UnsupportedProofPath,
     BootProofUnverified,
     DiscoveryUntrusted,
-    ProductionClaimRejected,
+    NetworkMismatch,
     ReleasePolicyInvalid,
 }
 
@@ -115,7 +115,7 @@ mod tests {
                 "UnsupportedProofPath",
                 "BootProofUnverified",
                 "DiscoveryUntrusted",
-                "ProductionClaimRejected",
+                "NetworkMismatch",
                 "ReleasePolicyInvalid",
             ]
         );

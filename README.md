@@ -92,7 +92,8 @@ A proof's witness leaves the enclave only sealed to a TEE prover whose
 attestation passes the signed prover policy of the network the image was built
 for (`SPR_NETWORK`, `devnet` or `mainnet`). The client downloads the policy
 file that network publishes and hands it to the enclave, which checks it
-against the signers zolana pins (`POLICY_SIGNERS`); the client posts the
+against the signers zolana pins for that network
+([`network.rs`](apps/privacy-wallet/src/network.rs)); the client posts the
 sealed request, and only that prover can open it. A new prover release needs
 no new enclave release; a change of signers does.
 

@@ -18,7 +18,8 @@ use zeroize::{Zeroize, Zeroizing};
 use zolana_tvc_protocol::constants::{MAX_PROVER_TARGET_LEN, MAX_PROVE_INPUTS};
 use zolana_tvc_protocol::types::{FailureStage, ProverSealing, SealedProverRequest};
 
-use super::{Failure, NETWORK, POLICY_SIGNERS, POLICY_THRESHOLD};
+use super::Failure;
+use crate::network::NET;
 
 /// A proving key's route, `<prefix>/prove/<key>`; `<key>` is the key file name
 /// without `.key`.
@@ -37,8 +38,12 @@ impl ProverTrust {
     /// the signers of the network the image was built for.
     pub(crate) fn image() -> Self {
         Self {
-            signers: PolicySigners::new(NETWORK, POLICY_SIGNERS.to_vec(), POLICY_THRESHOLD)
-                .expect("policy signers are well formed"),
+            signers: PolicySigners::new(
+                NET.network.as_str(),
+                NET.policy_signers.to_vec(),
+                NET.policy_threshold,
+            )
+            .expect("policy signers are well formed"),
             anchors: Anchors::PRODUCTION,
         }
     }

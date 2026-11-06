@@ -23,7 +23,7 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-/// `request_digest` omits only `authorization.signature`. `client_key_id` and scheme stay.
+/// `request_digest` omits only `authorization.signature`; `client_key_id` stays.
 pub fn request_digest(request: &OperationRequest) -> Result<[u8; 32], TvcError> {
     let mut value = encoding::to_canonical_value(request)?;
     let authorization = value
@@ -33,7 +33,7 @@ pub fn request_digest(request: &OperationRequest) -> Result<[u8; 32], TvcError> 
     if authorization.remove("signature").is_none() {
         return Err(TvcError::new(ErrorCode::InvalidCanonicalJson));
     }
-    if !authorization.contains_key("client_key_id") || !authorization.contains_key("scheme") {
+    if !authorization.contains_key("client_key_id") {
         return Err(TvcError::new(ErrorCode::InvalidCanonicalJson));
     }
     let canonical = canonicalize_json_value(&value)?;

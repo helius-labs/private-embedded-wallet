@@ -31,10 +31,9 @@ use zolana_tvc_protocol::release::{
     ReleaseAuthorityKey,
 };
 use zolana_tvc_protocol::types::{
-    reject_production_environment, ClientAuthorization, ClientAuthorizationScheme, ClientGrant,
-    Environment, HealthResponse, HealthStatus, Operation, OperationKind, OperationRequest,
-    ReleaseAuthoritySignature, ReleasePolicy, ServiceInfo, SignedReleasePolicy, WalletDescriptor,
-    WalletGrant,
+    ClientAuthorization, ClientGrant, HealthResponse, HealthStatus, Network, Operation,
+    OperationKind, OperationRequest, ReleaseAuthoritySignature, ReleasePolicy, ServiceInfo,
+    SignedReleasePolicy, WalletDescriptor, WalletGrant,
 };
 
 const OPERATIONS: [OperationKind; 5] = [
@@ -87,13 +86,15 @@ fn verify_turnkey_app_proof(
 }
 
 /// What `discovery-binding.json` expects: check for check, the TypeScript
-/// client's `bindDiscoveryToPolicy`.
+/// client's `bindDiscoveryToPolicy`. The policy has already verified for the
+/// client's network, so discovery must name that network too.
 pub fn bind_discovery_to_policy(
     info: &ServiceInfo,
     policy: &ReleasePolicy,
 ) -> Result<(), TvcError> {
-    reject_production_environment(info.environment)?;
-    reject_production_environment(policy.environment)?;
+    if info.network != policy.network {
+        return Err(TvcError::new(ErrorCode::NetworkMismatch));
+    }
     if info.version != API_VERSION {
         return Err(TvcError::new(ErrorCode::UnsupportedVersion));
     }
@@ -190,7 +191,7 @@ fn sample_descriptor(client_public: &[u8], security_domain: [u8; 32]) -> WalletD
     WalletDescriptor {
         version: API_VERSION,
         security_domain_id: security_domain,
-        environment: Environment::Development,
+        network: Network::Devnet,
         turnkey_organization_id: "child-org".to_owned(),
         turnkey_wallet_id: "turnkey-wallet".to_owned(),
         address: "4E2agEUkMiuP3ABYbYTYXuU7bYyqPb3uGsLqs7RDd1U5".to_owned(),
@@ -229,7 +230,6 @@ fn sample_request(client_public: &[u8], running: &Running) -> OperationRequest {
         operation: Operation::Bootstrap,
         authorization: ClientAuthorization {
             client_key_id: "client-1".to_owned(),
-            scheme: ClientAuthorizationScheme::P256Sha256,
             signature: Vec::new(),
         },
     }
@@ -250,7 +250,7 @@ fn sample_info(quorum: &QosP256Public, ephemeral: &QosP256Public) -> ServiceInfo
     let running = sample_running();
     ServiceInfo {
         version: API_VERSION,
-        environment: Environment::Development,
+        network: Network::Devnet,
         security_domain_id: running.security_domain_id,
         release_id: running.release_id,
         manifest_digest: running.manifest_digest,
@@ -263,7 +263,6 @@ fn sample_info(quorum: &QosP256Public, ephemeral: &QosP256Public) -> ServiceInfo
         max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
         max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
         proof_type: TVC_APP_PROOF_TYPE.to_owned(),
-        boot_proof_lookup_key: ephemeral.to_bytes().to_vec(),
     }
 }
 
@@ -271,7 +270,7 @@ fn sample_policy(info: &ServiceInfo) -> ReleasePolicy {
     ReleasePolicy {
         version: API_VERSION,
         release_id: info.release_id.clone(),
-        environment: Environment::Development,
+        network: info.network,
         tvc_application_id: "zolana-tvc-privacy-wallet".to_owned(),
         security_domain_id: info.security_domain_id,
         accepted_manifest_digests: vec![encode_lower_hex(&info.manifest_digest)],
@@ -552,11 +551,18 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
         authority_set_id: authorities.authority_set_id.clone(),
         signatures: vec![ReleaseAuthoritySignature {
             key_id: "release-1".to_owned(),
-            scheme: ClientAuthorizationScheme::P256Sha256,
             signature: signature.to_vec(),
         }],
     };
-    verify_signed_release_policy(&signed, &authorities, 1_750_000_000_000).expect("signed policy");
+    let verify =
+        |signed: &SignedReleasePolicy, authorities: &PinnedReleaseAuthorities, network, now| {
+            verify_signed_release_policy(signed, authorities, network, now)
+                .expect_err("the case is refused")
+                .code
+                .as_str()
+        };
+    verify_signed_release_policy(&signed, &authorities, Network::Devnet, 1_750_000_000_000)
+        .expect("signed policy");
     let mut unsigned = signed.clone();
     unsigned.signatures.clear();
     let mut duplicate = signed.clone();
@@ -580,25 +586,28 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
         fixture_json(&json!({
             "id": "signed-release-policy",
             "now_ms": "1750000000000",
+            "network": Network::Devnet,
             "authorities": authorities,
             "signed": signed,
             "policy_digest": encode_lower_hex(&zolana_tvc_protocol::release::policy_signing_digest(&policy)?),
-            "empty_signatures": verify_signed_release_policy(&unsigned, &authorities, 1_750_000_000_000).unwrap_err().code.as_str(),
+            "empty_signatures": verify(&unsigned, &authorities, Network::Devnet, 1_750_000_000_000),
             "empty_signatures_input": unsigned,
-            "duplicate_key_id": verify_signed_release_policy(&duplicate, &authorities, 1_750_000_000_000).unwrap_err().code.as_str(),
+            "duplicate_key_id": verify(&duplicate, &authorities, Network::Devnet, 1_750_000_000_000),
             "duplicate_key_id_input": duplicate,
-            "unknown_key_id": verify_signed_release_policy(&unknown, &authorities, 1_750_000_000_000).unwrap_err().code.as_str(),
+            "unknown_key_id": verify(&unknown, &authorities, Network::Devnet, 1_750_000_000_000),
             "unknown_key_id_input": unknown,
-            "mutated_policy": verify_signed_release_policy(&mutated, &authorities, 1_750_000_000_000).unwrap_err().code.as_str(),
+            "mutated_policy": verify(&mutated, &authorities, Network::Devnet, 1_750_000_000_000),
             "mutated_policy_input": mutated,
-            "zero_threshold": verify_signed_release_policy(&signed, &zero_threshold, 1_750_000_000_000).unwrap_err().code.as_str(),
+            "zero_threshold": verify(&signed, &zero_threshold, Network::Devnet, 1_750_000_000_000),
             "zero_threshold_authorities": zero_threshold,
-            "expired": verify_signed_release_policy(&signed, &authorities, 1_900_000_000_000).unwrap_err().code.as_str(),
+            "expired": verify(&signed, &authorities, Network::Devnet, 1_900_000_000_000),
             "expired_now_ms": "1900000000000",
-            "wrong_trust_root": verify_signed_release_policy(&wrong_trust_root, &authorities, 1_750_000_000_000).unwrap_err().code.as_str(),
+            "wrong_trust_root": verify(&wrong_trust_root, &authorities, Network::Devnet, 1_750_000_000_000),
             "wrong_trust_root_input": wrong_trust_root,
-            "revoked_epoch": verify_signed_release_policy(&signed, &revoking_authorities, 1_750_000_000_000).unwrap_err().code.as_str(),
+            "revoked_epoch": verify(&signed, &revoking_authorities, Network::Devnet, 1_750_000_000_000),
             "revoked_epoch_authorities": revoking_authorities,
+            "wrong_network": verify(&signed, &authorities, Network::Mainnet, 1_750_000_000_000),
+            "wrong_network_expected": Network::Mainnet,
         }))
         ,
     );
@@ -607,12 +616,12 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
     let mut binding_cases: Vec<(&str, ServiceInfo)> = Vec::new();
     {
         let mut m = info.clone();
-        m.environment = Environment::Production;
-        binding_cases.push(("production_environment", m));
+        m.network = Network::Mainnet;
+        binding_cases.push(("network", m));
     }
     {
         let mut m = info.clone();
-        m.version = 2;
+        m.version = API_VERSION + 1;
         binding_cases.push(("version", m));
     }
     {

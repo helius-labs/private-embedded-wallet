@@ -9,7 +9,7 @@ use qos_p256::P256Pair;
 use zeroize::Zeroizing;
 use zolana_tvc_privacy_wallet::{
     local_testkit_qos_seeds, local_unattested_state, router, shutdown_signal, LocalProver,
-    LocalProverTrust, NETWORK,
+    LocalProverTrust, NET,
 };
 
 #[derive(Debug, Parser)]
@@ -68,7 +68,8 @@ async fn main() -> io::Result<()> {
             local_unattested_state(ephemeral, quorum, *wallet_secret, LocalProverTrust::Image);
         eprintln!(
             "LOCAL DEVELOPMENT ONLY: unattested mock custody listening on {address}, sealing \
-             to provers the {NETWORK} prover policy admits; do not use funds"
+             to provers the {} prover policy admits; do not use funds",
+            NET.network
         );
         state
     } else {

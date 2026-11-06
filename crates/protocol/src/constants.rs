@@ -1,6 +1,6 @@
 //! Domain separators and protocol limits.
 
-pub const API_VERSION: u8 = 1;
+pub const API_VERSION: u8 = 2;
 pub const TVC_APP_PROOF_TYPE: &str = "zolana.tvc.wallet_operation.v1";
 pub const TVC_APP_PROOF_SCHEME: &str = "SIGNATURE_SCHEME_EPHEMERAL_KEY_P256";
 pub const TVC_QOS_PING_PROOF_TYPE: &str = "zolana.tvc.qos_ping.v1";

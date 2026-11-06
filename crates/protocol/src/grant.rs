@@ -56,7 +56,7 @@ mod tests {
     use p256::SecretKey;
 
     use super::*;
-    use crate::types::{ClientGrant, Environment, OperationKind};
+    use crate::types::{ClientGrant, Network, OperationKind};
 
     const GRANT_SECRET: [u8; 32] = [6; 32];
     const NOW: u64 = 1_800_000_000_000;
@@ -75,7 +75,7 @@ mod tests {
         WalletDescriptor {
             version: API_VERSION,
             security_domain_id: [1; 32],
-            environment: Environment::Development,
+            network: Network::Devnet,
             turnkey_organization_id: "00000000-0000-4000-8000-000000000001".to_owned(),
             turnkey_wallet_id: wallet.to_owned(),
             address: "11111111111111111111111111111111".to_owned(),
