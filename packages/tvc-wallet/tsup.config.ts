@@ -10,10 +10,8 @@ function verifyProductionBoundary(): void {
   const roots = [
     "dist/index.js",
     "dist/protocol.js",
-    "dist/browser.js",
     "dist/index.cjs",
     "dist/protocol.cjs",
-    "dist/browser.cjs",
   ];
   // Names that exist only in the testkit: its session factory and its pinned
   // key fixture.
@@ -41,7 +39,6 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     protocol: "src/protocol.ts",
-    browser: "src/browser.ts",
     testing: "src/testing.ts",
   },
   format: ["esm", "cjs"],

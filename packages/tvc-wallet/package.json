@@ -25,11 +25,6 @@
       "import": "./dist/protocol.js",
       "require": "./dist/protocol.cjs"
     },
-    "./browser": {
-      "types": "./dist/browser.d.ts",
-      "import": "./dist/browser.js",
-      "require": "./dist/browser.cjs"
-    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",

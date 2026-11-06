@@ -25,7 +25,7 @@ use crate::openapi::PingRequest;
 use crate::project::Caller;
 use crate::provisioner::{self, Provisioner};
 use crate::replay::{Claim, Outcome, ReplayLedger};
-use crate::turnkey::{ClaimedWallet, Turnkey};
+use crate::turnkey::{CallShare, ClaimedWallet, Turnkey};
 use crate::upstream::Enclave;
 use crate::wallet_grant::WalletGrants;
 
@@ -52,10 +52,13 @@ impl AppState {
             api_keys: ApiKeys::new(&config.dev_api)?,
             enclave: Enclave::new(config.enclave.clone())?,
             turnkey: Turnkey::new(&config.turnkey)?,
-            provisioner: Provisioner::new(&config.provisioning)?,
-            enrollment: Enrollment::new(&config.enrollment.domains),
+            provisioner: Provisioner::new(&config.provisioning, config.network)?,
+            enrollment: Enrollment::new(config.network, &config.enrollment.domains),
             wallet_grants: WalletGrants::new(&config.wallet_grant)?,
-            limiter: InFlightLimiter::new(config.enclave.max_in_flight_per_project),
+            limiter: InFlightLimiter::new(
+                config.enclave.max_in_flight_per_project,
+                "enclave.in_flight_rejected",
+            ),
             replay: ReplayLedger::connect(
                 Duration::from_secs(config.enclave.replay_window_secs),
                 config.enclave.replay_max_entries,
@@ -180,7 +183,7 @@ pub(crate) async fn session(
     }
     let boot_proof = state
         .turnkey
-        .boot_proof(&app_proof_key(&ping.body)?)
+        .boot_proof(&app_proof_key(&ping.body)?, CallShare::Project(&project))
         .await?;
     Ok(Json(Session {
         info: raw_json(&info.body)?,
@@ -190,7 +193,7 @@ pub(crate) async fn session(
     .into_response())
 }
 
-/// Enroll a device key
+/// Enroll a client key
 ///
 /// A descriptor for the enrollment's client key, once the wallet owner's
 /// signature and the wallet's ownership check out. Enrolling again answers
@@ -210,10 +213,13 @@ pub(crate) async fn enroll(
     Caller(project): Caller,
     ApiJson(request): ApiJson<EnrollmentRequest>,
 ) -> Result<Json<Enrolled>, ApiError> {
-    let input = state.enrollment.verify(&request, clock_ms()?)?;
+    let now_ms = clock_ms()?;
+    state.provisioner.check_current(now_ms)?;
+    let input = state.enrollment.verify(&request, now_ms)?;
     state
         .wallet_grants
         .check_client_key(&input.client_public_key)?;
+    let _permit = state.limiter.try_acquire(&project)?;
     let wallet = ClaimedWallet {
         organization_id: &input.organization_id,
         wallet_id: &input.turnkey_wallet_id,
@@ -252,7 +258,7 @@ pub(crate) async fn operations(
         mut request,
     }): ApiJson<Operation>,
 ) -> Result<Response, ApiError> {
-    state.provisioner.verify(&descriptor)?;
+    state.provisioner.verify(&descriptor, clock_ms()?)?;
     let [client] = descriptor.allowed_clients.as_slice() else {
         return Err(ApiError::InvalidDescriptor);
     };
@@ -289,13 +295,15 @@ pub(crate) async fn operations(
     };
     request.wallet_grant = Some(grant);
     let outcome = state.enclave.operations(&request).await;
-    state.replay.record(key, &project, &outcome).await;
+    state.replay.record(key, &outcome).await;
     Ok(answer(&state, outcome).await)
 }
 
 /// The client's answer to an enclave outcome: a success with the Boot Proof
 /// of the replica that answered, the enclave's refusal as it is, or the
-/// failure.
+/// failure. The enclave's work is done, Bootstrap's with the owner's
+/// approval, so the lookup takes no slot of the project's Turnkey share,
+/// only of the shared bound.
 async fn answer(state: &AppState, outcome: Outcome) -> Response {
     let answered = async {
         let forwarded = outcome?;
@@ -304,7 +312,7 @@ async fn answer(state: &AppState, outcome: Outcome) -> Response {
         }
         let boot_proof = state
             .turnkey
-            .boot_proof(&app_proof_key(&forwarded.body)?)
+            .boot_proof(&app_proof_key(&forwarded.body)?, CallShare::Shared)
             .await?;
         Ok(Json(Operated {
             response: raw_json(&forwarded.body)?,
@@ -363,7 +371,7 @@ mod tests {
 
     use super::*;
     use crate::config::EnclaveConfig;
-    use crate::project::PROJECT_ID_HEADER;
+    use crate::project::{PROJECT_ID_HEADER, ProjectId};
     use crate::replay::LocalLedger;
 
     const ORIGIN_AUTH: &str = "Bearer gatekeeper-test";
@@ -388,9 +396,9 @@ mod tests {
             enclave,
             turnkey: Turnkey::for_tests(UNREACHABLE),
             provisioner: crate::provisioner::tests::provisioner(),
-            enrollment: Enrollment::new(&[crate::enrollment::tests::DOMAIN.to_owned()]),
+            enrollment: crate::enrollment::tests::enrollment(&[crate::enrollment::tests::DOMAIN]),
             wallet_grants: crate::wallet_grant::tests::grants(Vec::new()),
-            limiter: InFlightLimiter::new(4),
+            limiter: InFlightLimiter::new(4, "test.in_flight_rejected"),
             replay: ReplayLedger::Local(LocalLedger::new(Duration::from_secs(360), 1_000)),
         })
     }
@@ -439,7 +447,7 @@ mod tests {
         serde_json::json!({
             "descriptor": descriptor,
             "request": {
-                "version": 1,
+                "version": zolana_tvc_protocol::constants::API_VERSION,
                 "quorum_key_id": "q",
                 "quorum_key_epoch": "1",
                 "ciphertext": ciphertext,
@@ -539,6 +547,19 @@ mod tests {
             operations(operation(&tampered, "abcd")).await,
             (StatusCode::FORBIDDEN, "InvalidDescriptor".to_owned())
         );
+        // Enrolled two days ago, for a day.
+        let two_days_ago = provisioner::now_ms().expect("clock") - 2 * 86_400_000;
+        let expired = state
+            .provisioner
+            .sign(&crate::enrollment::EnrollmentInput {
+                issued_at_ms: two_days_ago,
+                ..crate::enrollment::tests::input()
+            })
+            .expect("descriptor did not sign");
+        assert_eq!(
+            operations(operation(&expired, "abcd")).await,
+            (StatusCode::FORBIDDEN, "DescriptorExpired".to_owned())
+        );
     }
 
     #[tokio::test]
@@ -565,19 +586,50 @@ mod tests {
         );
     }
 
+    fn enrollment_body(request: &EnrollmentRequest) -> String {
+        serde_json::json!({
+            "organizationId": request.organization_id,
+            "turnkeyWalletId": request.turnkey_wallet_id,
+            "solanaAddress": request.solana_address,
+            "clientPublicKey": request.client_public_key,
+            "issuedAtMs": request.issued_at_ms,
+            "ownerSignature": request.owner_signature,
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn an_enrollment_takes_one_of_the_projects_in_flight_slots() {
+        let state = state();
+        let now = provisioner::now_ms().expect("clock");
+        let body = enrollment_body(&crate::enrollment::tests::signed_request(now));
+        let held: Vec<_> = (0..4)
+            .map(|_| {
+                state
+                    .limiter
+                    .try_acquire(&ProjectId::for_tests(PROJECT))
+                    .expect("a free slot")
+            })
+            .collect();
+        assert_eq!(
+            call(&state, request("POST", "/v1/private-wallet/enroll", &body)).await,
+            (StatusCode::TOO_MANY_REQUESTS, "TooManyInFlight".to_owned())
+        );
+        drop(held);
+        assert_eq!(
+            call(&state, request("POST", "/v1/private-wallet/enroll", &body)).await,
+            (
+                StatusCode::FAILED_DEPENDENCY,
+                "TurnkeyUnavailable".to_owned()
+            )
+        );
+    }
+
     #[tokio::test]
     async fn a_stale_or_malformed_enrollment_is_refused_before_turnkey_is_asked() {
         let state = state();
         let future = crate::enrollment::tests::signed_request(crate::enrollment::tests::NOW);
-        let body = serde_json::json!({
-            "organizationId": future.organization_id,
-            "turnkeyWalletId": future.turnkey_wallet_id,
-            "solanaAddress": future.solana_address,
-            "clientPublicKey": future.client_public_key,
-            "issuedAtMs": future.issued_at_ms,
-            "ownerSignature": future.owner_signature,
-        })
-        .to_string();
+        let body = enrollment_body(&future);
         assert_eq!(
             call(&state, request("POST", "/v1/private-wallet/enroll", &body)).await,
             (StatusCode::BAD_REQUEST, "StaleEnrollment".to_owned())

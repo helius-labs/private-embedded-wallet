@@ -1,50 +1,67 @@
 #!/usr/bin/env node
-// Releases the privacy wallet in four phases, each resumable on its own:
+// Releases the privacy wallet of one network in three phases, each resumable
+// on its own:
 //
-//   build   reads the /tvc_app digest from the image publish-privacy-wallet-image
-//           pushed and writes the deployment descriptor
+//   build   reads the /tvc_app digest from the network's image that
+//           publish-privacy-wallet-image pushed and writes the deployment
+//           descriptor
 //   deploy  creates the TVC deployment, approves and provisions it for every
 //           operator, makes it live, and waits for /v1/info to serve it
-//   policy  assembles the release policy from /v1/info, signs it with a
-//           one-time authority key, and pins the trust material in tvc-wallet
-//   pins    copies the signed policy and its authorities into tvc-gateway
+//   policy  verifies the live replica's Boot Proof as a client would (the
+//           pinned QOS PCRs, the manifest digest and Quorum key /v1/info
+//           reports, the Turnkey trust root), then assembles the release
+//           policy from /v1/info, signs it with a one-time authority key, and
+//           pins it in tvc-wallet's src/releases/<network>.json, the file
+//           tvc-gateway reads too
 //
-//   node scripts/release.mjs <build|deploy|policy|pins|all> <release-id>
-//     [--image <reference>] [--unattended] [--prune-deployments]
+//   node scripts/release.mjs <build|deploy|policy|all> <release-id>
+//     --network <devnet|mainnet> [--image <reference>] [--unattended]
+//     [--prune-deployments]
 //
-// Turnkey is driven through the `tvc` CLI and its active login. Approvals are
+// Turnkey is driven through the `tvc` CLI and its active login; the policy
+// phase reads that login's API key to fetch the Boot Proof, and verifies it
+// with tvc-wallet's build (packages/tvc-wallet/dist). Approvals are
 // interactive: the CLI shows the QOS manifest for each operator to confirm.
-// --unattended approves without that review. --prune-deployments deletes the
-// oldest deployments that are neither live nor this release's until it fits
-// under Turnkey's cap. The constants of the app are in
-// apps/privacy-wallet/deploy/release.json.
+// --unattended approves without that review, on devnet only.
+// --prune-deployments deletes the oldest deployments that are neither live nor
+// this release's until it fits under Turnkey's cap. The constants are in
+// apps/privacy-wallet/deploy/release.json, shared at the top and per network
+// under `networks`; each network's deployment files are in
+// apps/privacy-wallet/deploy/<network>/.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { createECDH, createPrivateKey, sign } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const DEPLOY_DIR = join(ROOT, "apps/privacy-wallet/deploy");
-const PINS = {
-  trust: "packages/tvc-wallet/src/devnet-release.json",
-  releasePolicy: "apps/tvc-gateway/configs/release-policy.json",
-  releaseAuthorities: "apps/tvc-gateway/configs/release-authorities.json",
-};
+const NETWORKS = ["devnet", "mainnet"];
+/** `API_VERSION` in crates/protocol/src/constants.rs: the release policy and `/v1/info` version. */
+const API_VERSION = 1;
+/** The operations, in the order the enclave advertises them and clients compare them. */
 const OPERATIONS = ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"];
 const HEX = (bytes) => new RegExp(`^[0-9a-f]{${2 * bytes}}$`);
 const WAIT_MS = 20 * 60_000;
 /** Turnkey's cap on deployable deployments per TVC app. */
 const DEPLOYABLE_LIMIT = 3;
+/** tvc-wallet's built `./testing` entry, whose `verifyLiveReplica` checks the replica before the policy is signed. */
+const CLIENT_TESTING = join(ROOT, "packages/tvc-wallet/dist/testing.js");
+const TURNKEY_API = "https://api.turnkey.com";
 
-const descriptorPath = (releaseId) => join(DEPLOY_DIR, `privacy-wallet-${releaseId}.deployment.json`);
-const recordPath = (releaseId) => join(DEPLOY_DIR, `privacy-wallet-${releaseId}.deploy.json`);
+/** The network's release pin in tvc-wallet, which tvc-gateway reads too. */
+const pinPath = (network) => join(ROOT, "packages/tvc-wallet/src/releases", `${network}.json`);
+const descriptorPath = (cfg, releaseId) => join(DEPLOY_DIR, cfg.network, `privacy-wallet-${releaseId}.deployment.json`);
+const recordPath = (cfg, releaseId) => join(DEPLOY_DIR, cfg.network, `privacy-wallet-${releaseId}.deploy.json`);
+
+class ReleaseError extends Error {}
 
 function fail(message) {
-  console.error(`error: ${message}`);
-  process.exit(1);
+  throw new ReleaseError(message);
 }
 
 function readJson(path) {
@@ -56,8 +73,9 @@ function readJson(path) {
 }
 
 function writeJson(path, value) {
+  mkdirSync(resolve(path, ".."), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
-  console.log(`wrote ${path}`);
+  console.log(`wrote ${relative(ROOT, path)}`);
 }
 
 /** Runs a command on the terminal, for the prompts of an interactive approval. */
@@ -92,26 +110,49 @@ async function waitFor(label, ready) {
   }
 }
 
-function config() {
-  const cfg = readJson(join(DEPLOY_DIR, "release.json"));
-  for (const key of ["appId", "endpoint", "imageRepository", "qosVersion", "securityDomainId", "quorumKeyId", "quorumKeyEpoch", "turnkeyTrustRootId"]) {
-    if (typeof cfg[key] !== "string" || cfg[key] === "") fail(`release.json: ${key} is required`);
+/**
+ * The shared constants of release.json with those of `network` on top, and
+ * `network` itself. A network without an entry has no Turnkey app yet.
+ */
+function config(network) {
+  const { networks, ...shared } = readJson(join(DEPLOY_DIR, "release.json"));
+  for (const key of ["imageRepository", "qosVersion", "turnkeyTrustRootId"]) {
+    if (typeof shared[key] !== "string" || shared[key] === "") fail(`release.json: ${key} is required`);
   }
-  if (!Array.isArray(cfg.operatorIds) || cfg.operatorIds.length === 0) fail("release.json: operatorIds is required");
+  if (!Array.isArray(shared.turnkeyProofSchemaVersions) || shared.turnkeyProofSchemaVersions.length === 0) {
+    fail("release.json: turnkeyProofSchemaVersions is required");
+  }
+  if (!Number.isSafeInteger(shared.policyValidityDays) || shared.policyValidityDays < 1) {
+    fail("release.json: policyValidityDays must be a positive whole number");
+  }
   for (const index of ["0", "1", "2", "3"]) {
-    if (!HEX(48).test(cfg.qosIdentityPcrs?.[index] ?? "")) fail(`release.json: qosIdentityPcrs.${index} must be 48-byte hex`);
+    if (!HEX(48).test(shared.qosIdentityPcrs?.[index] ?? "")) fail(`release.json: qosIdentityPcrs.${index} must be 48-byte hex`);
   }
-  return cfg;
+  if (typeof networks !== "object" || networks === null || !Object.hasOwn(networks, network)) {
+    fail(`release.json has no networks.${network}: add the ${network} Turnkey app, its Quorum key and operators first`);
+  }
+  const net = networks[network];
+  if (typeof net !== "object" || net === null) fail(`release.json: networks.${network} must be an object`);
+  for (const key of ["appId", "endpoint", "securityDomainId", "quorumKeyId", "quorumKeyEpoch"]) {
+    if (typeof net[key] !== "string" || net[key] === "") fail(`release.json: networks.${network}.${key} is required`);
+  }
+  if (!Array.isArray(net.operatorIds) || net.operatorIds.length === 0) {
+    fail(`release.json: networks.${network}.operatorIds is required`);
+  }
+  return { ...shared, ...net, network };
 }
 
 function build(releaseId, cfg, image) {
   if (!image) fail("build needs --image, the reference publish-privacy-wallet-image reports");
-  if (!image.startsWith(`${cfg.imageRepository}:`) || !/^[^@]+@sha256:[0-9a-f]{64}$/.test(image)) {
-    fail(`--image must be ${cfg.imageRepository}:<tag>@sha256:<digest>`);
+  // The publish workflow tags each image with the network whose prover policy
+  // and keys it was built with.
+  const tag = `${cfg.imageRepository}:privacy-wallet-${cfg.network}-`;
+  if (!image.startsWith(tag) || !/^[^@]+@sha256:[0-9a-f]{64}$/.test(image)) {
+    fail(`--image must be ${tag}<commit>@sha256:<digest>, the ${cfg.network} image publish-privacy-wallet-image reports`);
   }
   const pivotDigest = capture("docker", ["run", "--rm", "--platform", "linux/amd64", "--entrypoint", "sha256sum", image, "/tvc_app"]).split(" ")[0];
   if (!HEX(32).test(pivotDigest)) fail(`could not read the /tvc_app digest: ${pivotDigest}`);
-  writeJson(descriptorPath(releaseId), {
+  writeJson(descriptorPath(cfg, releaseId), {
     appId: cfg.appId,
     qosVersion: cfg.qosVersion,
     pivotContainerImageUrl: image,
@@ -160,7 +201,7 @@ async function fetchInfo(endpoint) {
 
 /** Waits until the endpoint serves this release, and returns its /v1/info. */
 async function awaitRelease(releaseId, cfg) {
-  const { expectedPivotDigest } = readJson(descriptorPath(releaseId));
+  const { expectedPivotDigest } = readJson(descriptorPath(cfg, releaseId));
   let info;
   await waitFor(`${cfg.endpoint} to serve ${releaseId}`, async () => {
     info = await fetchInfo(cfg.endpoint).catch((error) => ({ error: error.message }));
@@ -171,11 +212,12 @@ async function awaitRelease(releaseId, cfg) {
 
 /** The deployment record is the phase's progress: a re-run continues where the last one stopped. */
 async function deploy(releaseId, cfg, { unattended, prune }) {
-  if (!existsSync(descriptorPath(releaseId))) fail(`no ${descriptorPath(releaseId)}: run build first`);
-  const path = recordPath(releaseId);
+  const descriptor = descriptorPath(cfg, releaseId);
+  if (!existsSync(descriptor)) fail(`no ${relative(ROOT, descriptor)}: run build first`);
+  const path = recordPath(cfg, releaseId);
   const record = existsSync(path)
     ? readJson(path)
-    : { deployId: tvc("deploy", "create", "--config-file", descriptorPath(releaseId)).deploymentId, approved: [], provisioned: [], live: false };
+    : { deployId: tvc("deploy", "create", "--config-file", descriptor).deploymentId, approved: [], provisioned: [], live: false };
   const save = () => writeJson(path, record);
   save();
   const { deployId } = record;
@@ -211,26 +253,30 @@ async function deploy(releaseId, cfg, { unattended, prune }) {
   await awaitRelease(releaseId, cfg);
 }
 
-async function policy(releaseId, cfg) {
-  const info = await awaitRelease(releaseId, cfg);
+/**
+ * The unsigned release policy for `releaseId` as the enclave at `cfg.endpoint`
+ * serves it (`info`, its /v1/info), checked against the release constants:
+ * the shape `ReleasePolicy` in crates/protocol takes.
+ */
+export function releasePolicy(releaseId, cfg, info, now) {
   const expect = (field, expected) => {
     if (info[field] !== expected) fail(`/v1/info ${field} is ${info[field]}, expected ${expected}`);
   };
-  expect("environment", "development");
+  expect("version", API_VERSION);
+  expect("network", cfg.network);
   expect("security_domain_id", cfg.securityDomainId);
   expect("quorum_key_id", cfg.quorumKeyId);
   expect("quorum_key_epoch", cfg.quorumKeyEpoch);
   if (!HEX(32).test(info.manifest_digest)) fail("/v1/info manifest_digest is not 32-byte hex");
+  if (!HEX(32).test(info.executable_digest)) fail("/v1/info executable_digest is not 32-byte hex");
   if (!HEX(130).test(info.quorum_public_key)) fail("/v1/info quorum_public_key is not a QOS public key");
-  if ([...info.supported_operations].sort().join() !== [...OPERATIONS].sort().join()) {
-    fail(`/v1/info supported_operations are ${info.supported_operations.join(", ")}`);
+  if (!Array.isArray(info.supported_operations) || info.supported_operations.join() !== OPERATIONS.join()) {
+    fail(`/v1/info supported_operations are ${info.supported_operations}, expected ${OPERATIONS.join(", ")}`);
   }
-
-  const now = Date.now();
-  const unsigned = {
-    version: 1,
+  return {
+    version: API_VERSION,
     releaseId,
-    environment: "development",
+    network: cfg.network,
     tvcApplicationId: cfg.appId,
     securityDomainId: cfg.securityDomainId,
     acceptedManifestDigests: [info.manifest_digest],
@@ -247,59 +293,191 @@ async function policy(releaseId, cfg) {
     validFromMs: String(now),
     expiresAtMs: String(now + cfg.policyValidityDays * 86_400_000),
   };
-  const authoritySetId = `${releaseId}-${new Date(now).toISOString().slice(0, 7)}`;
+}
 
-  // The authority key is generated inside the signer, used once, and gone
-  // when it exits; only the signed policy and the public half come back.
+/**
+ * Signs `policy` under a fresh authority set with
+ * `cargo run -p zolana-tvc-protocol --example sign-release-policy`, which
+ * verifies the result as `verify_signed_release_policy` does for the policy's
+ * network before it answers. The authority key is generated inside that call,
+ * used once, and gone when it exits; only the signed policy and the public
+ * half come back, as `{releasePolicy, releaseAuthorities}`.
+ */
+export function signReleasePolicy(policy, authoritySetId) {
   const scratch = mkdtempSync(join(tmpdir(), "zolana-tvc-release-"));
-  let signed;
   try {
-    writeFileSync(join(scratch, "policy.json"), JSON.stringify(unsigned));
+    writeFileSync(join(scratch, "policy.json"), JSON.stringify(policy));
     const args = ["run", "-q", "-p", "zolana-tvc-protocol", "--example", "sign-release-policy", "--", join(scratch, "policy.json"), authoritySetId];
-    signed = JSON.parse(capture("cargo", args));
+    return JSON.parse(capture("cargo", args));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
-  writeJson(join(ROOT, PINS.trust), {
+}
+
+/**
+ * The Turnkey API key the `tvc` CLI acts with, and its organization, which
+ * holds the TVC app: `TVC_ORG_ID`, `TVC_API_KEY_PUBLIC` and
+ * `TVC_API_KEY_PRIVATE` when set, as tvc reads them, else the active
+ * organization of tvc's config file.
+ */
+export function tvcCredentials({ env = process.env, configDir = join(homedir(), ".config/turnkey") } = {}) {
+  const named = [env.TVC_ORG_ID, env.TVC_API_KEY_PUBLIC, env.TVC_API_KEY_PRIVATE];
+  if (named.some(Boolean)) {
+    if (!named.every(Boolean)) fail("set all of TVC_ORG_ID, TVC_API_KEY_PUBLIC and TVC_API_KEY_PRIVATE, or none");
+    const [organizationId, publicKey, privateKey] = named;
+    return { organizationId, apiBaseUrl: TURNKEY_API, publicKey, privateKey };
+  }
+  const path = join(configDir, "tvc.config.toml");
+  if (!existsSync(path)) fail(`no ${path}: run tvc login, or set TVC_ORG_ID, TVC_API_KEY_PUBLIC and TVC_API_KEY_PRIVATE`);
+  const config = readFileSync(path, "utf8");
+  const active = /^active_org\s*=\s*"([^"]+)"/m.exec(config)?.[1];
+  if (!active) fail(`${path} names no active_org`);
+  // The [orgs.<active>] table, up to the next table header.
+  const table = config.split(/^\[/m).find((block) => block.startsWith(`orgs.${active}]`)) ?? "";
+  const value = (key) => new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m").exec(table)?.[1];
+  const organizationId = value("id");
+  const keyPath = value("api_key_path");
+  if (!organizationId || !keyPath) fail(`${path}: [orgs.${active}] needs id and api_key_path`);
+  const key = readJson(keyPath);
+  return { organizationId, apiBaseUrl: value("api_base_url") || TURNKEY_API, publicKey: key.public_key, privateKey: key.private_key };
+}
+
+/**
+ * Turnkey's API-key stamp of `body`, the `X-Stamp` header: ECDSA P-256 over
+ * SHA-256 of the body, DER, with the compressed public key that names the key.
+ */
+export function turnkeyStamp(body, { publicKey, privateKey }) {
+  if (!HEX(32).test(privateKey ?? "") || !/^0[23][0-9a-f]{64}$/.test(publicKey ?? "")) {
+    fail("the Turnkey API key must be a 32-byte private key and a compressed public key, in hex");
+  }
+  const secret = Buffer.from(privateKey, "hex");
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(secret);
+  if (ecdh.getPublicKey("hex", "compressed") !== publicKey) fail("the Turnkey API key's private half does not match its public key");
+  const point = ecdh.getPublicKey();
+  const jwk = {
+    kty: "EC",
+    crv: "P-256",
+    d: secret.toString("base64url"),
+    x: point.subarray(1, 33).toString("base64url"),
+    y: point.subarray(33).toString("base64url"),
+  };
+  const signature = sign("sha256", Buffer.from(body), createPrivateKey({ key: jwk, format: "jwk" })).toString("hex");
+  return Buffer.from(JSON.stringify({ publicKey, scheme: "SIGNATURE_SCHEME_TK_API_P256", signature })).toString("base64url");
+}
+
+/** Fetches a replica's Boot Proof from Turnkey (`get_boot_proof`) with `credentials`. */
+export function turnkeyBootProofs(credentials, transport = { fetch }) {
+  return async (ephemeralKey) => {
+    const body = JSON.stringify({ organizationId: credentials.organizationId, ephemeralKey });
+    const response = await transport.fetch(new URL("/public/v1/query/get_boot_proof", credentials.apiBaseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-stamp": turnkeyStamp(body, credentials) },
+      body,
+    });
+    if (!response.ok) fail(`Turnkey answered the Boot Proof lookup with ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    const { bootProof } = await response.json();
+    if (!bootProof) fail("Turnkey has no Boot Proof for the replica that answered");
+    return bootProof;
+  };
+}
+
+/**
+ * Verifies the replica that serves `info` as a client will, before anything
+ * is signed: it answers a challenge sealed to `info`'s Quorum key, and its Boot
+ * Proof chains to the pinned AWS Nitro root, carries release.json's
+ * `qosIdentityPcrs` and attests `info`'s manifest digest, under the trust root
+ * the release names. `bootProof` defaults to Turnkey with the `tvc` login.
+ */
+export async function verifyRelease(cfg, info, { bootProof, transport, nowMs } = {}) {
+  if (!existsSync(CLIENT_TESTING)) {
+    fail(`${relative(ROOT, CLIENT_TESTING)} is missing: the policy phase verifies the replica with it, so build tvc-wallet first (npx pnpm build:ts)`);
+  }
+  const { verifyLiveReplica } = await import(pathToFileURL(CLIENT_TESTING).href);
+  try {
+    await verifyLiveReplica({
+      endpoint: new URL(cfg.endpoint),
+      info,
+      qosIdentityPcrs: cfg.qosIdentityPcrs,
+      turnkeyTrustRootId: cfg.turnkeyTrustRootId,
+      bootProof: bootProof ?? turnkeyBootProofs(tvcCredentials()),
+      ...(transport ? { transport } : {}),
+      ...(nowMs === undefined ? {} : { nowMs }),
+    });
+  } catch (error) {
+    if (error instanceof ReleaseError) throw error;
+    fail(`the replica at ${cfg.endpoint} does not verify, so nothing was signed: ${error.message}`);
+  }
+  console.log(`verified a replica at ${cfg.endpoint}: manifest ${info.manifest_digest} under the pinned PCRs`);
+}
+
+/**
+ * The release file for `releaseId` as the enclave at `cfg.endpoint` serves it
+ * (`info`): verified first, then signed. `verify` and `sign` are
+ * `verifyRelease` and `signReleasePolicy`.
+ */
+export async function verifiedReleaseFile(releaseId, cfg, info, now, { verify = verifyRelease, sign = signReleasePolicy } = {}) {
+  const unsigned = releasePolicy(releaseId, cfg, info, now);
+  await verify(cfg, info);
+  const signed = sign(unsigned, `${releaseId}-${new Date(now).toISOString().slice(0, 7)}`);
+  return {
     releasePolicy: signed.releasePolicy,
     releaseAuthorities: signed.releaseAuthorities,
     qosIdentityPcrs: cfg.qosIdentityPcrs,
-  });
+  };
 }
 
-function pins(releaseId) {
-  const trust = readJson(join(ROOT, PINS.trust));
-  const pinned = trust.releasePolicy?.policy?.releaseId;
-  if (pinned !== releaseId) fail(`${PINS.trust} pins ${pinned}, not ${releaseId}; run the policy phase first`);
-  writeJson(join(ROOT, PINS.releasePolicy), trust.releasePolicy);
-  writeJson(join(ROOT, PINS.releaseAuthorities), trust.releaseAuthorities);
+async function policy(releaseId, cfg) {
+  const info = await awaitRelease(releaseId, cfg);
+  writeJson(pinPath(cfg.network), await verifiedReleaseFile(releaseId, cfg, info, Date.now()));
 }
 
-const USAGE = "usage: node scripts/release.mjs <build|deploy|policy|pins|all> <release-id> [--image <reference>] [--unattended] [--prune-deployments]";
-const PHASES = ["build", "deploy", "policy", "pins"];
-let args;
-try {
-  args = parseArgs({
-    allowPositionals: true,
-    options: {
-      image: { type: "string" },
-      unattended: { type: "boolean", default: false },
-      "prune-deployments": { type: "boolean", default: false },
-    },
-  });
-} catch (error) {
-  fail(`${error.message}\n${USAGE}`);
+const USAGE =
+  "usage: node scripts/release.mjs <build|deploy|policy|all> <release-id> --network <devnet|mainnet> " +
+  "[--image <reference>] [--unattended] [--prune-deployments]";
+const PHASES = ["build", "deploy", "policy"];
+
+async function main() {
+  let args;
+  try {
+    args = parseArgs({
+      allowPositionals: true,
+      options: {
+        network: { type: "string" },
+        image: { type: "string" },
+        unattended: { type: "boolean", default: false },
+        "prune-deployments": { type: "boolean", default: false },
+      },
+    });
+  } catch (error) {
+    fail(`${error.message}\n${USAGE}`);
+  }
+  const { positionals, values } = args;
+  const [phase, releaseId] = positionals;
+  if (![...PHASES, "all"].includes(phase) || !releaseId || positionals.length > 2) fail(USAGE);
+  if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(releaseId)) fail("release id: lowercase letters, digits and dashes");
+  const { network } = values;
+  if (!NETWORKS.includes(network)) fail(`--network must be devnet or mainnet\n${USAGE}`);
+  // Each operator reviews the QOS manifest of a mainnet deployment before approving it.
+  if (values.unattended && network === "mainnet") fail("--unattended is refused on mainnet: every approval is reviewed");
+  const cfg = config(network);
+  for (const step of phase === "all" ? PHASES : [phase]) {
+    console.log(`\n== ${step} ${releaseId} (${network})`);
+    if (step === "build") build(releaseId, cfg, values.image);
+    if (step === "deploy") await deploy(releaseId, cfg, { unattended: values.unattended, prune: values["prune-deployments"] });
+    if (step === "policy") await policy(releaseId, cfg);
+  }
+  console.log(
+    `\n${releaseId}: done. Commit ${relative(ROOT, join(DEPLOY_DIR, network))} and ${relative(ROOT, pinPath(network))}.`,
+  );
 }
-const { positionals, values } = args;
-const [phase, releaseId] = positionals;
-if (![...PHASES, "all"].includes(phase) || !releaseId || positionals.length > 2) fail(USAGE);
-if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(releaseId)) fail("release id: lowercase letters, digits and dashes");
-const cfg = config();
-for (const step of phase === "all" ? PHASES : [phase]) {
-  console.log(`\n== ${step} ${releaseId}`);
-  if (step === "build") build(releaseId, cfg, values.image);
-  if (step === "deploy") await deploy(releaseId, cfg, { unattended: values.unattended, prune: values["prune-deployments"] });
-  if (step === "policy") await policy(releaseId, cfg);
-  if (step === "pins") pins(releaseId);
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await main();
+  } catch (error) {
+    if (!(error instanceof ReleaseError)) throw error;
+    console.error(`error: ${error.message}`);
+    process.exit(1);
+  }
 }
-console.log(`\n${releaseId}: done. Commit apps/privacy-wallet/deploy, ${Object.values(PINS).join(", ")}.`);

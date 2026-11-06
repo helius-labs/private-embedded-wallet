@@ -15,14 +15,18 @@ Routes:
 Module map: `operations/` (request validation, `bootstrap.rs`, `keys.rs` for
 the three derivation operations, `prove.rs` for completing a prover request
 and sealing it to an attested prover, `sealed.rs` for the sealed seed),
-`custody.rs` (Turnkey signing of the derivation message behind one trait),
+`network.rs` (what the image trusts on each network), `custody.rs` (Turnkey
+signing of the derivation message behind one trait),
 `turnkey.rs` (Turnkey API stamping with the Quorum signing subkey),
 `local_dev.rs` and `local_prover.rs` (testkit, `local-dev` feature only).
 
 The only network origin is Turnkey, compiled in. A proof's witness is sealed to
 a prover the network's signed prover policy admits and posted by the client.
 The network is fixed at build time by `SPR_NETWORK` (`devnet`, the default for
-local builds, or `mainnet`); the image pins that network's policy signers.
+local builds, or `mainnet`), which picks one entry of `network.rs`: the
+network `/v1/info` names and descriptors must name, the provisioning and
+wallet-grant public keys of that network's tvc-gateway, and the network's
+prover policy signers.
 
 ## Build
 
@@ -47,13 +51,22 @@ cargo run -p zolana-tvc-privacy-wallet --features local-dev \
   --wallet-keypair /path/to/disposable-keypair.json --prover-url http://127.0.0.1:3001
 ```
 
-Clients prove through `http://127.0.0.1:44021` (`localProverConfig` in
-`@heliuslabs/spr-embedded-wallet/testing`).
+Clients prove through `http://127.0.0.1:44021` (`createLocalTvcClient`'s
+`prover: localProverConfig(url)` in `@heliuslabs/spr-embedded-wallet/testing`).
 
 `--live-prover` starts no stand-in: the local enclave seals witnesses only to a
 prover whose Nitro attestation chains to the production AWS root and passes
-the network's signed policy, as the enclave image does. Clients prove through
-that network's TEE provers with `TvcProverPolicy.forNetwork(network)`; the
-custody and QOS keys stay local and unattested.
+the network's signed policy, as the enclave image does. Clients of that network
+(`createLocalTvcClient({ network, prover: { url } })`) prove through its TEE
+provers under its policy; the custody and QOS keys stay local and unattested.
 
 The `local-dev` feature is never enabled in the enclave binary.
+
+## Release
+
+`deploy/release.json` holds the release constants, shared at the top and per
+network under `networks`; `deploy/<network>/` holds that network's Turnkey app
+and deployment files. `just release <network> <release-id> --image <reference>`
+deploys the network's image and pins its signed release in
+`packages/tvc-wallet/src/releases/<network>.json`; see
+[`scripts/README.md`](../../scripts/README.md#release).

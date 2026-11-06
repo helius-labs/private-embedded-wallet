@@ -3,10 +3,9 @@ import {
   TVC_APP_PROOF_TYPE,
 } from "../protocol/constants.js";
 import { TvcError } from "../protocol/error.js";
-import type { OperationKind } from "../protocol/types.js";
+import type { Network, OperationKind } from "../protocol/types.js";
 import { fetchSession, type TvcBackend } from "./backend.js";
 import {
-  createVerifiedConnection,
   parseServiceInfo,
   qosPingChallenge,
   verifyQosPingAnswer,
@@ -15,6 +14,8 @@ import {
 import { createDefaultTransport, type TvcTransport } from "./transport.js";
 
 export type LocalUnattestedConnectionConfig = {
+  /** The network the testkit was built for. */
+  readonly network: Network;
   readonly backend: TvcBackend;
   readonly expectedReleaseId: string;
   readonly expectedSecurityDomainId: string;
@@ -46,7 +47,7 @@ export async function connectLocalUnattestedTvc(
   const info = parseServiceInfo(session.infoText);
   if (
     info.version !== API_VERSION ||
-    info.environment !== "development" ||
+    info.network !== config.network ||
     info.release_id !== config.expectedReleaseId ||
     info.security_domain_id !== config.expectedSecurityDomainId ||
     info.manifest_digest !== config.expectedManifestDigest ||
@@ -56,7 +57,6 @@ export async function connectLocalUnattestedTvc(
     info.proof_type !== TVC_APP_PROOF_TYPE ||
     info.quorum_public_key !== config.expectedQuorumPublicKey ||
     info.ephemeral_public_key !== config.expectedEphemeralPublicKey ||
-    info.boot_proof_lookup_key !== config.expectedEphemeralPublicKey ||
     info.supported_operations.length !== config.expectedOperations.length ||
     config.expectedOperations.some(
       (operation, index) => info.supported_operations[index] !== operation,
@@ -71,7 +71,6 @@ export async function connectLocalUnattestedTvc(
   }
   const nowMs = config.nowMs ?? (() => BigInt(Date.now()));
   return {
-    connection: createVerifiedConnection(info.release_id),
     backend: config.backend,
     info,
     transport,
@@ -83,9 +82,6 @@ export async function connectLocalUnattestedTvc(
         if (proof.publicKey !== config.expectedEphemeralPublicKey) {
           throw new TvcError("TurnkeyEvidenceInvalid");
         }
-      },
-      verifyCustodyProofs(proofs) {
-        if (proofs.length !== 0) throw new TvcError("TurnkeyEvidenceInvalid");
       },
     }),
   };

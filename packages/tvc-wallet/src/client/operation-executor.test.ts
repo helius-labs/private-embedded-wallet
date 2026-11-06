@@ -20,12 +20,12 @@ function fixture() {
     "../../../../crates/protocol/fixtures/wallet-grant-digest.json", import.meta.url,
   ), "utf8")) as { grant: WalletGrant };
   const info = {
-    version: 1, environment: "development", security_domain_id: "00".repeat(32),
+    version: 1, network: "devnet", security_domain_id: "00".repeat(32),
     release_id: "test-é", manifest_digest: "11".repeat(32), executable_digest: "22".repeat(32),
     quorum_public_key: encodeLowerHex(publicKey) + encodeLowerHex(publicKey),
     quorum_key_id: "quorum-é", quorum_key_epoch: "1", ephemeral_public_key: "",
     supported_operations: ["Decrypt"], max_encrypted_request_bytes: "262144",
-    max_encrypted_response_bytes: "262144", proof_type: "", boot_proof_lookup_key: "",
+    max_encrypted_response_bytes: "262144", proof_type: "",
   } satisfies ServiceInfo;
   const sign = vi.fn(async ({ clientAuthDigest }: { clientAuthDigest: Uint8Array }) => signP256Prehash(secret, clientAuthDigest));
   const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response("", { status: 503 }));
@@ -33,12 +33,12 @@ function fixture() {
     backend: { kind: "enclave", endpoint: new URL("https://example.invalid"), walletGrant: async () => grant },
     info, transport: { fetch },
     operations: {
-      walletDescriptor: descriptor,
-      authorizer: { clientKeyId: clientKeyIdFor(publicKey), authorizeTvcRequest: sign },
+      descriptor,
+      signer: { clientKeyId: clientKeyIdFor(publicKey), signRequest: sign },
     },
     releasePolicyValidFromMs: 0n,
     releasePolicyExpiresAtMs: 9999999n, nowMs: () => 1000n,
-    trustVerifier: { verifyOperationAppProof: async () => {}, verifyCustodyProofs: () => {} },
+    trustVerifier: { verifyOperationAppProof: async () => {} },
   };
   const item = {
     ciphertext: "ab".repeat(128), viewing_public_key: "04" + "11".repeat(32),
@@ -71,6 +71,21 @@ describe("wallet grant", () => {
   });
 });
 
+it("refuses a descriptor for another network before signing", async () => {
+  const { context, item, sign, fetch } = fixture();
+  const mainnet: OperationExecutionContext = {
+    ...context,
+    operations: {
+      ...context.operations,
+      descriptor: { ...context.operations.descriptor, network: "mainnet" },
+    },
+  };
+  await expect(executeOperationEnvelope(mainnet, { type: "Decrypt", items: [item] }))
+    .rejects.toMatchObject({ code: "NetworkMismatch" });
+  expect(sign).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
 describe("through a gateway", () => {
   function gatewayFixture() {
     const base = fixture();
@@ -91,7 +106,7 @@ describe("through a gateway", () => {
       request: Record<string, unknown>;
     };
     expect(Object.keys(body).sort()).toEqual(["descriptor", "request"]);
-    expect(body.descriptor).toEqual(context.operations.walletDescriptor);
+    expect(body.descriptor).toEqual(context.operations.descriptor);
     expect(Object.keys(body.request).sort()).toEqual(["ciphertext", "quorum_key_epoch", "quorum_key_id", "version"]);
   });
 
@@ -167,7 +182,7 @@ it("wipes the response key when request authorization fails", async () => {
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it("releases and wipes a request whose authorizer never answers, without sending it later", async () => {
+it("releases and wipes a request whose signer never answers, without sending it later", async () => {
   const { context, item, sign, fetch } = fixture();
   const responseKey = new Uint8Array(32).fill(7);
   vi.spyOn(p256.utils, "randomPrivateKey").mockReturnValueOnce(responseKey);

@@ -2,9 +2,7 @@
 
 use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::error::{ErrorCode, TvcError};
-use zolana_tvc_protocol::types::{
-    reject_production_environment, EncryptedRequest, OperationRequest, ServiceInfo,
-};
+use zolana_tvc_protocol::types::{EncryptedRequest, OperationRequest, ServiceInfo};
 
 pub(super) fn check_encrypted_request_bindings(
     outer: &EncryptedRequest,
@@ -29,9 +27,8 @@ pub(super) fn check_request_bindings(
     if request.version != API_VERSION {
         return Err(TvcError::new(ErrorCode::UnsupportedVersion));
     }
-    reject_production_environment(request.wallet_descriptor.environment)?;
-    if request.wallet_descriptor.environment != running.environment {
-        return Err(TvcError::new(ErrorCode::WalletBindingMismatch));
+    if request.wallet_descriptor.network != running.network {
+        return Err(TvcError::new(ErrorCode::NetworkMismatch));
     }
     if request.target_release_id != running.release_id
         || request.target_manifest_digest != running.manifest_digest

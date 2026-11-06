@@ -6,7 +6,7 @@ export const TVC_QOS_PING_PROOF_TYPE = "zolana.tvc.qos_ping.v1";
 export const TVC_APP_PROOF_KEYS = ["scheme", "public_key", "proof_payload", "signature"] as const;
 
 export const REQUEST_DIGEST_DOMAIN = "ZOLANA_TVC_REQUEST_V1";
-export const CLIENT_AUTH_DOMAIN = "ZOLANA_TVC_CLIENT_AUTH_V1";
+export const CLIENT_AUTH_DOMAIN = "spr-tvc-client-auth-v1";
 export const RESULT_DIGEST_DOMAIN = "ZOLANA_TVC_RESULT_V1";
 export const SEALED_SEED_DIGEST_DOMAIN = "ZOLANA_TVC_SEALED_SEED_DIGEST_V1";
 export const RELEASE_POLICY_DOMAIN = "ZOLANA_TVC_RELEASE_POLICY_V1";

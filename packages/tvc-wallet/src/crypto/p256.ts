@@ -32,16 +32,6 @@ function parseRawLowS(signature: Uint8Array) {
   return sig;
 }
 
-function parseRawSignature(signature: Uint8Array) {
-  if (signature.length !== RAW_P256_SIGNATURE_LEN) {
-    if (signature.length > 0 && signature[0] === 0x30) {
-      throw new TvcError("DerSignatureRejected");
-    }
-    throw new TvcError("InvalidSignature");
-  }
-  return p256.Signature.fromCompact(signature);
-}
-
 export function signP256Prehash(secret: Uint8Array, digest: Uint8Array): Uint8Array {
   const sig = p256.sign(digest, secret, { lowS: true, prehash: false });
   return sig.toCompactRawBytes();
@@ -69,25 +59,4 @@ export function verifyP256Message(
   signature: Uint8Array,
 ): void {
   verifyP256Prehash(publicSec1, sha256(message), signature);
-}
-
-/**
- * Turnkey App Proof compatibility path. The official Rust verifier accepts
- * both P-256 S encodings, while TVC client authorization remains low-S only.
- */
-export function verifyTurnkeyAppProofP256Message(
-  publicSec1: Uint8Array,
-  message: Uint8Array,
-  signature: Uint8Array,
-): void {
-  parseUncompressedSec1(publicSec1);
-  const sig = parseRawSignature(signature);
-  if (
-    !p256.verify(sig, sha256(message), publicSec1, {
-      lowS: false,
-      prehash: false,
-    })
-  ) {
-    throw new TvcError("InvalidSignature");
-  }
 }

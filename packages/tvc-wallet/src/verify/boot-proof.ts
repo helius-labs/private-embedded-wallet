@@ -16,7 +16,6 @@ import {
   decodeCbor,
 } from "./internal/cbor.js";
 import {
-  assertNotProductionVerifier,
   type CoseSign1,
   type TurnkeyAppProofWire,
   type TurnkeyBootProofWire,
@@ -62,11 +61,10 @@ type DecodedBootProof = {
 };
 
 /**
- * Development PoC verifier composed from Turnkey's AWS Nitro helpers plus
+ * Verifies a replica's Boot Proof with Turnkey's AWS Nitro helpers plus
  * independently pinned QOS manifest/PCR checks.
  */
 export async function verifyBootProof(input: VerifyBootProofInput): Promise<void> {
-  assertNotProductionVerifier();
   let stage = "app-proof";
   try {
     verifyTvcAppProof(input.appProof);

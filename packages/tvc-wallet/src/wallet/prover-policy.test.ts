@@ -31,7 +31,7 @@ describe("TvcProverPolicy", () => {
       await TvcProverPolicy.forNetwork(network, transport).current();
     }
     expect(urls.map(String)).toEqual([PROVER_POLICY_URLS.devnet, PROVER_POLICY_URLS.mainnet]);
-    expect(() => TvcProverPolicy.forNetwork("testnet" as "devnet")).toThrowError("UnknownProverNetwork");
+    expect(() => TvcProverPolicy.forNetwork("testnet" as "devnet")).toThrowError(/UnknownNetwork/);
   });
 
   it("holds the file for its max age and downloads it again after", async () => {
@@ -67,18 +67,57 @@ describe("TvcProverPolicy", () => {
     await expect(policy.current()).rejects.toMatchObject({ code: "ProverPolicyUnavailable", status: 503 });
   });
 
-  it("refuses an older version or another payload under the same version", async () => {
-    for (const next of [
+  it("takes whatever the publisher serves next, older or not", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
+    const { transport } = served(
+      file({ version: 2, expiresAt: NOW_SECS + 3_600 }),
       file({ version: 1, expiresAt: NOW_SECS + 7_200 }),
-      file({ version: 1, maxAgeSecs: 300, expiresAt: NOW_SECS + 3_600 }),
-    ]) {
-      vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
-      const { transport } = served(file({ version: 1, expiresAt: NOW_SECS + 3_600 }), next);
-      const policy = new TvcProverPolicy(POLICY_URL, transport);
-      await policy.current();
-      policy.invalidate();
-      await expect(policy.current()).rejects.toMatchObject({ code: "ProverPolicyRollback" });
-    }
+    );
+    const policy = new TvcProverPolicy(POLICY_URL, transport);
+    expect(await policy.current()).toMatchObject({ version: 2 });
+    policy.invalidate();
+    expect(await policy.current()).toMatchObject({ version: 1 });
+  });
+
+  it("shares one download, ends only the cancelled caller's wait and stops once nobody waits", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
+    let release!: () => void;
+    const signals: AbortSignal[] = [];
+    const transport: TvcTransport = {
+      fetch: vi.fn(async (_url: URL, init?: RequestInit) => {
+        signals.push(init!.signal!);
+        await new Promise<void>((done) => (release = done));
+        init!.signal!.throwIfAborted();
+        return Response.json(policyFile({ expiresAt: NOW_SECS + 3_600 }));
+      }),
+    };
+    const policy = new TvcProverPolicy(POLICY_URL, transport);
+    const first = new AbortController();
+    const cancelled = policy.current(first.signal);
+    const waiting = policy.current();
+    const rejected = expect(cancelled).rejects.toThrow("first left");
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    first.abort(new Error("first left"));
+    await rejected;
+    expect(signals[0]!.aborted).toBe(false);
+    release();
+    await expect(waiting).resolves.toMatchObject({ version: 1 });
+    expect(transport.fetch).toHaveBeenCalledOnce();
+
+    policy.invalidate();
+    const alone = new AbortController();
+    const abandoned = policy.current(alone.signal);
+    const left = expect(abandoned).rejects.toThrow("left");
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    alone.abort(new Error("left"));
+    await left;
+    expect(signals[1]!.aborted).toBe(true);
+    release();
+    // The abandoned download leaves the held file to be downloaded again.
+    const next = policy.current();
+    await vi.waitFor(() => expect(signals).toHaveLength(3));
+    release();
+    await expect(next).resolves.toMatchObject({ version: 1 });
   });
 
   it("refuses a malformed or expired file", async () => {
@@ -119,18 +158,6 @@ describe("TvcProverPolicy", () => {
       issuedAt: NOW_SECS + 900 - 3_600,
       expiresAt: NOW_SECS + 900,
     });
-  });
-
-  it("takes a newer freshness part of the held release and refuses an older one", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
-    const part = (issuedAt: number) => file({ expiresAt: NOW_SECS + 7_200, issuedAt, freshUntil: NOW_SECS + 3_600 });
-    const { transport } = served(part(NOW_SECS - 600), part(NOW_SECS - 60), part(NOW_SECS - 900));
-    const policy = new TvcProverPolicy(POLICY_URL, transport);
-    await policy.current();
-    policy.invalidate();
-    expect(await policy.current()).toMatchObject({ issuedAt: NOW_SECS - 60 });
-    policy.invalidate();
-    await expect(policy.current()).rejects.toMatchObject({ code: "ProverPolicyRollback" });
   });
 
   it("lets one attestation serve for the max age and never past the expiry", () => {

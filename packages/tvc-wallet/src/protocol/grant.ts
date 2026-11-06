@@ -1,5 +1,6 @@
 import { signP256Prehash } from "../crypto/p256.js";
 import { encodeDecimalU64 } from "./decimal.js";
+import { API_VERSION } from "./constants.js";
 import { descriptorDigest, walletGrantDigest } from "./digest.js";
 import { TvcError } from "./error.js";
 import { encodeLowerHex } from "./hex.js";
@@ -26,7 +27,7 @@ export function signWalletGrant(input: WalletGrantInput, secret: Uint8Array): Wa
     throw new TvcError("InvalidDescriptor", "grant lifetime must be positive and at most one hour");
   }
   const unsigned: WalletGrant = {
-    version: 1,
+    version: API_VERSION,
     descriptor_digest: encodeLowerHex(descriptorDigest(input.descriptor)),
     client_key_id: input.clientKeyId,
     project_id: input.projectId,

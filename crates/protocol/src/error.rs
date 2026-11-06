@@ -34,8 +34,9 @@ pub enum ErrorCode {
     UnsupportedProofPath,
     BootProofUnverified,
     DiscoveryUntrusted,
-    ProductionClaimRejected,
+    NetworkMismatch,
     ReleasePolicyInvalid,
+    DescriptorExpired,
 }
 
 impl ErrorCode {
@@ -115,8 +116,9 @@ mod tests {
                 "UnsupportedProofPath",
                 "BootProofUnverified",
                 "DiscoveryUntrusted",
-                "ProductionClaimRejected",
+                "NetworkMismatch",
                 "ReleasePolicyInvalid",
+                "DescriptorExpired",
             ]
         );
         for code in ErrorCode::VARIANTS {

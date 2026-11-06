@@ -1,12 +1,13 @@
 import { requestScope, type TvcRequestOptions } from "../client/request.js";
 import { decodeDecimalU64 } from "../protocol/decimal.js";
 import { sealedSeedDigest } from "../protocol/digest.js";
-import { TvcError } from "../protocol/error.js";
+import { TvcError, TvcOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex, requireHex } from "../protocol/hex.js";
 import { parseStrictJson } from "../protocol/json.js";
 import type {
   SealedSeed,
   DecryptOperation,
+  FailureStage,
   DeriveOperation,
   Operation,
   OperationResult,
@@ -41,7 +42,6 @@ const RESULT_KEYS: Record<OperationResult["type"], readonly string[]> = {
     "shielded_viewing_public_key",
     "sealed_seed",
     "turnkey_activity_id",
-    "turnkey_app_proofs",
   ],
   Decrypt: ["type", "plaintexts"],
   Derive: ["type", "values"],
@@ -172,11 +172,12 @@ function checkHexList(values: unknown, count: number, bytes?: number): asserts v
   for (const value of values) requireHex(value, bytes);
 }
 
+const FAILURE_STAGES: readonly string[] = ["Prover", "TurnkeySigning"] satisfies FailureStage[];
+
 function checkResult<TOperation extends Operation>(
   result: OperationResult,
   operation: TOperation,
   proofSeedDigest: string,
-  context: OperationExecutionContext,
 ): asserts result is ResultFor<TOperation> {
   const keys = Object.hasOwn(RESULT_KEYS, result.type) ? RESULT_KEYS[result.type] : undefined;
   if (!keys) throw new TvcError("UnsupportedVersion");
@@ -188,7 +189,8 @@ function checkResult<TOperation extends Operation>(
         `failure names ${result.operation}, asked for ${operation.type}`,
       );
     }
-    throw new TvcError("OperationFailed", String(result.stage).slice(0, 200));
+    if (!FAILURE_STAGES.includes(result.stage)) throw new TvcError("UnsupportedVersion");
+    throw new TvcOperationError(result.operation, result.stage);
   }
   if (result.type !== operation.type) {
     throw new TvcError("ReleaseBindingMismatch", `result is ${result.type}, asked for ${operation.type}`);
@@ -196,7 +198,6 @@ function checkResult<TOperation extends Operation>(
 
   switch (result.type) {
     case "Bootstrap": {
-      context.trustVerifier.verifyCustodyProofs(result.turnkey_app_proofs);
       requireHex(result.shielded_owner_hash, 32);
       requireHex(result.shielded_nullifier_public_key, 32);
       requireHex(result.shielded_viewing_public_key, VIEWING_PUBLIC_KEY_BYTES);
@@ -264,7 +265,7 @@ export async function executeOperation<TOperation extends Operation>(
       throw new TvcError("ReleaseBindingMismatch", "proof names another sealed seed");
     }
     const result = parseStrictJson<OperationResult>(envelope.plaintext);
-    checkResult(result, operation, envelope.sealedSeedDigest, context);
+    checkResult(result, operation, envelope.sealedSeedDigest);
     return result;
   } finally { scope.dispose(); }
 }

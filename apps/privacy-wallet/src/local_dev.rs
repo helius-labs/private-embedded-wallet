@@ -12,16 +12,20 @@ use ed25519_dalek::{Signer as _, SigningKey};
 use qos_p256::P256Pair;
 use serde::Deserialize;
 use spr_prover_tee::{Anchors, PolicySigners};
-use zolana_tvc_protocol::constants::API_VERSION;
+use zeroize::Zeroizing;
 use zolana_tvc_protocol::digest::sha256;
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
 use zolana_tvc_protocol::types::OperationKind;
 
-use crate::custody::{Custody, CustodyError, Evidence, RawSignature, WalletKey};
-use crate::operations::{ProverTrust, NETWORK};
+use crate::custody::{Custody, CustodyError, RawSignature, WalletKey};
+use crate::network::NET;
+use crate::operations::ProverTrust;
 use crate::{AppState, DiscoveryConfig, Runtime, OPERATIONS};
 
 const TESTKIT_JSON: &str = include_str!("../../../packages/tvc-wallet/src/local-testkit.json");
+/// The testkit fixture's own format version, which the TypeScript testkit
+/// checks too; not the protocol's.
+const TESTKIT_VERSION: u8 = 1;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +56,7 @@ fn testkit() -> &'static Testkit {
     TESTKIT.get_or_init(|| {
         let testkit: Testkit =
             serde_json::from_str(TESTKIT_JSON).expect("local testkit fixture must be valid");
-        assert_eq!(testkit.version, API_VERSION);
+        assert_eq!(testkit.version, TESTKIT_VERSION);
         assert_eq!(testkit.operations, OPERATIONS);
         let ephemeral = P256Pair::from_master_seed(&decode_32(&testkit.ephemeral_seed_hex).into())
             .expect("ephemeral seed");
@@ -117,7 +121,7 @@ impl LocalProverTrust {
             Self::StandIn(anchors) => {
                 let signer = testkit_prover_keys().0.verifying_key().to_bytes();
                 ProverTrust {
-                    signers: PolicySigners::new(NETWORK, vec![signer], 1)
+                    signers: PolicySigners::new(NET.network.as_str(), vec![signer], 1)
                         .expect("testkit policy signer"),
                     anchors,
                 }
@@ -176,13 +180,6 @@ impl LocalCustody {
     }
 }
 
-fn evidence(activity: &str) -> Evidence {
-    Evidence {
-        activity_id: activity.to_owned(),
-        app_proofs: Vec::new(),
-    }
-}
-
 #[async_trait]
 impl Custody for LocalCustody {
     async fn sign_raw(
@@ -193,8 +190,8 @@ impl Custody for LocalCustody {
     ) -> Result<RawSignature, CustodyError> {
         self.own(wallet)?;
         Ok(RawSignature {
-            signature: self.signing_key.sign(payload).to_bytes(),
-            evidence: evidence("local-custody-bootstrap"),
+            signature: Zeroizing::new(self.signing_key.sign(payload).to_bytes()),
+            activity_id: "local-custody-bootstrap".to_owned(),
         })
     }
 }

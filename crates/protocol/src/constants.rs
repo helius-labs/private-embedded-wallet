@@ -7,14 +7,18 @@ pub const TVC_QOS_PING_PROOF_TYPE: &str = "zolana.tvc.qos_ping.v1";
 pub const EXPECTED_TURNKEY_TRUST_ROOT_ID: &str = "aws-nitro-root-g1";
 /// A client key's ID is this prefix and the first 16 bytes of the SHA-256 of
 /// its SEC1 encoding, in hex.
-pub const CLIENT_KEY_ID_PREFIX: &str = "tvc-browser-p256-";
+pub const CLIENT_KEY_ID_PREFIX: &str = "spr-client-p256-";
 
-pub const CLIENT_AUTH_DOMAIN: &[u8] = b"ZOLANA_TVC_CLIENT_AUTH_V1";
+/// What a client key signs is the UTF-8 text `<CLIENT_AUTH_DOMAIN>:<request
+/// digest in lowercase hex>`, so a key that signs only text, such as a Turnkey
+/// session key through `signWithApiKey`, can sign it.
+pub const CLIENT_AUTH_DOMAIN: &str = "spr-tvc-client-auth-v1";
 pub const PROVISIONING_AUTH_DOMAIN: &[u8] = b"ZOLANA_TVC_PROVISIONING_AUTH_V1";
 pub const REQUEST_DIGEST_DOMAIN: &[u8] = b"ZOLANA_TVC_REQUEST_V1";
 pub const RESULT_DIGEST_DOMAIN: &[u8] = b"ZOLANA_TVC_RESULT_V1";
 pub const SEALED_SEED_DIGEST_DOMAIN: &[u8] = b"ZOLANA_TVC_SEALED_SEED_DIGEST_V1";
 pub const WALLET_ID_HASH_DOMAIN: &[u8] = b"ZOLANA_TVC_WALLET_ID_V1";
+pub const WALLET_BINDING_DOMAIN: &[u8] = b"ZOLANA_TVC_WALLET_BINDING_V1";
 pub const REQUEST_ID_HASH_DOMAIN: &[u8] = b"ZOLANA_TVC_REQUEST_ID_V1";
 pub const RELEASE_POLICY_DOMAIN: &[u8] = b"ZOLANA_TVC_RELEASE_POLICY_V1";
 pub const WALLET_GRANT_DOMAIN: &[u8] = b"ZOLANA_TVC_WALLET_GRANT_V1";

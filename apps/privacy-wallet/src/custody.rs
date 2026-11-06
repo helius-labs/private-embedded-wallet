@@ -17,7 +17,7 @@ use turnkey_client::generated::services::coordinator::public::v1::{
     ActivityResponse, GetActivityRequest,
 };
 use turnkey_client::{ActivityResult, TurnkeyClient, TurnkeyClientError};
-use zolana_tvc_protocol::types::TurnkeyAppProof;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::turnkey::QosTurnkeyStamper;
 
@@ -37,14 +37,12 @@ pub(crate) enum CustodyError {
     Declined,
 }
 
-pub(crate) struct Evidence {
-    pub activity_id: String,
-    pub app_proofs: Vec<TurnkeyAppProof>,
-}
-
 pub(crate) struct RawSignature {
-    pub signature: [u8; 64],
-    pub evidence: Evidence,
+    /// The signature over the bootstrap message, which is the wallet's
+    /// derivation seed.
+    pub signature: Zeroizing<[u8; 64]>,
+    /// The Turnkey activity that signed.
+    pub activity_id: String,
 }
 
 #[async_trait]
@@ -74,27 +72,10 @@ impl TurnkeyCustody {
     }
 }
 
-fn evidence<T>(activity: &ActivityResult<T>) -> Result<Evidence, CustodyError> {
-    if activity.app_proofs.is_empty() {
-        return Err(CustodyError::Unavailable);
-    }
-    Ok(Evidence {
-        activity_id: activity.activity_id.clone(),
-        app_proofs: activity
-            .app_proofs
-            .iter()
-            .map(|proof| TurnkeyAppProof {
-                scheme: proof.scheme.as_str_name().to_owned(),
-                public_key: proof.public_key.clone(),
-                proof_payload: proof.proof_payload.clone(),
-                signature: proof.signature.clone(),
-            })
-            .collect(),
-    })
-}
-
-fn decode_hex(value: &str) -> Result<Vec<u8>, CustodyError> {
-    hex::decode(value.strip_prefix("0x").unwrap_or(value)).map_err(|_| CustodyError::Unavailable)
+fn decode_hex(value: &str) -> Result<Zeroizing<Vec<u8>>, CustodyError> {
+    hex::decode(value.strip_prefix("0x").unwrap_or(value))
+        .map(Zeroizing::new)
+        .map_err(|_| CustodyError::Unavailable)
 }
 
 #[async_trait]
@@ -105,7 +86,7 @@ impl Custody for TurnkeyCustody {
         payload: &[u8],
         timestamp_ms: u64,
     ) -> Result<RawSignature, CustodyError> {
-        let activity = sign_with_approval(
+        let mut activity = sign_with_approval(
             &self.client()?,
             wallet.organization_id,
             timestamp_ms,
@@ -117,20 +98,22 @@ impl Custody for TurnkeyCustody {
             },
         )
         .await?;
-        let evidence = evidence(&activity)?;
-        let (r, s) = (
-            decode_hex(&activity.result.r)?,
-            decode_hex(&activity.result.s)?,
+        let decoded = (
+            decode_hex(&activity.result.r),
+            decode_hex(&activity.result.s),
         );
+        activity.result.r.zeroize();
+        activity.result.s.zeroize();
+        let (r, s) = (decoded.0?, decoded.1?);
         if r.len() != 32 || s.len() != 32 {
             return Err(CustodyError::Unavailable);
         }
-        let mut signature = [0u8; 64];
+        let mut signature = Zeroizing::new([0u8; 64]);
         signature[..32].copy_from_slice(&r);
         signature[32..].copy_from_slice(&s);
         Ok(RawSignature {
             signature,
-            evidence,
+            activity_id: activity.activity_id,
         })
     }
 }
@@ -148,7 +131,7 @@ async fn sign_with_approval<S: Stamp>(
         timestamp_ms: timestamp_ms.to_string(),
         organization_id: organization_id.to_owned(),
         parameters: Some(params.clone()),
-        generate_app_proofs: Some(true),
+        generate_app_proofs: None,
     };
     let mut permission_retries = 0;
     let mut activity = loop {
@@ -303,7 +286,7 @@ mod approval_tests {
     }
 
     #[tokio::test]
-    async fn approval_polls_the_original_activity_and_preserves_proofs() {
+    async fn approval_polls_the_original_activity() {
         for initial_status in [
             "ACTIVITY_STATUS_CONSENSUS_NEEDED",
             "ACTIVITY_STATUS_PENDING",
@@ -320,14 +303,9 @@ mod approval_tests {
             task.abort();
             assert_eq!(result.activity_id, "request-1");
             assert_eq!(result.result.r, "11");
-            assert_eq!(
-                evidence(&result).unwrap().app_proofs[0].proof_payload,
-                "proof"
-            );
             let requests = requests.lock().unwrap();
             assert_eq!(requests.len(), 3);
             assert_eq!(requests[0].0, "/public/v1/submit/sign_raw_payload");
-            assert_eq!(requests[0].1["generateAppProofs"], true);
             for (path, body) in &requests[1..] {
                 assert_eq!(path, "/public/v1/query/get_activity");
                 assert_eq!(

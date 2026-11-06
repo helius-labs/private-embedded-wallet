@@ -20,7 +20,9 @@ use zolana_tvc_protocol::constants::{
     TVC_APP_PROOF_SCHEME, TVC_APP_PROOF_TYPE,
 };
 use zolana_tvc_protocol::crypto::{parse_uncompressed_sec1, qos_encrypt, verify_p256_prehash};
-use zolana_tvc_protocol::digest::{descriptor_digest, request_digest, result_digest};
+use zolana_tvc_protocol::digest::{
+    descriptor_digest, request_digest, result_digest, sealed_seed_digest,
+};
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
     parse_encrypted_request, parse_operation_request, AppProof, EncryptedResponse, FailureStage,
@@ -31,7 +33,7 @@ use zolana_tvc_protocol::{client_key_id, verify_wallet_grant};
 use self::bindings::{check_encrypted_request_bindings, check_request_bindings};
 use crate::custody::{CustodyError, WalletKey};
 use crate::http::{self, PublicError};
-use crate::{sign_ephemeral_low_s, AppState};
+use crate::{sign_ephemeral_low_s, AppState, Runtime};
 
 mod bindings;
 mod bootstrap;
@@ -54,66 +56,21 @@ pub const OPERATIONS: [OperationKind; 5] = [
     OperationKind::Prove,
 ];
 
-const DERIVATION_SUITE: &str = "zolana-ed25519-role-expansion-v1";
+const DERIVATION_SUITE: &str = "spr-ed25519-role-expansion-v1";
+/// What an App Proof names as the sealed seed when the request presented none
+/// and the operation produced none: a Bootstrap that failed at a stage.
+const NO_SEALED_SEED: [u8; 32] = [0; 32];
 /// Leave time to respond before the proxy deadline; request expiry may shorten this.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(75);
-/// The network whose signed prover policy the image accepts, set at build
-/// time with `SPR_NETWORK`: `devnet` (the default) or `mainnet`.
-pub const NETWORK: &str = match option_env!("SPR_NETWORK") {
-    Some(network) => network,
-    None => "devnet",
-};
-const _: () = assert!(
-    eq(NETWORK, "devnet") || eq(NETWORK, "mainnet"),
-    "SPR_NETWORK must be devnet or mainnet"
-);
-/// Who signs each network's prover policy, as zolana pins them in
-/// `sdk-libs/client/src/prover/tee/signers.json`: today one KMS key for both.
-/// A change here is a new release.
-pub(crate) const POLICY_SIGNERS: [[u8; 32]; 1] = [[
-    0x1f, 0xe5, 0xd2, 0x9c, 0x79, 0x06, 0x4e, 0xa1, 0x7a, 0x16, 0x30, 0x84, 0x52, 0x04, 0x0b, 0x79,
-    0x9d, 0xf8, 0xae, 0xaa, 0xae, 0x58, 0x8d, 0x44, 0xa5, 0x27, 0xa8, 0xda, 0x9f, 0xfa, 0x92, 0x4a,
-]];
-pub(crate) const POLICY_THRESHOLD: usize = 1;
-
-const fn eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut i = 0;
-    while i < a.len() {
-        if a[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
-// The devnet provisioner key; its private half is the Secrets Manager secret
-// zolnet-devnet-e/tvc-provisioning-key.
-pub(crate) const PROVISIONING_PUBLIC: [u8; 65] = [
-    0x04, 0x6e, 0x85, 0x2f, 0x2e, 0xb1, 0xbc, 0x79, 0xe2, 0xed, 0x3c, 0xdb, 0x57, 0xfa, 0x7e, 0x2f,
-    0x75, 0x72, 0x0f, 0xe5, 0x30, 0x32, 0xf6, 0xae, 0xdc, 0xfb, 0xdf, 0xce, 0xb6, 0x7f, 0x63, 0x56,
-    0x91, 0x54, 0x05, 0x64, 0xe2, 0x08, 0xca, 0x67, 0x5f, 0x4d, 0x8b, 0x33, 0x29, 0x1a, 0xa1, 0x38,
-    0x8a, 0x00, 0x67, 0xda, 0xdc, 0x4f, 0x1d, 0x04, 0x51, 0x9a, 0xab, 0x32, 0x0b, 0xbd, 0x2c, 0xce,
-    0x64,
-];
-// The devnet wallet-grant key; its private half is the Secrets Manager secret
-// zolnet-devnet-e/tvc-wallet-grant-key.
-pub(crate) const GRANT_PUBLIC: [u8; 65] = [
-    0x04, 0xd9, 0x2d, 0xfa, 0x9b, 0xa9, 0xaa, 0xfd, 0x47, 0x1f, 0xf9, 0xff, 0xbf, 0x45, 0x4b, 0x9a,
-    0x11, 0xb1, 0x48, 0x58, 0xa8, 0xc2, 0xed, 0xb4, 0xf7, 0x9a, 0x4e, 0xa4, 0xb4, 0xdb, 0xa8, 0xca,
-    0x5c, 0xac, 0x9e, 0xc0, 0x6d, 0x9b, 0xb5, 0x57, 0x6d, 0xb7, 0x2d, 0x07, 0xe0, 0x87, 0xac, 0x6a,
-    0xad, 0xf7, 0x2e, 0x4e, 0xb3, 0x13, 0x23, 0xaa, 0xfa, 0xf9, 0xdb, 0xd1, 0x33, 0xd2, 0x6f, 0x4d,
-    0xc7,
-];
 
 /// How an operation did not produce a result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Failure {
     /// The request is malformed or not authorized; answered with a generic 400.
     Invalid,
+    /// The request is authorized by a descriptor that has expired; answered
+    /// with a 403 that says so, for the client to enroll again.
+    DescriptorExpired,
     /// The enclave cannot serve; answered with a generic 503.
     Unavailable,
     /// The operation ran and failed at a named stage; answered inside the
@@ -134,6 +91,8 @@ pub(crate) async fn handle(state: &AppState, body: &[u8]) -> Response<Body> {
     match execute(state, body).await {
         Ok(response) => http::ok(response),
         Err(Failure::Invalid) => PublicError::InvalidRequest.into_response(),
+        Err(Failure::DescriptorExpired) => PublicError::DescriptorExpired.into_response(),
+        // `execute` answers a stage failure inside the result.
         Err(Failure::Unavailable | Failure::Stage(_)) => PublicError::Unavailable.into_response(),
     }
 }
@@ -170,51 +129,21 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
 
     // Every result carries the digest of the sealed seed it was computed
     // against, so the App Proof binds the answer to one seed, not merely
-    // to the request.
-    let (result, proof_seed_digest) = match &request.operation {
-        Operation::Bootstrap => {
-            let until_expiry =
-                Duration::from_millis(request.expires_at_ms.saturating_sub(now_ms()?));
-            tokio::time::timeout(
-                OPERATION_TIMEOUT.min(until_expiry),
-                bootstrap::run(&request, &wallet, runtime),
-            )
-            .await
-            .map_err(|_| Failure::Unavailable)??
-        }
-        Operation::Decrypt { items } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            (keys::decrypt(&roles, items)?, digest)
-        }
-        Operation::Derive { items } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            (keys::derive(&roles, items)?, digest)
-        }
-        Operation::TransactionKeys { items } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            (keys::transaction_keys(&roles, items)?, digest)
-        }
-        Operation::Prove {
-            request: body,
-            prover,
-        } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            let result = match prove::seal(
-                body,
-                roles.nullifier_key.secret().as_slice(),
-                prover,
-                &runtime.prover,
-                now_ms()?,
-            ) {
-                Ok(sealed) => OperationResult::Prove { sealed },
-                Err(Failure::Stage(stage)) => OperationResult::Failure {
-                    operation: OperationKind::Prove,
-                    stage,
-                },
-                Err(failure) => return Err(failure),
-            };
-            (result, digest)
-        }
+    // to the request. An operation that failed at a named stage answers
+    // inside the result, under the seed the request presented.
+    let (result, proof_seed_digest) = match run(&request, &wallet, runtime).await {
+        Ok(answer) => answer,
+        Err(Failure::Stage(stage)) => (
+            OperationResult::Failure {
+                operation: request.operation.kind(),
+                stage,
+            },
+            request
+                .sealed_seed
+                .as_deref()
+                .map_or(NO_SEALED_SEED, sealed_seed_digest),
+        ),
+        Err(failure) => return Err(failure),
     };
 
     let result_plaintext =
@@ -254,11 +183,59 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
     .map_err(|_| Failure::Unavailable)
 }
 
+/// Runs a validated request's operation. Returns its result and the digest of
+/// the sealed seed it was computed against.
+async fn run(
+    request: &OperationRequest,
+    wallet: &WalletKey<'_>,
+    runtime: &Runtime,
+) -> Result<(OperationResult, [u8; 32]), Failure> {
+    match &request.operation {
+        Operation::Bootstrap => {
+            let until_expiry =
+                Duration::from_millis(request.expires_at_ms.saturating_sub(now_ms()?));
+            tokio::time::timeout(
+                OPERATION_TIMEOUT.min(until_expiry),
+                bootstrap::run(request, wallet, runtime),
+            )
+            .await
+            .map_err(|_| Failure::Unavailable)?
+        }
+        Operation::Decrypt { items } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            Ok((keys::decrypt(&roles, items)?, digest))
+        }
+        Operation::Derive { items } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            Ok((keys::derive(&roles, items)?, digest))
+        }
+        Operation::TransactionKeys { items } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            Ok((keys::transaction_keys(&roles, items)?, digest))
+        }
+        Operation::Prove {
+            request: body,
+            prover,
+        } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            let sealed = prove::seal(
+                body,
+                roles.nullifier_key.secret().as_slice(),
+                prover,
+                &runtime.prover,
+                now_ms()?,
+            )?;
+            Ok((OperationResult::Prove { sealed }, digest))
+        }
+    }
+}
+
 /// Binds the request to this release, checks its freshness, verifies the
 /// provisioner's signature over the descriptor and the client's signature over
-/// the request, and returns the Turnkey key the descriptor names.
+/// the request, refuses an expired descriptor, and returns the Turnkey key the
+/// descriptor names.
 fn validate<'a>(request: &'a OperationRequest, state: &AppState) -> Result<WalletKey<'a>, Failure> {
-    // Also refuses a production descriptor and an empty Turnkey wallet ID.
+    // Also refuses a descriptor for another network and an empty Turnkey wallet ID.
     check_request_bindings(request, &state.info).map_err(|_| Failure::Invalid)?;
     let kind = request.operation.kind();
     // Bootstrap derives a fresh state; every other operation answers against
@@ -305,6 +282,10 @@ fn validate<'a>(request: &'a OperationRequest, state: &AppState) -> Result<Walle
     }
     zolana_tvc_protocol::verify_client_authorization(request, &grant.client_public_key)
         .map_err(|_| Failure::Invalid)?;
+    // Only an authorized request learns that its descriptor expired.
+    descriptor
+        .check_current(now)
+        .map_err(|_| Failure::DescriptorExpired)?;
 
     Ok(WalletKey {
         organization_id: &descriptor.turnkey_organization_id,

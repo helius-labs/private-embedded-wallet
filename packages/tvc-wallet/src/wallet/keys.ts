@@ -18,9 +18,8 @@ import {
 import type { X25519PublicKey } from "@heliuslabs/spr/keypair";
 import type { TransactionKeyRequest } from "@heliuslabs/spr/transaction";
 
-import type { VerifiedConnection } from "../client/connection.js";
 import { encodeDecimalU64 } from "../protocol/decimal.js";
-import { TvcError } from "../protocol/error.js";
+import { TvcError, TvcOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type {
   SealedSeed,
@@ -28,9 +27,11 @@ import type {
   DecryptLabel,
   DeriveItem,
   ProverRequest,
+  ProverSealing,
+  SealedProverRequest,
   TransactionKeyItem,
 } from "../protocol/types.js";
-import type { ShieldedIdentity, TvcClient } from "./client.js";
+import type { ShieldedIdentity, StoredWallet } from "./client.js";
 import { shieldedAddressOf } from "./identity.js";
 import { MAX_ITEMS_PER_BATCH, type OperationOptions } from "./operations.js";
 import {
@@ -38,19 +39,52 @@ import {
   sealingFor,
   submitSealed,
   type ProverAttestation,
-  type TvcProverConfig,
+  type TvcProver,
 } from "./prover.js";
 import { attestationReuseMs, type HeldProverPolicy } from "./prover-policy.js";
 
+/**
+ * The wallet's four key operations over the client's verified connection, on
+ * the wire's terms. Each presents the sealed seed; the enclave cannot use it
+ * for another wallet or past a Quorum key rotation.
+ */
+export type TvcEnclave = {
+  /** Opens each ciphertext with the wallet's viewing key; one plaintext per item. */
+  decrypt(
+    sealedSeed: SealedSeed,
+    items: readonly DecryptItem[],
+    options?: OperationOptions,
+  ): Promise<readonly string[]>;
+  /** Derives nullifiers and merge values; one value per item. */
+  derive(
+    sealedSeed: SealedSeed,
+    items: readonly DeriveItem[],
+    options?: OperationOptions,
+  ): Promise<readonly string[]>;
+  /** Mints per-transaction viewing secrets; one per item. */
+  transactionKeys(
+    sealedSeed: SealedSeed,
+    items: readonly TransactionKeyItem[],
+    options?: OperationOptions,
+  ): Promise<readonly string[]>;
+  /**
+   * Completes the prover request with the nullifier secret and seals it to the
+   * prover `prover` attests; the client posts the sealed request.
+   */
+  prove(
+    sealedSeed: SealedSeed,
+    request: ProverRequest,
+    prover: ProverSealing,
+    options?: OperationOptions,
+  ): Promise<SealedProverRequest>;
+};
+
 export type TvcKeysInput = {
-  readonly client: TvcClient;
-  readonly connection: VerifiedConnection;
-  /** The sealed seed `bootstrap` returned. */
+  readonly enclave: TvcEnclave;
   readonly sealedSeed: SealedSeed;
-  /** The identity `bootstrap` returned; see `shieldedAddressOf`. */
   readonly identity: ShieldedIdentity;
-  /** The attested prover proofs are sealed to and posted at. */
-  readonly prover: TvcProverConfig;
+  /** The attested prover proofs are sealed to and posted at, under its policy. */
+  readonly prover: TvcProver;
 };
 
 const LABELS: Record<DecryptRequest["label"], DecryptLabel> = {
@@ -72,28 +106,34 @@ function operationOptions(context: RequestContext | undefined): OperationOptions
 }
 
 /**
- * The Zolana SDK's `WalletKeys`, answered by the enclave. Hand it to
- * `syncWallet`, `buildTransferTransaction`, and every other SDK flow in place
- * of `LocalKeys`: each SDK request becomes one enclave operation per batch.
- * A proof's witness is completed with the nullifier secret inside the enclave
- * and sealed there to an attested prover; this client posts the sealed
- * request and never sees the secret. Nothing here signs; the application's
- * Solana signer does.
+ * The Zolana SDK's `WalletKeys`, answered by the enclave; `client.open`
+ * returns it. Hand it to `syncWallet`, `buildTransferTransaction`, and every
+ * other SDK flow in place of `LocalKeys`: each SDK request becomes one enclave
+ * operation per batch. A proof's witness is completed with the nullifier
+ * secret inside the enclave and sealed there to an attested prover; this
+ * client posts the sealed request and never sees the secret. Nothing here
+ * signs; the application's Solana signer does.
  */
-export class TvcKeys implements WalletKeys {
-  readonly #client: TvcClient;
-  readonly #connection: VerifiedConnection;
+export interface TvcKeys extends WalletKeys {
+  /** What to persist and hand to `open` next time. */
+  readonly stored: Required<StoredWallet>;
+}
+
+/** `TvcKeys` over a client's enclave operations and prover. */
+export class EnclaveKeys implements TvcKeys {
+  readonly stored: Required<StoredWallet>;
+  readonly #enclave: TvcEnclave;
   readonly #sealedSeed: SealedSeed;
   readonly #address: ShieldedAddress;
-  readonly #prover: TvcProverConfig;
+  readonly #prover: TvcProver;
   #attested: ProverAttestation | undefined;
 
   constructor(input: TvcKeysInput) {
-    this.#client = input.client;
-    this.#connection = input.connection;
+    this.#enclave = input.enclave;
     this.#sealedSeed = input.sealedSeed;
     this.#address = shieldedAddressOf(input.identity);
     this.#prover = input.prover;
+    this.stored = Object.freeze({ identity: Object.freeze({ ...input.identity }), sealedSeed: input.sealedSeed });
   }
 
   address(): ShieldedAddress {
@@ -120,7 +160,7 @@ export class TvcKeys implements WalletKeys {
           label: LABELS[request.label],
         }),
       ),
-      (items) => this.#client.decrypt(this.#connection, this.#sealedSeed, items, options),
+      (items) => this.#enclave.decrypt(this.#sealedSeed, items, options),
     );
     return plaintexts.map(decodeLowerHex);
   }
@@ -162,7 +202,7 @@ export class TvcKeys implements WalletKeys {
             };
         }
       }),
-      (items) => this.#client.derive(this.#connection, this.#sealedSeed, items, options),
+      (items) => this.#enclave.derive(this.#sealedSeed, items, options),
     );
     return values.map((value) => decodeLowerHex(value) as Bytes32);
   }
@@ -179,7 +219,7 @@ export class TvcKeys implements WalletKeys {
           first_nullifier: encodeLowerHex(request.firstNullifier),
         }),
       ),
-      (items) => this.#client.transactionKeys(this.#connection, this.#sealedSeed, items, options),
+      (items) => this.#enclave.transactionKeys(this.#sealedSeed, items, options),
     );
     const keys: ViewingKey[] = [];
     try {
@@ -215,8 +255,7 @@ export class TvcKeys implements WalletKeys {
       const attested = await this.#attestation(policy, fresh, options.signal);
       let sealed;
       try {
-        sealed = await this.#client.prove(
-          this.#connection,
+        sealed = await this.#enclave.prove(
           this.#sealedSeed,
           request,
           sealingFor(policy, attested, request),
@@ -293,9 +332,5 @@ export class TvcKeys implements WalletKeys {
 
 /** The enclave refused the prover's policy or attestation. */
 function isProverStage(error: unknown): boolean {
-  return (
-    error instanceof TvcError &&
-    error.code === "OperationFailed" &&
-    error.message === "OperationFailed: Prover"
-  );
+  return error instanceof TvcOperationError && error.stage === "Prover";
 }

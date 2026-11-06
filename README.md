@@ -21,10 +21,10 @@ Helius API key.
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
 | [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet`: one-request sessions with Boot Proofs, enrollment, and wallet grants. |
-| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence. |
+| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the Turnkey session key as the client key, the five operations, `TvcKeys` for the Zolana SDK. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
-| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
-| [`scripts`](scripts) | Operator tooling: releases, wallet descriptors, the localnet for `just headless-e2e`. |
+| [`examples/typescript-client`](examples/typescript-client) | The client on a Turnkey API key, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
+| [`scripts`](scripts) | Operator tooling: per-network releases, service keys, the localnet for `just headless-e2e`. |
 
 ## Responsibility split
 
@@ -69,13 +69,18 @@ specified in [`crates/protocol`](crates/protocol/README.md).
 ## Trust
 
 Trust material arrives out of band: a threshold-signed release policy, the
-authority public keys, and PCR pins. `connectAndVerify()` verifies the policy,
-binds `GET /v1/info` to it, completes the Quorum-encrypted `POST /v1/ping`,
-and verifies the Nitro Boot Proof against the PCRs and accepted manifest
-digests. Wallet calls take the resulting `VerifiedConnection` only; HTTPS
-alone establishes nothing. A wallet descriptor, signed by the operator with the
+authority public keys, and PCR pins, one release per network
+(`packages/tvc-wallet/src/releases/<network>.json`). The policy names its
+network, `devnet` or `mainnet`, and a client accepts it only for the network
+it was created for. Before its first wallet call the client verifies the
+policy, binds `GET /v1/info` to it, completes the Quorum-encrypted
+`POST /v1/ping`, and verifies the Nitro Boot Proof against the PCRs and
+accepted manifest digests; it verifies again once the policy's window no
+longer holds or the backend refuses a call. HTTPS alone establishes nothing. A wallet descriptor, signed by the operator with the
 provisioning key whose public half is compiled into the image, grants a client
-key the operations of one Turnkey wallet. Each operation also carries a wallet
+key the operations of one Turnkey wallet. The client key is the user's Turnkey
+session key, which the client enrolls with tvc-gateway itself; the sealed seed
+is bound to the wallet, not to the key, so a new login keeps it. Each operation also carries a wallet
 grant, signed with the grant key, that is at most an hour old; a client key
 whose grants stop being issued stops within the hour.
 
@@ -92,7 +97,8 @@ A proof's witness leaves the enclave only sealed to a TEE prover whose
 attestation passes the signed prover policy of the network the image was built
 for (`SPR_NETWORK`, `devnet` or `mainnet`). The client downloads the policy
 file that network publishes and hands it to the enclave, which checks it
-against the signers zolana pins (`POLICY_SIGNERS`); the client posts the
+against the signers zolana pins for that network
+([`network.rs`](apps/privacy-wallet/src/network.rs)); the client posts the
 sealed request, and only that prover can open it. A new prover release needs
 no new enclave release; a change of signers does.
 
@@ -126,17 +132,21 @@ Never commit Turnkey operator files, API keys, or `.env.local`.
 
 ## Deployment
 
-Each deployment has its own Turnkey TVC app, Quorum key, `linux/amd64` image
-pinned by `@sha256:`, signed release policy, and wallet descriptors. The
-constants of the current app are in
-[`apps/privacy-wallet/deploy/release.json`](apps/privacy-wallet/deploy/release.json);
-a release is one command:
+Each network, `devnet` or `mainnet`, has its own Turnkey TVC app, Quorum key,
+operators, `linux/amd64` image built for it and pinned by `@sha256:`, signed
+release policy, tvc-gateway, and wallet descriptors. The constants are in
+[`apps/privacy-wallet/deploy/release.json`](apps/privacy-wallet/deploy/release.json),
+shared at the top and per network under `networks`, and each network's
+deployment files in `apps/privacy-wallet/deploy/<network>/`. A release of one
+network is one command:
 
 ```sh
-just release private-wallet-devnet-<sha> --image <reference>
+just release devnet private-wallet-devnet-<sha> --image <reference>
 ```
 
-Wallet descriptors come from tvc-gateway, which signs one on each
+It pins the signed release in `packages/tvc-wallet/src/releases/<network>.json`,
+which the client exports and tvc-gateway reads. Wallet descriptors come from
+the network's tvc-gateway, which signs one on each
 `POST /v1/private-wallet/enroll`. [`scripts/README.md`](scripts/README.md)
 describes the release phases and the localnet.
 

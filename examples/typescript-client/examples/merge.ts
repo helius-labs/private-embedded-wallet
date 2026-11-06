@@ -9,11 +9,9 @@ import {
   syncWallet,
 } from "@heliuslabs/spr";
 import { MERGE_INPUT_COUNT } from "@heliuslabs/spr/interface";
-import { TvcKeys, shieldedAddressOf } from "@heliuslabs/spr-embedded-wallet";
 
 import {
   expectBalance,
-  loadOrBootstrapWallet,
   sendAndConfirmFactory,
   setup,
 } from "../src/lib.js";
@@ -21,11 +19,8 @@ import {
 const DEPOSIT_AMOUNT = 5_000_000n;
 
 async function main(): Promise<void> {
-  const { zolana, tvc, connection, signer, walletPath, prover } = await setup();
-
-  const stored = await loadOrBootstrapWallet(tvc, connection, walletPath);
-  const shielded = shieldedAddressOf(stored.identity);
-  const keys = new TvcKeys({ ...stored, client: tvc, connection, prover });
+  const { zolana, keys, signer } = await setup();
+  const shielded = keys.address();
   const sendAndConfirm = sendAndConfirmFactory(zolana, signer);
 
   const registration = await buildRegistrationTransaction({

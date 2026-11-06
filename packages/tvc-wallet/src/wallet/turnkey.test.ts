@@ -1,0 +1,457 @@
+import { ed25519 } from "@noble/curves/ed25519";
+import { p256 } from "@noble/curves/p256";
+import { sha256 } from "@noble/hashes/sha256";
+import { getAddressDecoder } from "@solana/kit";
+import { describe, expect, it, vi } from "vitest";
+
+import type { SignTvcRequestInput } from "../client/operation-executor.js";
+import type { TvcTransport } from "../client/transport.js";
+import { clientAuthMessage, clientKeyIdFor, requestDigest } from "../protocol/digest.js";
+import { walletEnrollmentMessage } from "../protocol/enrollment.js";
+import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
+import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
+import {
+  DESCRIPTOR_RENEWAL_MARGIN_MS,
+  turnkeyClientKeys,
+  type TvcTurnkey,
+  type TvcTurnkeySession,
+} from "./turnkey.js";
+
+const ORGANIZATION_ID = "00000000-0000-4000-8000-00000000000a";
+const WALLET_ID = "00000000-0000-4000-8000-00000000000b";
+const ENDPOINT = new URL("https://devnet.helius-rpc.com/v1/private-wallet?api-key=key");
+const NOW_MS = 1_800_000_000_000n;
+const DAY_MS = 86_400_000n;
+const P256_ORDER = p256.CURVE.n;
+const te = new TextEncoder();
+
+type Enrollment = {
+  organizationId: string;
+  turnkeyWalletId: string;
+  solanaAddress: string;
+  clientPublicKey: string;
+  issuedAtMs: number;
+  ownerSignature: string;
+};
+
+/** A Turnkey client with one logged-in session and one embedded Solana wallet. */
+function fakeTurnkey() {
+  const owner = ed25519.utils.randomPrivateKey();
+  const ownerPublic = ed25519.getPublicKey(owner);
+  const address = getAddressDecoder().decode(ownerPublic);
+  const sessionKeys = new Map<string, Uint8Array>();
+  const login = () => {
+    const secret = p256.utils.randomPrivateKey();
+    const publicKey = encodeLowerHex(p256.getPublicKey(secret, true));
+    sessionKeys.set(publicKey, secret);
+    session = { organizationId: ORGANIZATION_ID, publicKey };
+    return publicKey;
+  };
+  let session: TvcTurnkeySession | undefined;
+  const account = { address, addressFormat: "ADDRESS_FORMAT_SOLANA", source: "embedded" };
+  const turnkey = {
+    getSession: vi.fn(async () => session),
+    // The browser's WebCrypto answers either half of S; the client normalizes.
+    signWithApiKey: vi.fn(async ({ message, publicKey }: { message: string; publicKey: string }) => {
+      const signature = p256.sign(sha256(te.encode(message)), sessionKeys.get(publicKey)!, { lowS: true });
+      return encodeLowerHex(
+        Uint8Array.from([
+          ...p256.CURVE.Fp.toBytes(signature.r),
+          ...p256.CURVE.Fp.toBytes(P256_ORDER - signature.s),
+        ]),
+      );
+    }),
+    fetchWallets: vi.fn(async () => [
+      {
+        walletId: "connected-wallet",
+        accounts: [{ ...account, address: "11111111111111111111111111111111", source: "connected" }],
+      },
+      {
+        walletId: WALLET_ID,
+        accounts: [{ ...account, address: "0xabc", addressFormat: "ADDRESS_FORMAT_ETHEREUM" }, account],
+      },
+    ]),
+    signMessage: vi.fn(async ({ message }: { message: string }) => {
+      const signature = ed25519.sign(te.encode(message), owner);
+      return { r: encodeLowerHex(signature.slice(0, 32)), s: encodeLowerHex(signature.slice(32)), v: "00" };
+    }),
+  } satisfies TvcTurnkey;
+  return { turnkey, address, account, ownerPublic, login, logout: () => { session = undefined; } };
+}
+
+/** A gateway that answers each enrollment with a descriptor for its key. */
+function fakeGateway(answer: (enrollment: Enrollment) => Response | undefined = () => undefined) {
+  const enrollments: { url: URL; body: Enrollment }[] = [];
+  const fetch = vi.fn(async (url: URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Enrollment;
+    enrollments.push({ url, body });
+    const descriptor: WalletDescriptor = {
+      version: 1,
+      security_domain_id: "11".repeat(32),
+      network: "devnet",
+      turnkey_organization_id: body.organizationId,
+      turnkey_wallet_id: body.turnkeyWalletId,
+      address: body.solanaAddress,
+      allowed_clients: [
+        {
+          client_public_key: body.clientPublicKey,
+          allowed_operations: ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"],
+        },
+      ],
+      expires_at_ms: String(BigInt(body.issuedAtMs) + DAY_MS),
+      provisioning_signature: "22".repeat(64),
+    };
+    return answer(body) ?? new Response(JSON.stringify({ descriptor }), { status: 200 });
+  });
+  return { transport: { fetch }, enrollments };
+}
+
+function keysOf(
+  turnkey: TvcTurnkey,
+  transport: TvcTransport,
+  solanaAddress?: string,
+  nowMs: () => bigint = () => NOW_MS,
+) {
+  return turnkeyClientKeys({
+    turnkey,
+    network: "devnet",
+    endpoint: ENDPOINT,
+    transport,
+    nowMs,
+    ...(solanaAddress === undefined ? {} : { solanaAddress }),
+  });
+}
+
+/** A request for `descriptor` under the key `clientKeyId`, shown to its signer with the text to sign. */
+function requestInput(descriptor: WalletDescriptor, clientKeyId: string): SignTvcRequestInput & { request: OperationRequest } {
+  const request = {
+    version: 1,
+    request_id: "aa".repeat(32),
+    issued_at_ms: "1800000000000",
+    expires_at_ms: "1800000300000",
+    target_release_id: "release",
+    target_manifest_digest: "11".repeat(32),
+    target_executable_digest: "22".repeat(32),
+    quorum_key_id: "quorum",
+    quorum_key_epoch: "1",
+    wallet_descriptor: descriptor,
+    sealed_seed: null,
+    client_response_public_key: `04${"77".repeat(64)}`,
+    operation: { type: "Bootstrap" },
+    authorization: { client_key_id: clientKeyId, signature: "" },
+  } satisfies OperationRequest;
+  const message = clientAuthMessage(requestDigest(request));
+  return {
+    operation: request.operation,
+    request,
+    clientAuthDigest: sha256(te.encode(message)),
+    clientAuthMessage: message,
+  };
+}
+
+describe("the Turnkey session key", () => {
+  it("is enrolled once, by the wallet owner, for the network's gatekeeper host", async () => {
+    const { turnkey, address, account, ownerPublic, login } = fakeTurnkey();
+    const sessionKey = login();
+    const gateway = fakeGateway();
+    const keys = keysOf(turnkey, gateway.transport);
+
+    const key = await keys.current();
+    expect(key.id).toBe(sessionKey);
+    const [first, second] = await Promise.all([key.operations(), key.operations()]);
+    expect(second).toBe(first);
+    expect(await (await keys.current()).operations()).toBe(first);
+    expect(gateway.enrollments).toHaveLength(1);
+
+    const [{ url, body }] = gateway.enrollments as [{ url: URL; body: Enrollment }];
+    expect(url.href).toBe("https://devnet.helius-rpc.com/v1/private-wallet/enroll?api-key=key");
+    const clientPublicKey = encodeLowerHex(p256.ProjectivePoint.fromHex(sessionKey).toRawBytes(false));
+    expect(body).toEqual({
+      organizationId: ORGANIZATION_ID,
+      turnkeyWalletId: WALLET_ID,
+      solanaAddress: address,
+      clientPublicKey,
+      issuedAtMs: Number(NOW_MS),
+      ownerSignature: expect.stringMatching(/^[0-9a-f]{128}$/),
+    });
+    const message = walletEnrollmentMessage({ domain: ENDPOINT.host, network: "devnet", ...body });
+    expect(turnkey.signMessage).toHaveBeenCalledWith({
+      message,
+      walletAccount: account,
+      encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
+      hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",
+    });
+    expect(ed25519.verify(decodeLowerHex(body.ownerSignature), te.encode(message), ownerPublic)).toBe(true);
+    expect(first.descriptor.allowed_clients[0]?.client_public_key).toBe(clientPublicKey);
+    expect(first.signer.clientKeyId).toBe(clientKeyIdFor(decodeLowerHex(clientPublicKey)));
+  });
+
+  it("signs the enrollment for the network's gatekeeper host when the app proxies the gateway", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    const proxy = new URL("https://wallet.example/api/tvc");
+    const keys = turnkeyClientKeys({ turnkey, network: "devnet", endpoint: proxy, transport: gateway.transport, nowMs: () => NOW_MS });
+
+    await (await keys.current()).operations();
+
+    const [{ url, body }] = gateway.enrollments as [{ url: URL; body: Enrollment }];
+    expect(url.href).toBe("https://wallet.example/api/tvc/enroll");
+    expect(turnkey.signMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: walletEnrollmentMessage({ domain: "devnet.helius-rpc.com", network: "devnet", ...body }),
+      }),
+    );
+  });
+
+  it("signs the client-auth text with signWithApiKey, normalized to low S", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    const sessionKey = login();
+    const { descriptor, signer } = await (await keysOf(turnkey, fakeGateway().transport).current()).operations();
+    const input = requestInput(descriptor, signer.clientKeyId);
+    const { request, clientAuthMessage: message } = input;
+    const signature = await signer.signRequest(input);
+    expect(turnkey.signWithApiKey).toHaveBeenCalledWith({ message, publicKey: sessionKey });
+    const publicKey = decodeLowerHex(descriptor.allowed_clients[0]!.client_public_key);
+    expect(p256.verify(signature, sha256(te.encode(message)), publicKey, { lowS: true })).toBe(true);
+    await expect(signer.signRequest({ ...input, clientAuthMessage: `${message}0` })).rejects.toMatchObject({
+      code: "OperationNotAllowed",
+    });
+    expect(request.authorization.client_key_id).toBe(signer.clientKeyId);
+  });
+
+  it("never has two signWithApiKey calls on one Turnkey client in flight", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const sign = turnkey.signWithApiKey.getMockImplementation()!;
+    let inFlight = 0;
+    let most = 0;
+    let calls = 0;
+    turnkey.signWithApiKey.mockImplementation(async (params) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        if (++calls === 2) throw new Error("declined");
+        return await sign(params);
+      } finally {
+        inFlight -= 1;
+      }
+    });
+    // Two clients of one Turnkey client, as two createTvcClient calls would be.
+    const signers = await Promise.all(
+      [fakeGateway(), fakeGateway()].map(async (gateway) => (await (await keysOf(turnkey, gateway.transport).current()).operations())),
+    );
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, index) => {
+        const { descriptor, signer } = signers[index % 2]!;
+        return signer.signRequest(requestInput(descriptor, signer.clientKeyId));
+      }),
+    );
+    expect(most).toBe(1);
+    expect(turnkey.signWithApiKey).toHaveBeenCalledTimes(6);
+    // A failed call does not hold up the ones after it.
+    expect(results.map(({ status }) => status)).toEqual([
+      "fulfilled", "rejected", "fulfilled", "fulfilled", "fulfilled", "fulfilled",
+    ]);
+  });
+
+  it("signs each request of another Turnkey client independently", async () => {
+    const first = fakeTurnkey();
+    const second = fakeTurnkey();
+    first.login();
+    second.login();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const sign = first.turnkey.signWithApiKey.getMockImplementation()!;
+    first.turnkey.signWithApiKey.mockImplementationOnce(async (params) => {
+      await held;
+      return sign(params);
+    });
+    const [a, b] = await Promise.all(
+      [first, second].map(async ({ turnkey }) => (await (await keysOf(turnkey, fakeGateway().transport).current()).operations())),
+    );
+    const waiting = a!.signer.signRequest(requestInput(a!.descriptor, a!.signer.clientKeyId));
+    await expect(b!.signer.signRequest(requestInput(b!.descriptor, b!.signer.clientKeyId))).resolves.toHaveLength(64);
+    release();
+    await expect(waiting).resolves.toHaveLength(64);
+  });
+
+  it("is enrolled again after a new login, and kept for a session it has seen", async () => {
+    const { turnkey, login, logout } = fakeTurnkey();
+    const gateway = fakeGateway();
+    const keys = keysOf(turnkey, gateway.transport);
+    login();
+    const first = await keys.current();
+    await first.operations();
+    login();
+    const second = await keys.current();
+    expect(second.id).not.toBe(first.id);
+    const enrolled = await second.operations();
+    expect(gateway.enrollments.map(({ body }) => body.clientPublicKey)).toEqual([
+      expect.any(String),
+      enrolled.descriptor.allowed_clients[0]?.client_public_key,
+    ]);
+    expect(await keys.current()).toBe(second);
+
+    logout();
+    await expect(keys.current()).rejects.toMatchObject({ code: "TurnkeySessionRequired" });
+  });
+
+  it("finds the organization's one embedded Solana account, or the one named", async () => {
+    const { turnkey, address, login } = fakeTurnkey();
+    login();
+    const named = await (await keysOf(turnkey, fakeGateway().transport, address).current()).operations();
+    expect(named.descriptor.address).toBe(address);
+
+    const missing = keysOf(turnkey, fakeGateway().transport, "11111111111111111111111111111111");
+    await expect((await missing.current()).operations()).rejects.toMatchObject({ code: "WalletAccountNotFound" });
+
+    const [, wallet] = await turnkey.fetchWallets();
+    turnkey.fetchWallets.mockResolvedValueOnce([
+      wallet!,
+      { walletId: "second", accounts: [{ ...wallet!.accounts[1]!, address: "So11111111111111111111111111111111111111112" }] },
+    ]);
+    const several = keysOf(turnkey, fakeGateway().transport);
+    await expect((await several.current()).operations()).rejects.toMatchObject({ code: "WalletAccountAmbiguous" });
+
+    turnkey.fetchWallets.mockResolvedValueOnce([]);
+    const none = keysOf(turnkey, fakeGateway().transport);
+    await expect((await none.current()).operations()).rejects.toMatchObject({ code: "WalletAccountNotFound" });
+  });
+
+  it("finishes an enrollment the owner signed, and keeps its descriptor, when every caller left", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => { answer = resolve; });
+    let posted!: (init?: RequestInit) => void;
+    const posting = new Promise<RequestInit | undefined>((resolve) => { posted = resolve; });
+    const respond = gateway.transport.fetch.getMockImplementation()!;
+    gateway.transport.fetch.mockImplementationOnce(async (url: URL, init?: RequestInit) => {
+      posted(init);
+      await answered;
+      return respond(url, init);
+    });
+    const key = await keysOf(turnkey, gateway.transport).current();
+    const caller = new AbortController();
+    const waiting = key.operations(caller.signal);
+    const init = await posting;
+    caller.abort(new Error("the caller left"));
+    await expect(waiting).rejects.toThrow("the caller left");
+    expect(init?.signal?.aborted).toBe(false);
+
+    answer();
+    const enrolled = await key.operations();
+    expect(enrolled.descriptor.allowed_clients[0]?.client_public_key).toBe(gateway.enrollments[0]?.body.clientPublicKey);
+    expect(turnkey.signMessage).toHaveBeenCalledOnce();
+    expect(gateway.transport.fetch).toHaveBeenCalledOnce();
+  });
+
+  it("stops an enrollment when every caller left before the owner signed", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    const sign = turnkey.signMessage.getMockImplementation()!;
+    let release!: () => void;
+    const signedLater = new Promise<void>((resolve) => { release = resolve; });
+    turnkey.signMessage.mockImplementationOnce(async (params) => {
+      await signedLater;
+      return sign(params);
+    });
+    const key = await keysOf(turnkey, gateway.transport).current();
+    const caller = new AbortController();
+    const waiting = key.operations(caller.signal);
+    await vi.waitFor(() => expect(turnkey.signMessage).toHaveBeenCalledOnce());
+    caller.abort(new Error("the caller left"));
+    await expect(waiting).rejects.toThrow("the caller left");
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(gateway.transport.fetch).not.toHaveBeenCalled();
+
+    // The next caller asks the owner again.
+    await key.operations();
+    expect(turnkey.signMessage).toHaveBeenCalledTimes(2);
+    expect(gateway.transport.fetch).toHaveBeenCalledOnce();
+  });
+
+  it("enrolls again when the descriptor expires within five minutes, or the backend refused it", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    let now = NOW_MS;
+    const key = await keysOf(turnkey, gateway.transport, undefined, () => now).current();
+    const first = await key.operations();
+    expect(first.descriptor.expires_at_ms).toBe(String(NOW_MS + DAY_MS));
+
+    now = NOW_MS + DAY_MS - DESCRIPTOR_RENEWAL_MARGIN_MS - 1n;
+    expect(await key.operations()).toBe(first);
+    now += 1n;
+    const second = await key.operations();
+    expect(second).not.toBe(first);
+    expect(gateway.enrollments.map(({ body }) => BigInt(body.issuedAtMs))).toEqual([NOW_MS, now]);
+
+    // A refusal of a descriptor it no longer holds changes nothing.
+    key.expire!(first.descriptor);
+    expect(await key.operations()).toBe(second);
+    key.expire!(second.descriptor);
+    expect(await key.operations()).not.toBe(second);
+    expect(gateway.enrollments).toHaveLength(3);
+    expect(turnkey.signMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a descriptor that names no expiry", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway((body) => {
+      const descriptor = {
+        version: 1,
+        security_domain_id: "11".repeat(32),
+        network: "devnet",
+        turnkey_organization_id: body.organizationId,
+        turnkey_wallet_id: body.turnkeyWalletId,
+        address: body.solanaAddress,
+        allowed_clients: [{ client_public_key: body.clientPublicKey, allowed_operations: ["Decrypt"] }],
+        expires_at_ms: 1,
+        provisioning_signature: "22".repeat(64),
+      };
+      return new Response(JSON.stringify({ descriptor }));
+    });
+    await expect((await keysOf(turnkey, gateway.transport).current()).operations()).rejects.toMatchObject({
+      code: "InvalidDescriptor",
+    });
+  });
+
+  it("refuses a refused enrollment or another key's descriptor, and enrolls again next time", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    let answer: Response | undefined = new Response("{}", { status: 403 });
+    const gateway = fakeGateway(() => answer);
+    const key = await keysOf(turnkey, gateway.transport).current();
+    await expect(key.operations()).rejects.toMatchObject({ code: "EnrollmentRejected", status: 403 });
+
+    const other = encodeLowerHex(p256.getPublicKey(p256.utils.randomPrivateKey(), false));
+    answer = undefined;
+    gateway.transport.fetch.mockImplementationOnce(async (_url: URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Enrollment;
+      return new Response(JSON.stringify({
+        descriptor: {
+          version: 1,
+          security_domain_id: "11".repeat(32),
+          network: "devnet",
+          turnkey_organization_id: body.organizationId,
+          turnkey_wallet_id: body.turnkeyWalletId,
+          address: body.solanaAddress,
+          allowed_clients: [{ client_public_key: other, allowed_operations: ["Decrypt"] }],
+          expires_at_ms: String(BigInt(body.issuedAtMs) + DAY_MS),
+          provisioning_signature: "22".repeat(64),
+        },
+      }));
+    });
+    await expect(key.operations()).rejects.toMatchObject({ code: "InvalidDescriptor" });
+
+    await expect(key.operations()).resolves.toMatchObject({ descriptor: { network: "devnet" } });
+    expect(gateway.transport.fetch).toHaveBeenCalledTimes(3);
+  });
+});

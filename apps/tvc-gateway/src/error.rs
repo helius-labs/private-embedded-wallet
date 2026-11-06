@@ -24,7 +24,7 @@ pub enum ApiError {
     InvalidJson,
     #[error("the enrollment names an invalid organization, wallet, address or client key")]
     InvalidEnrollmentRequest,
-    #[error("the enrollment is more than five minutes old or more than 30 seconds ahead")]
+    #[error("the enrollment is more than five minutes old or more than a minute ahead")]
     StaleEnrollment,
     #[error("the wallet address did not sign this enrollment")]
     InvalidOwnerEnrollmentSignature,
@@ -42,6 +42,8 @@ pub enum ApiError {
 
     #[error("this gateway did not provision the descriptor for the current release")]
     InvalidDescriptor,
+    #[error("the descriptor has expired: enroll the client key again")]
+    DescriptorExpired,
     #[error("the descriptor's client key is revoked")]
     ClientKeyRevoked,
     #[error("the wallet does not hold the claimed address")]
@@ -53,8 +55,6 @@ pub enum ApiError {
 
     #[error("no such endpoint")]
     NotFound,
-    #[error("another project already sent this ciphertext")]
-    ReplayedRequest,
     #[error("an operation with this ciphertext is still running")]
     OperationInProgress,
     #[error("the body is too large")]
@@ -87,6 +87,8 @@ pub enum ApiError {
 
     #[error("the gateway clock is unavailable")]
     ClockUnavailable,
+    #[error("the release this gateway issues descriptors under has expired")]
+    ReleaseExpired,
 }
 
 /// An RFC 9457 problem; `type` is omitted, so it is `about:blank`.
@@ -122,13 +124,14 @@ impl ApiError {
             | Self::ApiKeyRequired
             | Self::ApiKeyInvalid => StatusCode::UNAUTHORIZED,
             Self::InvalidDescriptor
+            | Self::DescriptorExpired
             | Self::ClientKeyRevoked
             | Self::WalletNotOwned
             | Self::SubOrganizationNotOwned
             | Self::TurnkeyRejected
             | Self::WaasNotEnabled => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
-            Self::ReplayedRequest | Self::OperationInProgress => StatusCode::CONFLICT,
+            Self::OperationInProgress => StatusCode::CONFLICT,
             Self::RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyInFlight => StatusCode::TOO_MANY_REQUESTS,
             Self::EnclaveUnavailable
@@ -142,7 +145,7 @@ impl ApiError {
             | Self::ProvisionerUnavailable
             | Self::WalletGrantUnavailable
             | Self::ApiKeyLookupUnavailable => StatusCode::FAILED_DEPENDENCY,
-            Self::ClockUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::ClockUnavailable | Self::ReleaseExpired => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 

@@ -3,7 +3,7 @@
 # signed prover policy it accepts and the commit. Turnkey
 # pulls it anonymously, so the package must be public. The release continues
 # on an operator's machine with the reference from the run summary:
-#   just release <release-id> --image <reference>
+#   just release <network> <release-id> --image <reference>
 
 name: publish-privacy-wallet-image
 

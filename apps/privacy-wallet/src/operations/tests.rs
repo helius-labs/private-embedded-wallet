@@ -8,8 +8,8 @@ use spr_prover_tee::{
 };
 use zolana_tvc_protocol::constants::{API_VERSION, MAX_PROVE_INPUTS};
 use zolana_tvc_protocol::types::{
-    ClientAuthorization, ClientAuthorizationScheme, ClientGrant, DecryptItem, DecryptLabel,
-    DeriveItem, Environment, ProverSealing, TransactionKeyItem, WalletDescriptor,
+    ClientAuthorization, ClientGrant, DecryptItem, DecryptLabel, DeriveItem, Network,
+    ProverSealing, TransactionKeyItem, WalletDescriptor,
 };
 
 use zolana_tvc_protocol::digest::sealed_seed_digest;
@@ -17,7 +17,11 @@ use zolana_tvc_protocol::digest::sealed_seed_digest;
 use super::sealed::{seal, unseal, Roles};
 use super::*;
 use crate::custody::TurnkeyCustody;
+use crate::network::NET;
 use crate::{DiscoveryConfig, Runtime};
+
+/// The network the image under test serves, as prover policies name it.
+const NETWORK: &str = NET.network.as_str();
 
 /// A wallet key plus the seed its derivation message signs to.
 struct TestWallet {
@@ -53,8 +57,8 @@ fn runtime() -> Runtime {
         ephemeral: Arc::new(P256Pair::generate().expect("ephemeral")),
         custody: Arc::new(TurnkeyCustody::new(Arc::clone(&quorum))),
         quorum,
-        provisioning_public: PROVISIONING_PUBLIC,
-        grant_public: GRANT_PUBLIC,
+        provisioning_public: NET.provisioning,
+        grant_public: NET.grant,
         prover: production_prover_trust(),
     }
 }
@@ -154,7 +158,7 @@ fn descriptor(address: [u8; 32]) -> WalletDescriptor {
     WalletDescriptor {
         version: API_VERSION,
         security_domain_id: [0x11; 32],
-        environment: Environment::Development,
+        network: NET.network,
         turnkey_organization_id: "00000000-0000-0000-0000-00000000000b".to_owned(),
         turnkey_wallet_id: "test".to_owned(),
         address: Pubkey::new_from_array(address).to_string(),
@@ -162,6 +166,7 @@ fn descriptor(address: [u8; 32]) -> WalletDescriptor {
             client_public_key: vec![0x04; 65],
             allowed_operations: OPERATIONS.to_vec(),
         }],
+        expires_at_ms: 1_900_000_000_000,
         provisioning_signature: vec![0u8; 64],
     }
 }
@@ -182,8 +187,7 @@ fn request(operation: Operation, descriptor: WalletDescriptor) -> OperationReque
         client_response_public_key: vec![0u8; 65],
         operation,
         authorization: ClientAuthorization {
-            client_key_id: "tvc-browser-p256-test".to_owned(),
-            scheme: ClientAuthorizationScheme::P256Sha256,
+            client_key_id: "spr-client-p256-test".to_owned(),
             signature: vec![0u8; 64],
         },
     }
@@ -195,7 +199,7 @@ fn sealed_request(
     operation: Operation,
 ) -> OperationRequest {
     let mut request = request(operation, descriptor(wallet.public_key));
-    let (bytes, _) = seal(&request, runtime, wallet.public_key, wallet.seed).expect("seal");
+    let (bytes, _) = seal(&request, runtime, &wallet.seed).expect("seal");
     request.sealed_seed = Some(bytes);
     request
 }
@@ -222,37 +226,67 @@ fn roles_come_only_from_the_wallets_own_derivation_signature() {
 }
 
 #[test]
-fn sealed_seed_hides_the_seed_and_is_bound_to_descriptor_and_epoch() {
+fn sealed_seed_hides_the_seed_and_is_bound_to_the_wallet_and_epoch() {
     let runtime = runtime();
     let wallet = test_wallet();
     let request = sealed_request(&runtime, &wallet, derive_nothing());
     let sealed = request.sealed_seed.clone().expect("sealed");
     assert!(!sealed.windows(64).any(|window| window == wallet.seed));
 
+    let expected = Roles::from_seed(&wallet.public_key, &wallet.seed)
+        .expect("roles")
+        .address()
+        .expect("address");
     let (roles, digest) = unseal(&request, &runtime).expect("unseal");
     assert_eq!(digest, sealed_seed_digest(&sealed));
-    assert_eq!(
-        roles.address().expect("address"),
-        Roles::from_seed(&wallet.public_key, &wallet.seed)
-            .expect("roles")
-            .address()
-            .expect("address")
-    );
+    assert_eq!(roles.address().expect("address"), expected);
+
+    // Another descriptor of the same wallet, for another client key, opens it:
+    // a client that signs in again with a new key keeps its sealed seed.
+    let mut other_client = request.clone();
+    other_client.wallet_descriptor.allowed_clients[0].client_public_key = vec![0x05; 65];
+    other_client.wallet_descriptor.provisioning_signature = vec![0x01; 64];
+    let (roles, _) = unseal(&other_client, &runtime).expect("another client key");
+    assert_eq!(roles.address().expect("address"), expected);
 
     let mut other_epoch = request.clone();
     other_epoch.quorum_key_epoch = 2;
     assert_eq!(failure(unseal(&other_epoch, &runtime)), Failure::Invalid);
 
-    let mut other_descriptor = request.clone();
-    other_descriptor.wallet_descriptor.turnkey_wallet_id = "other".to_owned();
-    assert_eq!(
-        failure(unseal(&other_descriptor, &runtime)),
-        Failure::Invalid
-    );
-
-    let mut other_grant = request.clone();
-    other_grant.wallet_descriptor.allowed_clients[0].client_public_key = vec![0x05; 65];
-    assert_eq!(failure(unseal(&other_grant, &runtime)), Failure::Invalid);
+    // Another wallet's descriptor does not.
+    let other_network = match NET.network {
+        Network::Devnet => Network::Mainnet,
+        Network::Mainnet => Network::Devnet,
+    };
+    let other_address = Pubkey::new_from_array(test_wallet().public_key).to_string();
+    let wallet_descriptor = &request.wallet_descriptor;
+    let other_wallets = [
+        WalletDescriptor {
+            network: other_network,
+            ..wallet_descriptor.clone()
+        },
+        WalletDescriptor {
+            security_domain_id: [0x12; 32],
+            ..wallet_descriptor.clone()
+        },
+        WalletDescriptor {
+            turnkey_organization_id: "00000000-0000-0000-0000-00000000000c".to_owned(),
+            ..wallet_descriptor.clone()
+        },
+        WalletDescriptor {
+            turnkey_wallet_id: "other".to_owned(),
+            ..wallet_descriptor.clone()
+        },
+        WalletDescriptor {
+            address: other_address,
+            ..wallet_descriptor.clone()
+        },
+    ];
+    for descriptor in other_wallets {
+        let mut other_wallet = request.clone();
+        other_wallet.wallet_descriptor = descriptor;
+        assert_eq!(failure(unseal(&other_wallet, &runtime)), Failure::Invalid);
+    }
 
     let other_quorum = runtime_with_quorum(P256Pair::generate().expect("quorum"));
     assert_eq!(failure(unseal(&request, &other_quorum)), Failure::Invalid);
@@ -268,8 +302,8 @@ fn runtime_with_quorum(quorum: P256Pair) -> Runtime {
         ephemeral: Arc::new(P256Pair::generate().expect("ephemeral")),
         custody: Arc::new(TurnkeyCustody::new(Arc::clone(&quorum))),
         quorum,
-        provisioning_public: PROVISIONING_PUBLIC,
-        grant_public: GRANT_PUBLIC,
+        provisioning_public: NET.provisioning,
+        grant_public: NET.grant,
         prover: production_prover_trust(),
     }
 }
@@ -580,15 +614,11 @@ fn prove_fills_only_the_open_secret_slots() {
     }
 }
 
-/// The image builds the signer set zolana pins for its network, in
-/// `sdk-libs/client/src/prover/tee/signers.json`.
+/// The image trusts the policy signers of the network it was built for.
 #[test]
-fn the_image_trusts_the_networks_policy_signers() {
-    assert_eq!(
-        POLICY_SIGNERS.map(hex::encode),
-        ["1fe5d29c79064ea17a16308452040b799df8aeaaae588d44a527a8da9ffa924a"]
-    );
-    let expected = PolicySigners::new(NETWORK, POLICY_SIGNERS.to_vec(), POLICY_THRESHOLD).unwrap();
+fn the_image_trusts_its_networks_policy_signers() {
+    let expected =
+        PolicySigners::new(NETWORK, NET.policy_signers.to_vec(), NET.policy_threshold).unwrap();
     assert_eq!(ProverTrust::image().signers, expected);
 }
 
@@ -727,7 +757,16 @@ fn a_request_bound_to_another_release_or_quorum_key_is_refused() {
     let bound = request(derive_nothing(), descriptor([0x07; 32]));
     assert_eq!(check_request_bindings(&bound, &running), Ok(()));
     type Edit = fn(&mut OperationRequest);
-    let cases: [(Edit, ErrorCode); 6] = [
+    let cases: [(Edit, ErrorCode); 7] = [
+        (
+            |request| {
+                request.wallet_descriptor.network = match NET.network {
+                    Network::Devnet => Network::Mainnet,
+                    Network::Mainnet => Network::Devnet,
+                }
+            },
+            ErrorCode::NetworkMismatch,
+        ),
         (
             |request| request.quorum_key_epoch = 9,
             ErrorCode::QuorumKeyEpochMismatch,
@@ -865,7 +904,13 @@ mod local {
             }
         }
 
+        /// A descriptor for the testkit client key, signed by the testkit
+        /// provisioning key, that expires a day from now.
         fn descriptor(&self) -> WalletDescriptor {
+            self.descriptor_expiring(now_ms().expect("clock") + 86_400_000)
+        }
+
+        fn descriptor_expiring(&self, expires_at_ms: u64) -> WalletDescriptor {
             let client_public = public_key_uncompressed(
                 &p256::SecretKey::from_slice(&self.client_secret)
                     .expect("client scalar")
@@ -874,7 +919,7 @@ mod local {
             let mut descriptor = WalletDescriptor {
                 version: API_VERSION,
                 security_domain_id: sha256(self.keys.security_domain_label.as_bytes()),
-                environment: Environment::Development,
+                network: NET.network,
                 turnkey_organization_id: self.keys.organization_id.clone(),
                 turnkey_wallet_id: self.keys.wallet_id.clone(),
                 address: Pubkey::new_from_array(self.wallet.public_key).to_string(),
@@ -882,6 +927,7 @@ mod local {
                     client_public_key: client_public.to_vec(),
                     allowed_operations: OPERATIONS.to_vec(),
                 }],
+                expires_at_ms,
                 provisioning_signature: Vec::new(),
             };
             let provisioning: [u8; 32] =
@@ -897,9 +943,18 @@ mod local {
         }
 
         fn request(&self, operation: Operation, sealed: Option<Vec<u8>>) -> OperationRequest {
+            self.request_under(self.descriptor(), operation, sealed)
+        }
+
+        /// `operation` under `descriptor`, signed by the testkit client key.
+        fn request_under(
+            &self,
+            descriptor: WalletDescriptor,
+            operation: Operation,
+            sealed: Option<Vec<u8>>,
+        ) -> OperationRequest {
             let info = &self.state.info;
             let now = now_ms().expect("clock");
-            let descriptor = self.descriptor();
             let client_key_id = client_key_id(&descriptor.allowed_clients[0].client_public_key);
             let response_public = public_key_uncompressed(
                 &p256::SecretKey::from_slice(&self.response_secret)
@@ -922,7 +977,6 @@ mod local {
                 operation,
                 authorization: ClientAuthorization {
                     client_key_id,
-                    scheme: ClientAuthorizationScheme::P256Sha256,
                     signature: Vec::new(),
                 },
             };
@@ -1047,6 +1101,40 @@ mod local {
             failure(harness.call_with_grant(&request, Some(forged)).await),
             Failure::Invalid
         );
+    }
+
+    #[tokio::test]
+    async fn an_expired_descriptor_is_refused_after_the_clock_skew_and_says_so() {
+        let harness = Harness::new(LocalProverTrust::StandIn(Anchors::PRODUCTION));
+        let now = now_ms().expect("clock");
+        let within_skew = harness.descriptor_expiring(now - MAX_CLOCK_SKEW_MS + 10_000);
+        let current = harness.request_under(within_skew, Operation::Bootstrap, None);
+        assert!(matches!(
+            harness.call(&current).await,
+            Ok(OperationResult::Bootstrap { .. })
+        ));
+
+        let past = harness.descriptor_expiring(now - MAX_CLOCK_SKEW_MS - 1_000);
+        let expired = harness.request_under(past, Operation::Bootstrap, None);
+        assert_eq!(
+            failure(harness.call(&expired).await),
+            Failure::DescriptorExpired
+        );
+
+        // An expired descriptor whose request another key signed is only invalid.
+        let mut unsigned = expired.clone();
+        unsigned.authorization.signature = vec![0x01; 64];
+        assert_eq!(failure(harness.call(&unsigned).await), Failure::Invalid);
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_answers_an_expired_descriptor_with_a_403_that_names_it() {
+        let response = PublicError::DescriptorExpired.into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = axum::body::to_bytes(response.into_body(), 1_024)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], br#"{"error":"DescriptorExpired"}"#);
     }
 
     /// A prover that answers `/prove/<key>` with a fixed proof once the
@@ -1230,6 +1318,43 @@ mod local {
     }
 
     #[tokio::test]
+    async fn a_seed_one_client_key_bootstrapped_serves_another_client_key_of_the_wallet() {
+        let prover = LocalProver::new("http://127.0.0.1:1");
+        let mut harness = Harness::new(LocalProverTrust::StandIn(prover.anchors()));
+        let OperationResult::Bootstrap { sealed_seed, .. } = harness
+            .call(&harness.request(Operation::Bootstrap, None))
+            .await
+            .expect("bootstrap")
+        else {
+            panic!("expected a bootstrap result");
+        };
+        let first_nullifier = [7u8; 32];
+        let items = vec![DeriveItem::MergeOutputBlinding { first_nullifier }];
+        let derive = |harness: &Harness| {
+            harness.request(
+                Operation::Derive {
+                    items: items.clone(),
+                },
+                Some(sealed_seed.clone()),
+            )
+        };
+        let first_request = derive(&harness);
+        let first = harness.call(&first_request).await.expect("first key");
+
+        // A new sign-in: another client key, enrolled in its own descriptor.
+        harness.client_secret = [0x21; 32];
+        let second_request = derive(&harness);
+        assert_ne!(
+            second_request.wallet_descriptor.allowed_clients,
+            first_request.wallet_descriptor.allowed_clients
+        );
+        assert_eq!(
+            harness.call(&second_request).await.expect("second key"),
+            first
+        );
+    }
+
+    #[tokio::test]
     async fn a_refused_attestation_is_a_failure_stage_inside_the_result() {
         let prover = LocalProver::new("http://127.0.0.1:1");
         let harness = Harness::new(LocalProverTrust::StandIn(prover.anchors()));
@@ -1258,6 +1383,23 @@ mod local {
             OperationResult::Failure {
                 operation: OperationKind::Prove,
                 stage: FailureStage::Prover,
+            }
+        );
+    }
+
+    /// A wallet the custodian declines to sign for gets the `TurnkeySigning`
+    /// stage inside a proven result, not a generic outage.
+    #[tokio::test]
+    async fn a_declined_signature_is_a_failure_stage_inside_the_result() {
+        let mut harness = Harness::new(LocalProverTrust::StandIn(Anchors::PRODUCTION));
+        // The local custodian holds the first wallet's key only.
+        harness.wallet = test_wallet();
+        let bootstrap = harness.request(Operation::Bootstrap, None);
+        assert_eq!(
+            harness.call(&bootstrap).await.expect("answered"),
+            OperationResult::Failure {
+                operation: OperationKind::Bootstrap,
+                stage: FailureStage::TurnkeySigning,
             }
         );
     }

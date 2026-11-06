@@ -9,10 +9,10 @@ export type {
   DeriveItem,
   DeriveOperation,
   DeriveResult,
-  Environment,
   FailureResult,
   FailureStage,
   HealthResponse,
+  Network,
   Operation,
   OperationKind,
   OperationRequest,
@@ -30,7 +30,6 @@ export type {
   TransactionKeyItem,
   TransactionKeysOperation,
   TransactionKeysResult,
-  TurnkeyAppProof,
   WalletDescriptor,
   WalletGrant,
 } from "./protocol/types.js";
@@ -40,9 +39,10 @@ export {
   walletGrantDigest,
 } from "./protocol/digest.js";
 export {
+  ENROLLMENT_DOMAINS,
   WALLET_ENROLLMENT_STATEMENT,
   walletEnrollmentMessage,
   type WalletEnrollment,
 } from "./protocol/enrollment.js";
-export { TvcError, TvcHttpError } from "./protocol/error.js";
+export { TvcError, TvcHttpError, TvcOperationError } from "./protocol/error.js";
 export { decodeLowerHex, encodeLowerHex } from "./protocol/hex.js";

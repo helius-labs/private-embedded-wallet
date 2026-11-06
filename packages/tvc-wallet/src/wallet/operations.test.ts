@@ -23,7 +23,7 @@ vi.mock("../client/operation-executor.js", () => ({ executeOperationEnvelope: en
 const sealedSeed: SealedSeed = { sealedSeed: "11".repeat(64) };
 const sealedSeedDigestHex = encodeLowerHex(sealedSeedDigest(new Uint8Array(64).fill(0x11)));
 const context = {
-  trustVerifier: { verifyCustodyProofs: vi.fn(), verifyOperationAppProof: vi.fn() },
+  trustVerifier: { verifyOperationAppProof: vi.fn() },
 } as unknown as OperationExecutionContext;
 const VIEWING = `04${"cd".repeat(32)}`;
 const HASH = "22".repeat(32);
@@ -191,8 +191,14 @@ describe("result checks", () => {
   it("surfaces an enclave failure stage and refuses a result for another operation", async () => {
     answer({ type: "Failure", operation: "Prove", stage: "Prover" });
     await expect(executeOperation(context, prove, sealedSeed)).rejects.toMatchObject({
+      name: "TvcOperationError",
       code: "OperationFailed",
-      message: "OperationFailed: Prover",
+      operation: "Prove",
+      stage: "Prover",
+    });
+    answer({ type: "Failure", operation: "Prove", stage: "Elsewhere" } as unknown as OperationResult);
+    await expect(executeOperation(context, prove, sealedSeed)).rejects.toMatchObject({
+      code: "UnsupportedVersion",
     });
 
     answer({ type: "Derive", values: ["ab".repeat(32)] });

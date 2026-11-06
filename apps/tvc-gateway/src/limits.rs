@@ -9,17 +9,21 @@ use crate::project::ProjectId;
 
 const LIMITER_PRUNE_THRESHOLD: usize = 10_000;
 
-/// Caps each project's concurrent enclave calls; a Bootstrap can hold one for
-/// the full request timeout.
+/// Caps how many of something each project holds at once, such as its
+/// requests in flight, where a Bootstrap can hold one for the full request
+/// timeout.
 pub struct InFlightLimiter {
     max_per_project: u32,
+    /// Counted each time a project is refused.
+    rejected_metric: &'static str,
     by_project: Mutex<HashMap<ProjectId, Arc<Semaphore>>>,
 }
 
 impl InFlightLimiter {
-    pub fn new(max_per_project: u32) -> Self {
+    pub fn new(max_per_project: u32, rejected_metric: &'static str) -> Self {
         Self {
             max_per_project,
+            rejected_metric,
             by_project: Mutex::new(HashMap::new()),
         }
     }
@@ -27,7 +31,7 @@ impl InFlightLimiter {
     pub fn try_acquire(&self, project: &ProjectId) -> Result<OwnedSemaphorePermit, ApiError> {
         let semaphore = self.semaphore(project);
         semaphore.try_acquire_owned().map_err(|_| {
-            statsd_count!("enclave.in_flight_rejected", 1);
+            statsd_count!(self.rejected_metric, 1);
             ApiError::TooManyInFlight
         })
     }
@@ -55,7 +59,7 @@ mod tests {
     #[test]
     fn in_flight_limiter_caps_each_project_independently() {
         crate::metrics::init_for_tests();
-        let limiter = InFlightLimiter::new(1);
+        let limiter = InFlightLimiter::new(1, "test.rejected");
         let a = ProjectId::for_tests("a");
         let b = ProjectId::for_tests("b");
         let held = limiter.try_acquire(&a);

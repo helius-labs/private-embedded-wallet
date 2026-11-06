@@ -37,7 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=builder /src/apps/tvc-gateway/target/release/tvc-gateway /app/tvc-gateway
 COPY apps/tvc-gateway/configs /app/configs
+COPY packages/tvc-wallet/src/releases /app/releases
 USER appuser
 
 EXPOSE 8940
-ENTRYPOINT ["/app/tvc-gateway", "--config", "/app/configs/config.yaml"]
+ENTRYPOINT ["/app/tvc-gateway"]
+# One image serves either network: run it with --config /app/configs/mainnet.yaml for mainnet.
+CMD ["--config", "/app/configs/devnet.yaml"]

@@ -12,10 +12,18 @@ describe("walletEnrollmentMessage", () => {
     expect(walletEnrollmentMessage(enrollment)).toBe(vector.message);
   });
 
+  it("names the gateway's network as the chain", () => {
+    expect(walletEnrollmentMessage(enrollment)).toContain("\nChain ID: devnet\n");
+    expect(walletEnrollmentMessage({ ...enrollment, network: "mainnet" })).toContain(
+      "\nChain ID: mainnet\n",
+    );
+  });
+
   it("changes with every field", () => {
     const message = walletEnrollmentMessage(enrollment);
     for (const changed of [
       { ...enrollment, domain: "wallet.example" },
+      { ...enrollment, network: "mainnet" as const },
       { ...enrollment, organizationId: "3b2c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e" },
       { ...enrollment, clientPublicKey: `04${"cd".repeat(64)}` },
       { ...enrollment, issuedAtMs: enrollment.issuedAtMs + 1 },
@@ -31,5 +39,8 @@ describe("walletEnrollmentMessage", () => {
     for (const organizationId of [`${enrollment.organizationId}\n`, `${enrollment.organizationId}\r`]) {
       expect(() => walletEnrollmentMessage({ ...enrollment, organizationId })).toThrow(/InvalidDescriptor/);
     }
+    expect(() => walletEnrollmentMessage({ ...enrollment, network: "devnet\n" as "devnet" })).toThrow(
+      /UnknownNetwork/,
+    );
   });
 });

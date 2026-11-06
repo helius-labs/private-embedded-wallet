@@ -1,3 +1,5 @@
+import type { FailureStage, OperationKind } from "./types.js";
+
 export class TvcError extends Error {
   readonly code: string;
 
@@ -18,5 +20,18 @@ export class TvcHttpError extends TvcError {
   constructor(code: string, readonly status: number, readonly retryAfter: string | null) {
     super(code, `HTTP ${status}`);
     this.name = "TvcHttpError";
+  }
+}
+
+/**
+ * An operation that ran and failed at a named stage, which the enclave answers
+ * inside the encrypted result: `Prover` when it refused the prover's policy or
+ * attestation, `TurnkeySigning` when Turnkey declined to sign the bootstrap
+ * message.
+ */
+export class TvcOperationError extends TvcError {
+  constructor(readonly operation: OperationKind, readonly stage: FailureStage) {
+    super("OperationFailed", stage);
+    this.name = "TvcOperationError";
   }
 }

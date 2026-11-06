@@ -1,22 +1,25 @@
+import { createHash } from "node:crypto";
 import { ed25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/p256";
 import { getAddressDecoder } from "@solana/kit";
+import type { TvcKeys, TvcTransport, TvcTurnkey } from "@heliuslabs/spr-embedded-wallet";
 import {
-  identityOf,
-  sealedSeedOf,
-  type TvcClient,
-  type TvcTransport,
-  type VerifiedConnection,
-} from "@heliuslabs/spr-embedded-wallet";
-import {
+  ENROLLMENT_DOMAINS,
   decodeLowerHex,
+  descriptorDigest,
   encodeLowerHex,
   walletEnrollmentMessage,
-  type BootstrapResult,
+  type Network,
+  type ReleasePolicy,
+  type ServiceInfo,
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
-import { createLocalTvcClient } from "@heliuslabs/spr-embedded-wallet/testing";
-import { beforeAll, describe, expect, inject, it } from "vitest";
+import {
+  createLocalTvcClient,
+  createTestTvcClient,
+  type ReleaseTrust,
+} from "@heliuslabs/spr-embedded-wallet/testing";
+import { beforeAll, describe, expect, inject, it, vi } from "vitest";
 import {
   ORGANIZATION_ID,
   PROJECT_ID,
@@ -24,7 +27,7 @@ import {
   testkit,
 } from "./fixtures.js";
 
-const { gatewayUrl, originAuth, apiKey, walletSeedHex } = inject("stack");
+const { gatewayUrl, enclaveUrl, originAuth, apiKey, walletSeedHex, turnkeyUrl } = inject("stack");
 const privateWallet = `${gatewayUrl}/v1/private-wallet`;
 const ownerSeed = decodeLowerHex(walletSeedHex);
 const ownerAddress = getAddressDecoder().decode(ed25519.getPublicKey(ownerSeed));
@@ -55,8 +58,13 @@ function problem(status: number, code: string) {
   return { status, body: expect.objectContaining({ status, code }) };
 }
 
-/** A `POST /enroll` body the owner signed for the gateway at `domain`. */
-function enrollment({ issuedAtMs = Date.now(), signer = ownerSeed, domain = new URL(gatewayUrl).host } = {}) {
+/** A `POST /enroll` body the owner signed for the gateway at `domain`, which serves `network`. */
+function enrollment({
+  issuedAtMs = Date.now(),
+  signer = ownerSeed,
+  network = "devnet",
+  domain = ENROLLMENT_DOMAINS[network],
+}: { issuedAtMs?: number; signer?: Uint8Array; network?: Network; domain?: string } = {}) {
   const fields = {
     organizationId: ORGANIZATION_ID,
     turnkeyWalletId: TURNKEY_WALLET_ID,
@@ -64,7 +72,7 @@ function enrollment({ issuedAtMs = Date.now(), signer = ownerSeed, domain = new 
     clientPublicKey,
     issuedAtMs,
   };
-  const message = new TextEncoder().encode(walletEnrollmentMessage({ domain, ...fields }));
+  const message = new TextEncoder().encode(walletEnrollmentMessage({ domain, network, ...fields }));
   return { ...fields, ownerSignature: encodeLowerHex(ed25519.sign(message, signer)) };
 }
 
@@ -87,7 +95,7 @@ describe("enrollment", () => {
     expect(await response.json()).toEqual({
       title: "Bad Request",
       status: 400,
-      detail: "the enrollment is more than five minutes old or more than 30 seconds ahead",
+      detail: "the enrollment is more than five minutes old or more than a minute ahead",
       code: "StaleEnrollment",
     });
   });
@@ -111,19 +119,27 @@ describe("enrollment", () => {
     );
   });
 
+  it("refuses an enrollment signed for another network", async () => {
+    expect(await post("/enroll", enrollment({ network: "mainnet", domain: ENROLLMENT_DOMAINS.devnet }))).toMatchObject(
+      problem(400, "InvalidOwnerEnrollmentSignature"),
+    );
+  });
+
   it("refuses an enrollment for another project's sub-organization", async () => {
     expect(await post("/enroll", enrollment(), "other-project")).toMatchObject(
       problem(403, "SubOrganizationNotOwned"),
     );
   });
 
-  it("answers the same descriptor for the same enrollment", async () => {
+  it("answers the same descriptor for the same enrollment, for a day from when the owner signed", async () => {
     const signed = enrollment();
     const first = await post("/enroll", signed);
     expect(first.status).toBe(200);
     expect(first.body.descriptor).toMatchObject({
+      network: "devnet",
       address: ownerAddress,
       allowed_clients: [{ client_public_key: clientPublicKey }],
+      expires_at_ms: String(signed.issuedAtMs + 86_400_000),
     });
     expect((await post("/enroll", signed)).body).toEqual(first.body);
   });
@@ -138,10 +154,7 @@ describe("a wallet enrolled through the gateway", () => {
       return response;
     },
   };
-  let descriptor: WalletDescriptor;
-  let tvc: TvcClient;
-  let connection: VerifiedConnection;
-  let bootstrap: BootstrapResult;
+  let keys: TvcKeys;
   const firstSent = () => {
     const operation = sent.find(({ path }) => path.endsWith("/operations"));
     if (!operation) throw new Error("no operation was sent");
@@ -151,15 +164,14 @@ describe("a wallet enrolled through the gateway", () => {
     JSON.parse(firstSent().body) as { descriptor: WalletDescriptor; request: { ciphertext: string } };
 
   beforeAll(async () => {
-    descriptor = (await post("/enroll", enrollment())).body.descriptor;
-    tvc = createLocalTvcClient({
+    const tvc = createLocalTvcClient({
+      network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(privateWallet) },
       solanaAddress: ownerAddress,
-      walletDescriptor: descriptor,
+      descriptor: (await post("/enroll", enrollment())).body.descriptor,
       transport,
     });
-    connection = await tvc.connectAndVerify();
-    bootstrap = await tvc.bootstrap(connection);
+    keys = await tvc.open();
   });
 
   it("connects with one /session request", () => {
@@ -169,16 +181,20 @@ describe("a wallet enrolled through the gateway", () => {
   });
 
   it("bootstraps through /operations with a grant the gateway adds", () => {
-    expect(identityOf(bootstrap).solanaAddress).toBe(ownerAddress);
+    expect(keys.stored.identity.solanaAddress).toBe(ownerAddress);
     expect(firstOperation().request).not.toHaveProperty("wallet_grant");
   });
 
-  it("answers TransactionKeys for the bootstrapped wallet", async () => {
-    const identity = identityOf(bootstrap);
-    const keys = await tvc.transactionKeys(connection, sealedSeedOf(bootstrap), [
-      { viewing_public_key: identity.shieldedViewingPublicKey, first_nullifier: "01".padStart(64, "0") },
+  it("answers TransactionKeys for the bootstrapped wallet over the same session", async () => {
+    type Request = Parameters<TvcKeys["transactionKeys"]>[0][number];
+    const firstNullifier = new Uint8Array(32);
+    firstNullifier[31] = 1;
+    const [viewingPublicKey] = keys.viewingPublicKeys();
+    const answered = await keys.transactionKeys([
+      { viewingPublicKey: viewingPublicKey!, firstNullifier: firstNullifier as Request["firstNullifier"] },
     ]);
-    expect(keys).toHaveLength(1);
+    expect(answered).toHaveLength(1);
+    expect(sent.filter(({ path }) => path.endsWith("/session"))).toHaveLength(1);
   });
 
   it("answers a resent operation with the first answer", async () => {
@@ -188,9 +204,9 @@ describe("a wallet enrolled through the gateway", () => {
     expect(resent.body).toEqual(JSON.parse(firstSent().answer));
   });
 
-  it("refuses another project's resend of an answered operation", async () => {
+  it("treats another project's resend as its own request, which the ownership check refuses", async () => {
     expect(await post("/operations", firstOperation(), "other-project")).toMatchObject(
-      problem(409, "ReplayedRequest"),
+      problem(403, "SubOrganizationNotOwned"),
     );
   });
 
@@ -209,6 +225,122 @@ describe("a wallet enrolled through the gateway", () => {
     expect(await post("/operations", firstOperation().request)).toMatchObject(
       problem(400, "InvalidJson"),
     );
+  });
+});
+
+/** `descriptor` with `fields` changed, signed again with the testkit's provisioning key. */
+function provisioned(descriptor: WalletDescriptor, fields: Partial<WalletDescriptor>): WalletDescriptor {
+  const unsigned = { ...descriptor, ...fields, provisioning_signature: "" };
+  const signature = p256.sign(descriptorDigest(unsigned), decodeLowerHex(testkit.provisioningPrivateKeyHex), {
+    lowS: true,
+    prehash: false,
+  });
+  return { ...unsigned, provisioning_signature: encodeLowerHex(signature.toCompactRawBytes()) };
+}
+
+describe("a descriptor that expired", () => {
+  let expired: WalletDescriptor;
+  beforeAll(async () => {
+    const { descriptor } = (await post("/enroll", enrollment())).body as { descriptor: WalletDescriptor };
+    expired = provisioned(descriptor, { expires_at_ms: String(Date.now() - 2 * 60_000) });
+  });
+
+  it("is refused by the gateway before the enclave sees it", async () => {
+    const request = { version: 1, quorum_key_id: testkit.quorumKeyId, quorum_key_epoch: "1", ciphertext: "abcd" };
+    expect(await post("/operations", { descriptor: expired, request })).toMatchObject(
+      problem(403, "DescriptorExpired"),
+    );
+  });
+
+  it("is refused by the enclave, which says so to the client", async () => {
+    const tvc = createLocalTvcClient({
+      network: "devnet",
+      backend: { kind: "enclave", endpoint: new URL(enclaveUrl) },
+      solanaAddress: ownerAddress,
+      descriptor: expired,
+    });
+    await expect(tvc.open()).rejects.toMatchObject({ code: "DescriptorExpired", status: 403 });
+  });
+});
+
+/** A logged-in Turnkey session for the testkit's wallet, whose session key a new login replaces. */
+function turnkeySession() {
+  const sessionKeys = new Map<string, Uint8Array>();
+  let publicKey = "";
+  const signed: string[] = [];
+  const login = () => {
+    const secret = p256.utils.randomPrivateKey();
+    publicKey = encodeLowerHex(p256.getPublicKey(secret, true));
+    sessionKeys.set(publicKey, secret);
+    return publicKey;
+  };
+  login();
+  const turnkey: TvcTurnkey = {
+    getSession: async () => ({ publicKey, organizationId: ORGANIZATION_ID }),
+    async signWithApiKey({ message, publicKey: key }) {
+      signed.push(message);
+      const secret = sessionKeys.get(key);
+      if (!secret) throw new Error(`no session key ${key}`);
+      return p256.sign(createHash("sha256").update(message, "utf8").digest(), secret).toCompactHex();
+    },
+    fetchWallets: async () => [{
+      walletId: TURNKEY_WALLET_ID,
+      accounts: [{ address: ownerAddress, addressFormat: "ADDRESS_FORMAT_SOLANA" }],
+    }],
+    async signMessage({ message }) {
+      const signature = ed25519.sign(new TextEncoder().encode(message), ownerSeed);
+      return { r: encodeLowerHex(signature.slice(0, 32)), s: encodeLowerHex(signature.slice(32)) };
+    },
+  };
+  return { turnkey, login, signed };
+}
+
+describe("a Turnkey session key as the client key", () => {
+  const sent: { path: string; body: string }[] = [];
+  const transport: TvcTransport = {
+    async fetch(url, init) {
+      sent.push({ path: url.pathname, body: String(init?.body ?? "") });
+      return fetch(url, { ...init, headers: gatekeeperHeaders() });
+    },
+  };
+  const paths = () => sent.map(({ path }) => path.replace("/v1/private-wallet", ""));
+  const { turnkey, login, signed } = turnkeySession();
+  const tvc = createLocalTvcClient({
+    network: "devnet",
+    backend: { kind: "gateway", endpoint: new URL(privateWallet) },
+    turnkey,
+    transport,
+  });
+  let keys: TvcKeys;
+
+  it("is enrolled through the gateway on first use and signs the bootstrap", async () => {
+    keys = await tvc.open();
+    expect(keys.stored.identity.solanaAddress).toBe(ownerAddress);
+    expect(paths()).toEqual(["/session", "/enroll", "/operations"]);
+    const enrolled = JSON.parse(sent[1]!.body) as { clientPublicKey: string };
+    const operation = JSON.parse(sent[2]!.body) as { descriptor: WalletDescriptor };
+    expect(operation.descriptor.allowed_clients[0]?.client_public_key).toBe(enrolled.clientPublicKey);
+    expect(signed).toEqual([expect.stringMatching(/^spr-tvc-client-auth-v1:[0-9a-f]{64}$/)]);
+  });
+
+  it("enrolls the new key after a new login, verifies again, and opens the stored seed with it", async () => {
+    sent.length = 0;
+    login();
+    const reopened = await tvc.open(keys.stored);
+    expect(sent).toEqual([]);
+    const firstNullifier = new Uint8Array(32);
+    firstNullifier[31] = 2;
+    type Request = Parameters<TvcKeys["transactionKeys"]>[0][number];
+    const [viewingPublicKey] = reopened.viewingPublicKeys();
+    const request = [{ viewingPublicKey: viewingPublicKey!, firstNullifier: firstNullifier as Request["firstNullifier"] }];
+    // The enclave opens the seed sealed at the first key's bootstrap under
+    // the new key's descriptor: same wallet, another client key.
+    expect(await reopened.transactionKeys(request)).toHaveLength(1);
+    expect(paths()).toEqual(["/session", "/enroll", "/operations"]);
+    const enrolled = JSON.parse(sent[1]!.body) as { clientPublicKey: string };
+    const operation = JSON.parse(sent[2]!.body) as { descriptor: WalletDescriptor };
+    expect(operation.descriptor.allowed_clients[0]?.client_public_key).toBe(enrolled.clientPublicKey);
+    expect(signed).toHaveLength(2);
   });
 });
 
@@ -238,11 +370,112 @@ describe("a direct caller with a Helius API key", () => {
   it("connects and bootstraps with the key in the endpoint's query", async () => {
     const { descriptor } = (await postDirect("/enroll", enrollment(), { "x-api-key": apiKey })).body;
     const tvc = createLocalTvcClient({
+      network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(`${privateWallet}?api-key=${apiKey}`) },
       solanaAddress: ownerAddress,
-      walletDescriptor: descriptor,
+      descriptor,
     });
-    const connection = await tvc.connectAndVerify();
-    expect(identityOf(await tvc.bootstrap(connection)).solanaAddress).toBe(ownerAddress);
+    expect((await tvc.open()).stored.identity.solanaAddress).toBe(ownerAddress);
+  });
+});
+
+/** What `scripts/release.mjs` exports for its `policy` phase. */
+type ReleaseScript = {
+  releasePolicy(releaseId: string, cfg: Record<string, unknown>, info: ServiceInfo, now: number): ReleasePolicy;
+  signReleasePolicy(policy: ReleasePolicy, authoritySetId: string): Omit<ReleaseTrust, "qosIdentityPcrs">;
+  turnkeyBootProofs(credentials: {
+    organizationId: string;
+    apiBaseUrl: string;
+    publicKey: string;
+    privateKey: string;
+  }): (ephemeralKey: string) => Promise<unknown>;
+  verifyRelease(cfg: Record<string, unknown>, info: ServiceInfo, deps: { bootProof: unknown }): Promise<void>;
+  verifiedReleaseFile(
+    releaseId: string,
+    cfg: Record<string, unknown>,
+    info: ServiceInfo,
+    now: number,
+    deps: { verify: (cfg: Record<string, unknown>, info: ServiceInfo) => Promise<void>; sign: () => never },
+  ): Promise<unknown>;
+};
+
+describe("a release the release script signs for the testkit", () => {
+  it("is accepted by the client for the enclave's network only, up to the Boot Proof", async () => {
+    const script = new URL("../../../scripts/release.mjs", import.meta.url).href;
+    const { releasePolicy, signReleasePolicy } = (await import(script)) as ReleaseScript;
+    const info = (await (await fetch(`${enclaveUrl}/v1/info`)).json()) as ServiceInfo;
+    const cfg = {
+      network: info.network,
+      appId: "local-testkit",
+      securityDomainId: info.security_domain_id,
+      quorumKeyId: info.quorum_key_id,
+      quorumKeyEpoch: info.quorum_key_epoch,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      turnkeyProofSchemaVersions: ["turnkey.boot_proof.v1"],
+      policyValidityDays: 1,
+    };
+    const policy = releasePolicy(info.release_id, cfg, info, Date.now());
+    const release: ReleaseTrust = {
+      ...signReleasePolicy(policy, "local-e2e-authorities"),
+      qosIdentityPcrs: { 0: "00".repeat(48), 1: "00".repeat(48), 2: "00".repeat(48), 3: "00".repeat(48) },
+    };
+    expect(release.releasePolicy.policy).toEqual(policy);
+    // Verification fails before the session key is enrolled or signs anything.
+    const { turnkey, signed } = turnkeySession();
+    const signMessage = vi.spyOn(turnkey, "signMessage");
+    const client = (network: Network) =>
+      createTestTvcClient({
+        network,
+        backend: { kind: "gateway", endpoint: new URL(privateWallet) },
+        release,
+        turnkey,
+        transport: { fetch: (url, init) => fetch(url, { ...init, headers: gatekeeperHeaders() }) },
+      });
+    // The policy verifies and binds the testkit's discovery and ping; only
+    // the unattested Boot Proof is refused.
+    await expect(client("devnet").open()).rejects.toMatchObject({
+      code: "BootProofUnverified",
+    });
+    await expect(client("mainnet").open()).rejects.toMatchObject({ code: "NetworkMismatch" });
+    expect(signMessage).not.toHaveBeenCalled();
+    expect(signed).toEqual([]);
+    expect(() => releasePolicy(info.release_id, { ...cfg, network: "mainnet" }, info, Date.now())).toThrow(
+      "/v1/info network is devnet, expected mainnet",
+    );
+  });
+
+  it("is not signed when the replica's Boot Proof does not verify, as the testkit's does not", async () => {
+    const script = new URL("../../../scripts/release.mjs", import.meta.url).href;
+    const { turnkeyBootProofs, verifyRelease, verifiedReleaseFile } = (await import(script)) as ReleaseScript;
+    const info = (await (await fetch(`${enclaveUrl}/v1/info`)).json()) as ServiceInfo;
+    const turnkeyKey = p256.utils.randomPrivateKey();
+    // Fetched from the mock Turnkey with a stamped request, as from Turnkey with the tvc login.
+    const bootProof = turnkeyBootProofs({
+      organizationId: ORGANIZATION_ID,
+      apiBaseUrl: turnkeyUrl,
+      publicKey: encodeLowerHex(p256.getPublicKey(turnkeyKey, true)),
+      privateKey: encodeLowerHex(turnkeyKey),
+    });
+    const cfg = {
+      network: info.network,
+      endpoint: enclaveUrl,
+      appId: "local-testkit",
+      securityDomainId: info.security_domain_id,
+      quorumKeyId: info.quorum_key_id,
+      quorumKeyEpoch: info.quorum_key_epoch,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      turnkeyProofSchemaVersions: ["turnkey.boot_proof.v1"],
+      policyValidityDays: 1,
+      qosIdentityPcrs: { 0: "00".repeat(48), 1: "00".repeat(48), 2: "00".repeat(48), 3: "00".repeat(48) },
+    };
+    const sign = vi.fn<() => never>();
+    // The testkit answers the challenge under its Quorum key; only the unattested Boot Proof is refused.
+    await expect(
+      verifiedReleaseFile(info.release_id, cfg, info, Date.now(), {
+        verify: (verified, served) => verifyRelease(verified, served, { bootProof }),
+        sign,
+      }),
+    ).rejects.toThrow(/does not verify, so nothing was signed: BootProofUnverified: decode/);
+    expect(sign).not.toHaveBeenCalled();
   });
 });

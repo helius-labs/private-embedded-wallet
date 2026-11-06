@@ -18,9 +18,10 @@ mod fixtures;
 use fixtures::{
     bind_discovery_to_policy, reject_double_hashed_signature, verify_fixtures, write_fixtures,
 };
+use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::release::verify_signed_release_policy;
 use zolana_tvc_protocol::types::{
-    DecryptLabel, DeriveItem, HealthResponse, Operation, OperationKind, ServiceInfo,
+    DecryptLabel, DeriveItem, HealthResponse, Network, Operation, OperationKind, ServiceInfo,
 };
 use zolana_tvc_protocol::{PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy};
 
@@ -221,7 +222,7 @@ fn health_does_not_leak_deployment_details() {
     assert_eq!(value["health_has_release_id"], false);
     assert_eq!(value["health_status"], 200);
     let info: ServiceInfo = parse_strict_json(value["info_body"].as_str().unwrap()).unwrap();
-    assert_eq!(info.version, 1);
+    assert_eq!(info.version, API_VERSION);
 }
 
 #[test]
@@ -278,11 +279,20 @@ fn signed_release_policy_rejects_empty_duplicate_unknown_and_mutated() {
     let authorities: PinnedReleaseAuthorities =
         serde_json::from_value(value["authorities"].clone()).unwrap();
     let now_ms = decode_decimal_u64(value["now_ms"].as_str().unwrap()).unwrap();
-    verify_signed_release_policy(&signed, &authorities, now_ms).unwrap();
+    let network: Network = serde_json::from_value(value["network"].clone()).unwrap();
+    verify_signed_release_policy(&signed, &authorities, network, now_ms).unwrap();
     assert_eq!(value["empty_signatures"], "ReleasePolicyInvalid");
     assert_eq!(value["duplicate_key_id"], "ReleasePolicyInvalid");
     assert_eq!(value["unknown_key_id"], "ReleasePolicyInvalid");
     assert_eq!(value["mutated_policy"], "InvalidSignature");
     assert_eq!(value["wrong_trust_root"], "ReleasePolicyInvalid");
     assert_eq!(value["revoked_epoch"], "ReleasePolicyInvalid");
+    assert_eq!(value["wrong_network"], "NetworkMismatch");
+    let other: Network = serde_json::from_value(value["wrong_network_expected"].clone()).unwrap();
+    assert_eq!(
+        verify_signed_release_policy(&signed, &authorities, other, now_ms)
+            .unwrap_err()
+            .code,
+        ErrorCode::NetworkMismatch
+    );
 }

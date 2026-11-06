@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { p256 } from "@noble/curves/p256";
 import { sha256 } from "@noble/hashes/sha256";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { qosDecrypt } from "../crypto/qos.js";
+import { qosDecrypt, qosEncrypt } from "../crypto/qos.js";
 import { signP256Message, signP256Prehash } from "../crypto/p256.js";
 import { canonicalizeJsonValue } from "../protocol/jcs.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
@@ -15,7 +15,9 @@ import type {
   SignedReleasePolicy,
 } from "../protocol/types.js";
 import { policySigningDigest } from "../verify/release-policy.js";
-import { createTvcClient } from "../wallet/client.js";
+import { verifyLiveReplica, type TvcConnectionConfig } from "./connection.js";
+import type { TvcRequestOptions } from "./request.js";
+import { createTvcSession } from "./session.js";
 
 const verifyBootProofMock = vi.hoisted(() => vi.fn());
 
@@ -23,6 +25,11 @@ vi.mock("../verify/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../verify/index.js")>()),
   verifyBootProof: verifyBootProofMock,
 }));
+
+/** What the client verifies on first use: a fresh session's connection. */
+function verify(config: TvcConnectionConfig, options?: TvcRequestOptions) {
+  return createTvcSession(config).context(options);
+}
 
 function secret(label: string): Uint8Array {
   return sha256(new TextEncoder().encode(label));
@@ -83,7 +90,7 @@ function connectFixture() {
   const policy: ReleasePolicy = {
     version: 1,
     releaseId: "connect-poc",
-    environment: "development",
+    network: "devnet",
     tvcApplicationId: "wallet-dev",
     securityDomainId: "33".repeat(32),
     acceptedManifestDigests: [manifestDigest],
@@ -106,7 +113,6 @@ function connectFixture() {
     signatures: [
       {
         keyId: "connect-authority",
-        scheme: "p256-sha256",
         signature: encodeLowerHex(
           signP256Prehash(authoritySecret, policySigningDigest(policy))
         ),
@@ -126,7 +132,7 @@ function connectFixture() {
   };
   const info: ServiceInfo = {
     version: 1,
-    environment: "development",
+    network: "devnet",
     security_domain_id: policy.securityDomainId,
     release_id: policy.releaseId,
     manifest_digest: manifestDigest,
@@ -140,7 +146,6 @@ function connectFixture() {
     max_encrypted_request_bytes: "262144",
     max_encrypted_response_bytes: "262144",
     proof_type: "zolana.tvc.wallet_operation.v1",
-    boot_proof_lookup_key: discoveryEphemeralPublicKey,
   };
   const expectedPcrs = {
     0: "44".repeat(48),
@@ -191,12 +196,12 @@ function connectFixture() {
   };
 }
 
-describe("connectAndVerify development PoC", () => {
+describe("verification", () => {
   beforeEach(() =>
     verifyBootProofMock.mockReset().mockResolvedValue(undefined)
   );
 
-  it("runs encrypted QOS ping, resolves the Boot Proof, and returns an opaque connection", async () => {
+  it("runs encrypted QOS ping, resolves the Boot Proof, and holds the verified release", async () => {
     const {
       ephemeralPublicKey,
       manifestDigest,
@@ -208,15 +213,14 @@ describe("connectAndVerify development PoC", () => {
       pingAnswer,
     } = connectFixture();
     const resolveBootProof = vi.fn().mockResolvedValue(bootProof);
-    const client = createTvcClient({
+    const config: TvcConnectionConfig = {
       backend: {
         kind: "enclave",
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
         resolveBootProof,
       },
-      releasePolicy: signedPolicy,
-      releaseAuthorities: authorities,
-      qosIdentityPcrs: expectedPcrs,
+      network: "devnet",
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
       nowMs: () => 1_750_000_000_000n,
       transport: {
         fetch: async (url, init) => {
@@ -233,11 +237,10 @@ describe("connectAndVerify development PoC", () => {
           });
         },
       },
-    });
+    };
 
-    await expect(client.connectAndVerify()).resolves.toMatchObject({
-      releaseId: "connect-poc",
-      environment: "development",
+    await expect(verify(config)).resolves.toMatchObject({
+      info: { release_id: "connect-poc", network: "devnet" },
     });
     expect(resolveBootProof).toHaveBeenCalledWith(
       expect.objectContaining({ bootProofLookupKey: ephemeralPublicKey })
@@ -256,7 +259,7 @@ describe("connectAndVerify development PoC", () => {
     const lookupsBefore = resolveBootProof.mock.calls.length;
     const verificationsBefore = verifyBootProofMock.mock.calls.length;
     resolveBootProof.mockImplementationOnce(() => new Promise((resolve) => { resolveLate = resolve; }));
-    const pending = client.connectAndVerify({ signal: controller.signal });
+    const pending = verify(config, { signal: controller.signal });
     const rejected = expect(pending).rejects.toThrow("cancelled lookup");
     await vi.waitFor(() => expect(resolveBootProof.mock.calls.length).toBe(lookupsBefore + 1));
     const lookupSignal = resolveBootProof.mock.lastCall?.[0].signal;
@@ -268,33 +271,31 @@ describe("connectAndVerify development PoC", () => {
     expect(verifyBootProofMock).toHaveBeenCalledTimes(verificationsBefore);
 
     let discoveryPulls = 0;
-    const oversizedDiscoveryClient = createTvcClient({
+    const oversizedDiscovery = verify({
       backend: {
         kind: "enclave",
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
         resolveBootProof,
       },
-      releasePolicy: signedPolicy,
-      releaseAuthorities: authorities,
-      qosIdentityPcrs: expectedPcrs,
+      network: "devnet",
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
       nowMs: () => 1_750_000_000_000n,
       transport: { fetch: async () => oversizedResponse(() => (discoveryPulls += 1)) },
     });
-    await expect(oversizedDiscoveryClient.connectAndVerify()).rejects.toThrowError(
+    await expect(oversizedDiscovery).rejects.toThrowError(
       "ResponseTooLarge",
     );
     expect(discoveryPulls).toBeLessThan(4);
 
     let pingPulls = 0;
-    const oversizedPingClient = createTvcClient({
+    const oversizedPing = verify({
       backend: {
         kind: "enclave",
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
         resolveBootProof,
       },
-      releasePolicy: signedPolicy,
-      releaseAuthorities: authorities,
-      qosIdentityPcrs: expectedPcrs,
+      network: "devnet",
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
       nowMs: () => 1_750_000_000_000n,
       transport: {
         fetch: async (url) =>
@@ -303,7 +304,7 @@ describe("connectAndVerify development PoC", () => {
             : oversizedResponse(() => (pingPulls += 1)),
       },
     });
-    await expect(oversizedPingClient.connectAndVerify()).rejects.toThrowError(
+    await expect(oversizedPing).rejects.toThrowError(
       "ResponseTooLarge",
     );
     expect(pingPulls).toBeLessThan(4);
@@ -322,14 +323,13 @@ describe("connectAndVerify development PoC", () => {
     } = connectFixture();
     const requested: URL[] = [];
     const session = (extra: Record<string, unknown> = {}) =>
-      createTvcClient({
+      verify({
         backend: {
           kind: "gateway",
           endpoint: new URL("https://gateway.example.invalid/v1/private-wallet?api-key=key"),
         },
-        releasePolicy: signedPolicy,
-        releaseAuthorities: authorities,
-        qosIdentityPcrs: expectedPcrs,
+        network: "devnet",
+        release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
         nowMs: () => 1_750_000_000_000n,
         transport: {
           fetch: async (url, init) => {
@@ -351,8 +351,8 @@ describe("connectAndVerify development PoC", () => {
         },
       });
 
-    await expect(session().connectAndVerify()).resolves.toMatchObject({
-      releaseId: "connect-poc",
+    await expect(session()).resolves.toMatchObject({
+      info: { release_id: "connect-poc" },
     });
     expect(requested.map(String)).toEqual([
       "https://gateway.example.invalid/v1/private-wallet/session?api-key=key",
@@ -365,7 +365,7 @@ describe("connectAndVerify development PoC", () => {
       nowMs: 1_750_000_000_000n,
     });
 
-    await expect(session({ policy: {} }).connectAndVerify()).rejects.toMatchObject({
+    await expect(session({ policy: {} })).rejects.toMatchObject({
       code: "UnknownJsonField",
     });
   });
@@ -391,15 +391,129 @@ describe("connectAndVerify development PoC", () => {
       ),
     ) as Record<string, unknown>;
 
-    const client = createTvcClient({
+    const verified = verify({
+      network: "devnet",
       backend: { kind: "enclave", endpoint: new URL("https://tvc.example.invalid") },
-      releasePolicy: policyFixture.signed as SignedReleasePolicy,
-      releaseAuthorities: policyFixture.authorities as PinnedReleaseAuthorities,
+      release: {
+        releasePolicy: policyFixture.signed as SignedReleasePolicy,
+        releaseAuthorities: policyFixture.authorities as PinnedReleaseAuthorities,
+        qosIdentityPcrs: { 0: "00", 1: "00", 2: "00", 3: "00" },
+      },
       nowMs: clock,
       transport: { fetch: async () => new Response("{}", { status: 500 }) },
     });
 
-    await expect(client.connectAndVerify()).rejects.toThrow();
+    await expect(verified).rejects.toThrow();
     expect(seen.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the client's network", () => {
+  it("refuses a release for another network before it fetches anything", async () => {
+    const { signedPolicy, authorities, expectedPcrs } = connectFixture();
+    const fetch = vi.fn();
+    const verified = verify({
+      network: "mainnet",
+      backend: { kind: "gateway", endpoint: new URL("https://gateway.example.invalid/v1/private-wallet") },
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
+      nowMs: () => 1_750_000_000_000n,
+      transport: { fetch },
+    });
+    await expect(verified).rejects.toMatchObject({ code: "NetworkMismatch" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses discovery for another network than the release's", async () => {
+    const { signedPolicy, authorities, info, expectedPcrs, bootProof, pingAnswer } = connectFixture();
+    const verified = verify({
+      network: "devnet",
+      backend: { kind: "gateway", endpoint: new URL("https://gateway.example.invalid/v1/private-wallet") },
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
+      nowMs: () => 1_750_000_000_000n,
+      transport: {
+        fetch: async (_url, init) => {
+          const { encrypted_challenge } = JSON.parse(String(init?.body)) as { encrypted_challenge: string };
+          return Response.json({
+            info: { ...info, network: "mainnet" },
+            ping: JSON.parse(pingAnswer(encrypted_challenge)),
+            bootProof,
+          });
+        },
+      },
+    });
+    await expect(verified).rejects.toMatchObject({ code: "NetworkMismatch" });
+  });
+});
+
+describe("a live replica, before its release is signed", () => {
+  beforeEach(() => verifyBootProofMock.mockReset().mockResolvedValue(undefined));
+
+  function enclave(answer: (encryptedChallenge: string) => string) {
+    const fetch = vi.fn(async (url: URL, init?: RequestInit) => {
+      expect(url.pathname).toBe("/v1/ping");
+      const request = JSON.parse(String(init?.body)) as { encrypted_challenge: string };
+      try {
+        return new Response(answer(request.encrypted_challenge), { status: 200 });
+      } catch {
+        // A challenge sealed to a key the replica does not hold.
+        return new Response('{"error":"InvalidRequest"}', { status: 400 });
+      }
+    });
+    return { fetch };
+  }
+
+  it("answers the ping under the Quorum key info names, and its Boot Proof attests info's manifest", async () => {
+    const { ephemeralPublicKey, manifestDigest, info, expectedPcrs, bootProof, pingAnswer } = connectFixture();
+    const lookup = vi.fn().mockResolvedValue(bootProof);
+    await verifyLiveReplica({
+      endpoint: new URL("https://app.example"),
+      info,
+      qosIdentityPcrs: expectedPcrs,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      bootProof: lookup,
+      transport: enclave(pingAnswer),
+      nowMs: 1_750_000_000_000n,
+    });
+    expect(lookup).toHaveBeenCalledWith(ephemeralPublicKey, undefined);
+    expect(verifyBootProofMock).toHaveBeenCalledWith({
+      appProof: expect.objectContaining({ publicKey: ephemeralPublicKey }),
+      bootProof,
+      allowedManifestSha256: [manifestDigest],
+      expectedPcrs,
+      nowMs: 1_750_000_000_000n,
+    });
+  });
+
+  it("is refused when another key answers, the Boot Proof fails, or the trust root is not the pinned one", async () => {
+    const { info, expectedPcrs, bootProof, pingAnswer } = connectFixture();
+    const input = {
+      endpoint: new URL("https://app.example"),
+      info,
+      qosIdentityPcrs: expectedPcrs,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      bootProof: vi.fn().mockResolvedValue(bootProof),
+      transport: enclave(pingAnswer),
+    };
+    // A Quorum key the replica does not hold: it cannot read the challenge.
+    const { info: otherRelease } = connectFixture();
+    const otherQuorum = qosPublic(secret("another-quorum-encryption"), secret("another-quorum-signing"));
+    await expect(
+      verifyLiveReplica({ ...input, info: { ...otherRelease, quorum_public_key: otherQuorum } }),
+    ).rejects.toMatchObject({ code: "BootProofUnverified", status: 400 });
+    // An answer to another challenge.
+    const replayed = enclave(() => pingAnswer(encodeLowerHex(qosEncrypt(
+      p256.getPublicKey(secret("connect-quorum-encryption"), false),
+      new TextEncoder().encode("another challenge"),
+    ))));
+    await expect(verifyLiveReplica({ ...input, transport: replayed })).rejects.toMatchObject({
+      code: "TurnkeyEvidenceInvalid",
+    });
+    verifyBootProofMock.mockRejectedValueOnce(new Error("BootProofUnverified"));
+    await expect(verifyLiveReplica(input)).rejects.toThrow("BootProofUnverified");
+    const fetch = vi.fn();
+    await expect(
+      verifyLiveReplica({ ...input, turnkeyTrustRootId: "another-root", transport: { fetch } }),
+    ).rejects.toMatchObject({ code: "ReleasePolicyInvalid" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

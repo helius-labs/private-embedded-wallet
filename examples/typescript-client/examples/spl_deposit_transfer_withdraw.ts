@@ -9,11 +9,9 @@ import {
 } from "@heliuslabs/spr";
 import { AssetRegistry } from "@heliuslabs/spr/transaction";
 import { address } from "@solana/kit";
-import { TvcKeys, shieldedAddressOf } from "@heliuslabs/spr-embedded-wallet";
 
 import {
   expectBalance,
-  loadOrBootstrapWallet,
   requiredEnv,
   sendAndConfirmFactory,
   setup,
@@ -28,12 +26,9 @@ const TRANSFER_AMOUNT = DEPOSIT_AMOUNT / 4n;
 const WITHDRAW_AMOUNT = DEPOSIT_AMOUNT / 4n;
 
 async function main(): Promise<void> {
-  const { zolana, tvc, connection, signer, walletPath, prover } = await setup();
-
   // Same wallet as the SOL example: one identity holds every asset.
-  const stored = await loadOrBootstrapWallet(tvc, connection, walletPath);
-  const shielded = shieldedAddressOf(stored.identity);
-  const keys = new TvcKeys({ ...stored, client: tvc, connection, prover });
+  const { zolana, keys, signer } = await setup();
+  const shielded = keys.address();
   const sendAndConfirm = sendAndConfirmFactory(zolana, signer);
 
   const registration = await buildRegistrationTransaction({

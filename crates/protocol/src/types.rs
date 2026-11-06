@@ -1,22 +1,37 @@
 //! Wire types: discovery, requests, results, sealed seed, release policy.
 
+use std::fmt::{Display, Formatter, Result as FmtResult};
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
+use crate::constants::MAX_CLOCK_SKEW_MS;
 use crate::encoding::{self, decimal_u64, hex};
 use crate::error::{ErrorCode, TvcError};
 
+/// The Solana network a release, a descriptor and a running enclave serve.
+/// Every check is equality with the network the checker expects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", deny_unknown_fields)]
-pub enum Environment {
-    Development,
-    Production,
+pub enum Network {
+    Devnet,
+    Mainnet,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ClientAuthorizationScheme {
-    #[serde(rename = "p256-sha256")]
-    P256Sha256,
+impl Network {
+    /// The wire name, which is also the Zolana network name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Devnet => "devnet",
+            Self::Mainnet => "mainnet",
+        }
+    }
+}
+
+impl Display for Network {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str(self.as_str())
+    }
 }
 
 /// What a request asks for, as advertised by `/v1/info`, granted by a
@@ -47,7 +62,7 @@ pub struct HealthResponse {
 #[serde(deny_unknown_fields)]
 pub struct ServiceInfo {
     pub version: u8,
-    pub environment: Environment,
+    pub network: Network,
     #[serde(with = "hex")]
     pub security_domain_id: [u8; 32],
     pub release_id: String,
@@ -68,8 +83,6 @@ pub struct ServiceInfo {
     #[serde(with = "decimal_u64")]
     pub max_encrypted_response_bytes: u64,
     pub proof_type: String,
-    #[serde(with = "hex")]
-    pub boot_proof_lookup_key: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,11 +99,15 @@ pub struct WalletDescriptor {
     pub version: u8,
     #[serde(with = "hex")]
     pub security_domain_id: [u8; 32],
-    pub environment: Environment,
+    pub network: Network,
     pub turnkey_organization_id: String,
     pub turnkey_wallet_id: String,
     pub address: String,
     pub allowed_clients: Vec<ClientGrant>,
+    /// When the descriptor stops admitting its client key, in Unix ms. The
+    /// provisioning signature covers it.
+    #[serde(with = "decimal_u64")]
+    pub expires_at_ms: u64,
     #[serde(with = "hex")]
     pub provisioning_signature: Vec<u8>,
 }
@@ -99,13 +116,21 @@ impl WalletDescriptor {
     pub fn wallet_id(&self) -> String {
         format!("wallet-{}", self.turnkey_wallet_id)
     }
+
+    /// Refuses the descriptor once `now_ms` is more than the clock skew past
+    /// its expiry: `DescriptorExpired`.
+    pub fn check_current(&self, now_ms: u64) -> Result<(), TvcError> {
+        if now_ms > self.expires_at_ms.saturating_add(MAX_CLOCK_SKEW_MS) {
+            return Err(TvcError::new(ErrorCode::DescriptorExpired));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientAuthorization {
     pub client_key_id: String,
-    pub scheme: ClientAuthorizationScheme,
     #[serde(with = "hex")]
     pub signature: Vec<u8>,
 }
@@ -359,18 +384,6 @@ pub struct EncryptedResponse {
     pub tvc_app_proof: AppProof,
 }
 
-/// The typed Turnkey proof fields returned by `turnkey_client`. Their policy
-/// evidence is cryptographically valid but unbound to our intent until
-/// Turnkey publishes a decision-context binding.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TurnkeyAppProof {
-    pub scheme: String,
-    pub public_key: String,
-    pub proof_payload: String,
-    pub signature: String,
-}
-
 /// Coarse, non-secret failure marker, returned only inside the encrypted result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FailureStage {
@@ -392,12 +405,13 @@ pub enum OperationResult {
         #[serde(with = "hex")]
         shielded_viewing_public_key: Vec<u8>,
         /// The derivation seed sealed to the Quorum key: presented on every
-        /// later operation, reproducible by another bootstrap, never a secret
-        /// to the client. No secret appears elsewhere in this result.
+        /// later operation and reproducible by another bootstrap. Opaque to
+        /// the client but sensitive, since any current descriptor of the
+        /// wallet opens it in the enclave. No other secret appears in this
+        /// result.
         #[serde(with = "hex")]
         sealed_seed: Vec<u8>,
         turnkey_activity_id: String,
-        turnkey_app_proofs: Vec<TurnkeyAppProof>,
     },
     /// One plaintext per item, in request order.
     Decrypt {
@@ -460,7 +474,7 @@ pub struct OperationProofPayload {
 pub struct ReleasePolicy {
     pub version: u8,
     pub release_id: String,
-    pub environment: Environment,
+    pub network: Network,
     pub tvc_application_id: String,
     #[serde(with = "hex")]
     pub security_domain_id: [u8; 32],
@@ -488,7 +502,6 @@ pub struct ReleasePolicy {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReleaseAuthoritySignature {
     pub key_id: String,
-    pub scheme: ClientAuthorizationScheme,
     #[serde(with = "hex")]
     pub signature: Vec<u8>,
 }
@@ -515,11 +528,4 @@ pub fn parse_qos_ping_request(json: &str) -> Result<QosPingRequest, TvcError> {
 
 pub fn parse_qos_ping_challenge(json: &str) -> Result<QosPingChallenge, TvcError> {
     encoding::parse_strict_json(json)
-}
-
-pub fn reject_production_environment(environment: Environment) -> Result<(), TvcError> {
-    match environment {
-        Environment::Development => Ok(()),
-        Environment::Production => Err(TvcError::new(ErrorCode::ProductionClaimRejected)),
-    }
 }

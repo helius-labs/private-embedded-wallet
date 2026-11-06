@@ -1,10 +1,9 @@
 import type {
-  AuthorizeTvcRequestInput,
-  TvcOperationAuthorizer,
+  SignTvcRequestInput,
+  TvcRequestSigner,
 } from "../client/operation-executor.js";
 import { clientAuthMessage, requestDigest } from "../protocol/digest.js";
 import { TvcError } from "../protocol/error.js";
-import { bytesEqual } from "../protocol/hex.js";
 
 const P256_ORDER = BigInt(
   "0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
@@ -12,22 +11,22 @@ const P256_ORDER = BigInt(
 const P256_HALF_ORDER = P256_ORDER >> 1n;
 
 /**
- * Rederives the exact bytes this authorizer will sign from the request it was
+ * Rederives the exact bytes this signer will sign from the request it was
  * shown, and refuses to sign anything else.
  *
- * The private key is the wallet's operation authority, so the authorizer must
- * not be a signing oracle for caller-supplied bytes: whatever it signs has to
- * be a function of a request the caller also disclosed in full.
+ * The private key is the wallet's operation authority, so the signer must not
+ * be a signing oracle for caller-supplied bytes: whatever it signs has to be a
+ * function of a request the caller also disclosed in full.
  */
-export function authorizedRequestMessage(
-  input: AuthorizeTvcRequestInput,
+export function signedRequestMessage(
+  input: SignTvcRequestInput,
   clientKeyId: string,
-): Uint8Array {
+): string {
   if (input.request.authorization.client_key_id !== clientKeyId) {
     throw new TvcError("OperationNotAllowed");
   }
   const expected = clientAuthMessage(requestDigest(input.request));
-  if (!bytesEqual(input.clientAuthMessage, expected)) {
+  if (input.clientAuthMessage !== expected) {
     throw new TvcError("OperationNotAllowed");
   }
   return expected;
@@ -54,28 +53,24 @@ export function compactLowS(signature: ArrayBuffer | Uint8Array): Uint8Array {
   return output;
 }
 
-export type TvcRequestSigner = {
+/** A P-256 client key: a Turnkey session key, or the testkit's. */
+export type TvcRequestKey = {
   /** `clientKeyIdFor` of the uncompressed P-256 public key the descriptor lists. */
   readonly clientKeyId: string;
-  /** ECDSA over `SHA-256` of the message, returned as 64-byte `r||s`. */
-  sign(message: Uint8Array): Promise<Uint8Array>;
+  /** ECDSA over SHA-256 of the message's UTF-8 bytes, returned as 64-byte `r||s`. */
+  sign(message: string): Promise<Uint8Array>;
 };
 
 /**
- * Wraps a signing function as an operation authorizer.
- *
- * The message and the low-S normalization stay here, so a caller outside the
- * browser supplies a key and nothing else. Reimplementing either would put the
- * canonical form in two places.
+ * The request signer for a key. The message and the low-S normalization stay
+ * here, so a key supplies its signature and nothing else.
  */
-export function createTvcOperationAuthorizer(
-  signer: TvcRequestSigner,
-): TvcOperationAuthorizer {
+export function createTvcRequestSigner(key: TvcRequestKey): TvcRequestSigner {
   return {
-    clientKeyId: signer.clientKeyId,
-    async authorizeTvcRequest(input: AuthorizeTvcRequestInput) {
-      const message = authorizedRequestMessage(input, signer.clientKeyId);
-      return compactLowS(await signer.sign(message));
+    clientKeyId: key.clientKeyId,
+    async signRequest(input: SignTvcRequestInput) {
+      const message = signedRequestMessage(input, key.clientKeyId);
+      return compactLowS(await key.sign(message));
     },
   };
 }

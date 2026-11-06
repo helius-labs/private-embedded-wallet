@@ -38,14 +38,18 @@ export function isProveCircuit(value: unknown): value is keyof typeof FAMILIES {
  * Where the client proves and under which policy. `url` is the prover's base
  * URL, such as a regional prover or `https://<gateway>/v1/spr?api-key=<key>`:
  * the attestation and proof routes are appended to its path and its query is
- * kept. `policy` is the signed policy file of the network the enclave image
- * was built for, usually `TvcProverPolicy.forNetwork(network)`.
+ * kept. `policy` is the signed policy file of the network the enclave serves;
+ * the client downloads its network's file,
+ * `TvcProverPolicy.forNetwork(network)`, when it is absent.
  */
 export type TvcProverConfig = {
   readonly url: string;
-  readonly policy: TvcProverPolicy;
+  readonly policy?: TvcProverPolicy;
   readonly transport?: TvcTransport;
 };
+
+/** A client's prover with its policy settled, which every wallet it opens shares. */
+export type TvcProver = TvcProverConfig & { readonly policy: TvcProverPolicy };
 
 /** A prover's answer to a sealed request that could not be opened as a proof. */
 export type ProverAnswer =

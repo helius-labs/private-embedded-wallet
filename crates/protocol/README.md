@@ -7,7 +7,7 @@ release-policy signing and threshold verification, and named errors that
 carry no secret.
 [`packages/tvc-wallet/src/protocol`](../../packages/tvc-wallet/src/protocol)
 implements the same protocol in TypeScript; the [fixtures](#fixtures) keep the
-two in agreement. This document is the normative specification of v1.
+two in agreement. This document is the normative specification.
 
 ## Encoding
 
@@ -17,7 +17,7 @@ canonicalized with RFC 8785 (JCS). Binary fields are lowercase hex without
 uncompressed SEC1; P-256 signatures are 64-byte raw low-S `r || s`; viewing
 and transaction viewing public keys are Zolana's 33-byte tagged X25519 keys,
 `0x04 || u` with a canonical little-endian `u`; Solana addresses and
-transaction signatures are base58.
+transaction signatures are base58. A network is `devnet` or `mainnet`.
 
 ## Digests
 
@@ -25,11 +25,11 @@ transaction signatures are base58.
 
 | Domain | Payload | Use |
 | --- | --- | --- |
-| `ZOLANA_TVC_REQUEST_V1` | `JCS(request)` without `authorization.signature` | `request_digest`; `client_key_id` and `scheme` stay in |
-| `ZOLANA_TVC_CLIENT_AUTH_V1` | `request_digest` | What the client key signs, through a prehash API |
+| `ZOLANA_TVC_REQUEST_V1` | `JCS(request)` without `authorization.signature` | `request_digest`; `client_key_id` stays in |
 | `ZOLANA_TVC_RESULT_V1` | The encrypted result bytes | `result_digest`, bound by the App Proof |
 | `ZOLANA_TVC_SEALED_SEED_DIGEST_V1` | The sealed seed wire bytes | Names the seed a response used |
 | `ZOLANA_TVC_WALLET_ID_V1` | The wallet id | Binds a sealed seed to its wallet |
+| `ZOLANA_TVC_WALLET_BINDING_V1` | `JCS({network, security_domain_id, turnkey_organization_id, turnkey_wallet_id, address})` of a descriptor | What a sealed seed's contents name the wallet by |
 | `ZOLANA_TVC_PROVISIONING_AUTH_V1` | `JCS(descriptor)` without `provisioning_signature` | What the provisioning key signs |
 | `ZOLANA_TVC_RELEASE_POLICY_V1` | `JCS(policy)` | What a release authority signs |
 | `ZOLANA_TVC_WALLET_GRANT_V1` | `JCS(grant)` without `signature` | What the grant key signs |
@@ -50,8 +50,11 @@ carries a fresh 32-byte request id, `issued_at_ms` and `expires_at_ms`, the
 release pins (`target_release_id`, `target_manifest_digest`,
 `target_executable_digest`, Quorum key id and epoch), the wallet descriptor,
 the sealed seed (absent on `Bootstrap`), a one-time response public key, the
-operation, and a `ClientAuthorization`: the client key id, the scheme, and
-the client key's signature over `H(client-auth, request_digest)`.
+operation, and a `ClientAuthorization`: the client key id and the client
+key's signature over the client-auth message, the UTF-8 text
+`spr-tvc-client-auth-v1:<request_digest in lowercase hex>`. The signature is
+ECDSA P-256 over SHA-256 of that text, as Turnkey's `signWithApiKey` signs
+with a session key, sent as 64-byte low-S `r || s`.
 
 An `EncryptedResponse` echoes the request id and carries the result
 encrypted to the response key, plus an App Proof: a P-256/SHA-256 signature by
@@ -70,7 +73,7 @@ SDK's `ShieldedKeys` and `ProofAuthority` methods, so `TvcKeys` in
 
 | Operation | Sealed seed | Returns |
 | --- | --- | --- |
-| `Bootstrap` | forbidden | The public identity (Solana address, owner hash, nullifier and viewing public keys), the sealed seed, and Turnkey's App Proofs for the signing. Also the recovery path: the client passes the identity it knows and refuses another. |
+| `Bootstrap` | forbidden | The public identity (Solana address, owner hash, nullifier and viewing public keys), the sealed seed, and the Turnkey activity that signed. Also the recovery path: the client passes the identity it knows and refuses another. |
 | `Decrypt { items }` | required | The transfer cipher's output for each `{ ciphertext, viewing_public_key, transaction_viewing_public_key, salt, slot_index, label }`, label `Transfer` or `RingDeposit`. The enclave interprets nothing; the SDK decodes and matches commitments. |
 | `Derive { items }` | required | One 32-byte value per item: `Nullifier { utxo_hash, blinding }`, `MergeDummyNullifier { first_nullifier, slot_index }`, `MergeOutputBlinding { first_nullifier }`, `MergePrivateTxBlinding { first_nullifier }`, or `MergeOutputKey { first_nullifier }`. |
 | `TransactionKeys { items }` | required | The per-transaction viewing secret for each `{ viewing_public_key, first_nullifier }`. The derivation is one way: a secret opens that transaction and nothing else. |
@@ -80,15 +83,16 @@ A batch takes up to 256 items. The pool cipher is unauthenticated, so
 `Decrypt` cannot tell whose ciphertext it opened; the SDK adopts a UTXO only
 when its commitment equals the indexed one. `Prove` does not check who owns the
 inputs: a slot filled for another wallet's UTXO gives a witness the circuit
-rejects, and a proof reveals nothing about the secret either way. The client
-checks Turnkey's App Proofs as signatures only: their payload carries no
-decision-context binding, so they show that a Turnkey enclave signed, not that
-the signing was the one the policy permits, and nothing treats them as
-authorization. Failures surface only inside the encrypted result as a closed
-stage marker (`Prover`, `TurnkeySigning`); public HTTP errors are generic.
+rejects, and a proof reveals nothing about the secret either way. An
+operation that ran and failed at a named stage answers inside the encrypted
+result with `Failure { operation, stage }`, a closed marker: `Prover` when a
+prover's policy or attestation is refused, `TurnkeySigning` when Turnkey
+declines to sign the bootstrap message. Its App Proof names the sealed seed
+the request presented, or 32 zero bytes when it presented none. Every other
+failure is a generic public HTTP error.
 
-Both the descriptor and the running environment must be `development`; a
-production descriptor is rejected.
+`/v1/info` names the network the enclave serves, fixed when its image is
+built, and the enclave refuses a descriptor for any other network.
 
 ## Sealed proving
 
@@ -125,19 +129,31 @@ reads the witness.
 
 A wallet descriptor is the operator's grant that lets client keys drive the
 enclave operations of one Turnkey wallet. It binds a security domain, the
-`development` environment, a Turnkey organization and wallet id, the Solana
-address, and the allowed clients (each a P-256 public key with its allowed
-operations), under a provisioning signature over the descriptor digest that
-the enclave verifies against the provisioning public key compiled into it. A
-descriptor names public keys and identifiers only; it is not a secret.
+network, a Turnkey organization and wallet id, the Solana
+address, the allowed clients (each a P-256 public key with its allowed
+operations) and `expires_at_ms`, under a provisioning signature over the
+descriptor digest that the enclave verifies against the provisioning public
+key compiled into it. Once a request's signatures check out, the enclave
+refuses it with `403 {"error":"DescriptorExpired"}` when its clock is more
+than 60 s past `expires_at_ms`, so a client knows to enroll its key again; a
+gateway in front refuses the same descriptor the same way. A descriptor names
+public keys and identifiers only; it is not a secret.
 
 The sealed seed is the derivation seed encrypted to the Quorum key. Its
 envelope names the Quorum key id and epoch and the wallet id hash; its
-contents repeat them and add the descriptor digest, the derivation suite, and
-the seed. `Bootstrap` returns it; every other operation presents it, and the
-enclave accepts it only under the descriptor and Quorum key epoch it was
-issued for. It contains nothing the Turnkey wallet cannot reproduce, so
-losing it costs one more `Bootstrap`.
+contents repeat the Quorum key id and epoch and add the wallet binding digest
+(the network, security domain, Turnkey organization and wallet, and address
+of the descriptor), the derivation suite (`spr-ed25519-role-expansion-v1`),
+and the seed. `Bootstrap` returns it; every other operation presents it, and
+the enclave accepts it under any descriptor of the same wallet, whichever
+client key that descriptor lists, and only under the Quorum key epoch it was
+issued for. A client that signs in again with a new key opens the seed it
+already holds. It contains nothing the Turnkey wallet cannot reproduce, so
+losing it costs one more `Bootstrap`. It is sensitive all the same: it runs
+every operation but `Bootstrap` for the wallet without the owner or Turnkey,
+with a current descriptor of the wallet and that descriptor's client key until
+the descriptor expires, or with the provisioning key, which issues
+descriptors, for as long as the image trusts that key.
 
 ## Wallet grant
 
@@ -154,23 +170,24 @@ enclave can check it before forwarding.
 
 ## Release policy
 
-A release policy names a release: its id, the environment, the TVC
+A release policy names a release: its id, the network, the TVC
 application id, the security domain, the accepted manifest and executable
 digests, the Quorum key id, epoch and public key, the allowed operations, and
 the request and response size limits. Release authorities sign
-`H(ZOLANA_TVC_RELEASE_POLICY_V1, JCS(policy))`; a client accepts the policy
+`H(ZOLANA_TVC_RELEASE_POLICY_V1, JCS(policy))` with P-256; a client accepts
+the policy only for the network it expects (`NetworkMismatch` otherwise) and
 at a threshold of authority signatures, and verification fails closed on an
 empty, duplicate, or unknown key. A re-signed policy is a new authority set
 every client must accept.
 
 The trust material a client pins is the policy, the authority public keys,
-and the QOS identity PCRs. `connectAndVerify()` in `@heliuslabs/spr-embedded-wallet`
-verifies the policy, binds every security field of `GET /v1/info` to it,
-completes the Quorum-encrypted `POST /v1/ping`, and verifies the Nitro Boot
-Proof against the PCRs and the accepted manifest digests. Wallet calls take
-the resulting `VerifiedConnection` only. `/v1/info` is discovery, not a trust
-root, `/health` reports process readiness only, and HTTPS alone establishes
-nothing.
+and the QOS identity PCRs. Before its first wallet call, the client in
+`@heliuslabs/spr-embedded-wallet` verifies the policy, binds every security
+field of `GET /v1/info` to it, including the network, completes the
+Quorum-encrypted `POST /v1/ping`, and verifies the Nitro Boot Proof against
+the PCRs and the accepted manifest digests. Wallet calls run only over that
+verification. `/v1/info` is discovery, not a trust root, `/health` reports
+process readiness only, and HTTPS alone establishes nothing.
 
 ## Fixtures
 

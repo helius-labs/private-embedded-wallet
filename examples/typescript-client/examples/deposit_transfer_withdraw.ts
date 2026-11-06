@@ -8,11 +8,9 @@ import {
   buildWithdrawalTransaction,
   syncWallet,
 } from "@heliuslabs/spr";
-import { TvcKeys, shieldedAddressOf } from "@heliuslabs/spr-embedded-wallet";
 
 import {
   expectBalance,
-  loadOrBootstrapWallet,
   sendAndConfirmFactory,
   setup,
 } from "../src/lib.js";
@@ -22,11 +20,8 @@ const TRANSFER_AMOUNT = 3_000_000n;
 const WITHDRAW_AMOUNT = 3_000_000n;
 
 async function main(): Promise<void> {
-  const { zolana, tvc, connection, signer, walletPath, prover } = await setup();
-
-  const stored = await loadOrBootstrapWallet(tvc, connection, walletPath);
-  const shielded = shieldedAddressOf(stored.identity);
-  const keys = new TvcKeys({ ...stored, client: tvc, connection, prover });
+  const { zolana, keys, signer } = await setup();
+  const shielded = keys.address();
   const sendAndConfirm = sendAndConfirmFactory(zolana, signer);
 
   // Register so others can pay this wallet by its Solana address.

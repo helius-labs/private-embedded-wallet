@@ -16,26 +16,45 @@ use crate::upstream::Forwarded;
 const KEY_PREFIX: &str = "tvc-gateway:replay:";
 const REDIS_TIMEOUT: Duration = Duration::from_millis(500);
 const RUNNING: &str = "running";
+/// The largest answer the ledger keeps. A larger one is not kept, and a resend
+/// runs again: only `Decrypt`, `Derive`, `TransactionKeys` and `Prove` answer
+/// this much, and running them twice gives the same answer or a new sealing
+/// of the same proof. A `Bootstrap` answer, which must not run twice, is a few
+/// kilobytes.
+pub const MAX_KEPT_ANSWER_BYTES: usize = 64 * 1024;
 
 /// What the enclave did with an operation: its answer, or the failure that
 /// left it unknown.
 pub type Outcome = Result<Forwarded, ApiError>;
 
-/// The digest of a claimed ciphertext.
+/// The digest of a project and a ciphertext it claimed. Project IDs hold no
+/// NUL, so the pair is unambiguous.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Key([u8; 32]);
 
+impl Key {
+    fn of(project: &ProjectId, ciphertext: &[u8]) -> Self {
+        let mut digest = Sha256::new();
+        digest.update(project.as_str().as_bytes());
+        digest.update([0]);
+        digest.update(ciphertext);
+        Self(digest.finalize().into())
+    }
+}
+
 #[derive(Debug)]
 pub enum Claim {
-    /// No request sent the ciphertext within the window. This one now holds
-    /// it, and must record its outcome or release it.
+    /// The project sent no request with the ciphertext within the window.
+    /// This one now holds it, and must record its outcome or release it.
     New(Key),
-    /// A request from the same project sent it, and this was the outcome.
+    /// A request from the project sent it, and this was the outcome.
     Answered(Outcome),
 }
 
-/// The first outcome of each `/operations` ciphertext within the window, so
-/// a resent operation gets that outcome instead of running twice.
+/// The first outcome of each project's `/operations` ciphertext within the
+/// window, so a resent operation gets that outcome instead of running twice.
+/// Projects do not share entries, so none can claim another's ciphertext
+/// first.
 pub enum ReplayLedger {
     Local(LocalLedger),
     Shared(SharedLedger),
@@ -57,17 +76,14 @@ impl ReplayLedger {
         }))
     }
 
-    /// Refuses a ciphertext that is still running, or that another project sent.
+    /// Refuses a ciphertext the project's earlier request is still running.
     pub async fn claim(&self, project: &ProjectId, ciphertext: &[u8]) -> Result<Claim, ApiError> {
-        let key = Key(Sha256::digest(ciphertext).into());
+        let key = Key::of(project, ciphertext);
         let claim = match self {
-            Self::Local(ledger) => ledger.claim(project, key, Instant::now()),
-            Self::Shared(ledger) => ledger.claim(project, key).await,
+            Self::Local(ledger) => ledger.claim(key, Instant::now()),
+            Self::Shared(ledger) => ledger.claim(key).await,
         };
         match &claim {
-            Err(ApiError::ReplayedRequest) => {
-                statsd_count!("enclave.replay_rejected", 1);
-            }
             Err(ApiError::OperationInProgress) => {
                 statsd_count!("operations.in_progress", 1);
             }
@@ -81,10 +97,18 @@ impl ReplayLedger {
 
     /// Records the outcome of a claimed ciphertext. If that fails, the claim
     /// stands until the window ends, and a resend gets `OperationInProgress`.
-    pub async fn record(&self, key: Key, project: &ProjectId, outcome: &Outcome) {
+    /// An answer above [`MAX_KEPT_ANSWER_BYTES`] releases the claim instead.
+    pub async fn record(&self, key: Key, outcome: &Outcome) {
+        if outcome
+            .as_ref()
+            .is_ok_and(|answer| answer.body.len() > MAX_KEPT_ANSWER_BYTES)
+        {
+            statsd_count!("operations.answer_not_kept", 1);
+            return self.release(key).await;
+        }
         match self {
-            Self::Local(ledger) => ledger.record(key, project, outcome),
-            Self::Shared(ledger) => ledger.record(key, project, outcome).await,
+            Self::Local(ledger) => ledger.record(key, outcome),
+            Self::Shared(ledger) => ledger.record(key, outcome).await,
         }
     }
 
@@ -99,14 +123,8 @@ impl ReplayLedger {
 
 /// An outcome as the shared ledger stores it.
 #[derive(Serialize, Deserialize)]
-struct Record {
-    project: String,
-    outcome: StoredOutcome,
-}
-
-#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum StoredOutcome {
+enum Record {
     Answered {
         status: u16,
         content_type: String,
@@ -118,26 +136,22 @@ enum StoredOutcome {
 }
 
 impl Record {
-    fn new(project: &ProjectId, outcome: &Outcome) -> Option<Self> {
-        let outcome = match outcome {
-            Ok(forwarded) => StoredOutcome::Answered {
+    fn new(outcome: &Outcome) -> Option<Self> {
+        Some(match outcome {
+            Ok(forwarded) => Self::Answered {
                 status: forwarded.status.as_u16(),
                 content_type: forwarded.content_type.to_str().ok()?.to_owned(),
                 body: String::from_utf8(forwarded.body.to_vec()).ok()?,
             },
-            Err(error) => StoredOutcome::Failed {
+            Err(error) => Self::Failed {
                 code: error.code().to_owned(),
             },
-        };
-        Some(Self {
-            project: project.as_str().to_owned(),
-            outcome,
         })
     }
 
     fn outcome(self) -> Option<Outcome> {
-        Some(match self.outcome {
-            StoredOutcome::Answered {
+        Some(match self {
+            Self::Answered {
                 status,
                 content_type,
                 body,
@@ -146,7 +160,7 @@ impl Record {
                 content_type: HeaderValue::try_from(content_type).ok()?,
                 body: Bytes::from(body),
             }),
-            StoredOutcome::Failed { code } => Err(code.parse().ok()?),
+            Self::Failed { code } => Err(code.parse().ok()?),
         })
     }
 }
@@ -178,7 +192,7 @@ impl SharedLedger {
         }
     }
 
-    async fn claim(&self, project: &ProjectId, key: Key) -> Result<Claim, ApiError> {
+    async fn claim(&self, key: Key) -> Result<Claim, ApiError> {
         let mut claim = redis::cmd("SET");
         claim
             .arg(Self::redis_key(key))
@@ -197,19 +211,14 @@ impl SharedLedger {
             tracing::warn!(%error, "replay record is malformed");
             ApiError::ReplayGuardUnavailable
         })?;
-        if record.project != project.as_str() {
-            return Err(ApiError::ReplayedRequest);
-        }
         record
             .outcome()
             .map(Claim::Answered)
             .ok_or(ApiError::ReplayGuardUnavailable)
     }
 
-    async fn record(&self, key: Key, project: &ProjectId, outcome: &Outcome) {
-        let Some(record) =
-            Record::new(project, outcome).and_then(|r| serde_json::to_string(&r).ok())
-        else {
+    async fn record(&self, key: Key, outcome: &Outcome) {
+        let Some(record) = Record::new(outcome).and_then(|r| serde_json::to_string(&r).ok()) else {
             tracing::warn!("operation outcome is not recordable");
             return;
         };
@@ -231,7 +240,7 @@ impl SharedLedger {
 
 enum Entry {
     Running,
-    Answered(ProjectId, Outcome),
+    Answered(Outcome),
 }
 
 /// The ledger of one process. Two generations rotate, so an outcome is
@@ -278,7 +287,7 @@ impl LocalLedger {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn claim(&self, project: &ProjectId, key: Key, now: Instant) -> Result<Claim, ApiError> {
+    fn claim(&self, key: Key, now: Instant) -> Result<Claim, ApiError> {
         let mut state = self.lock();
         let expired = now.saturating_duration_since(state.rotated_at) >= self.window;
         if expired || state.maps[state.current].len() >= self.max_entries {
@@ -294,16 +303,13 @@ impl LocalLedger {
                 Ok(Claim::New(key))
             }
             Some(Entry::Running) => Err(ApiError::OperationInProgress),
-            Some(Entry::Answered(sender, outcome)) if sender == project => {
-                Ok(Claim::Answered(outcome.clone()))
-            }
-            Some(Entry::Answered(..)) => Err(ApiError::ReplayedRequest),
+            Some(Entry::Answered(outcome)) => Ok(Claim::Answered(outcome.clone())),
         }
     }
 
-    fn record(&self, key: Key, project: &ProjectId, outcome: &Outcome) {
+    fn record(&self, key: Key, outcome: &Outcome) {
         if let Some(entry) = self.lock().get_mut(key) {
-            *entry = Entry::Answered(project.clone(), outcome.clone());
+            *entry = Entry::Answered(outcome.clone());
         }
     }
 
@@ -347,21 +353,33 @@ mod tests {
             body(ledger.claim(&project, b"ciphertext").await),
             Err(ApiError::OperationInProgress)
         );
-        ledger.record(key, &project, &answer("first")).await;
+        ledger.record(key, &answer("first")).await;
+        assert_eq!(
+            body(ledger.claim(&project, b"ciphertext").await),
+            Ok("first".to_owned())
+        );
+
+        // Another project's request with the same ciphertext is its own: it
+        // neither sees nor takes the first project's entry.
+        let Ok(Claim::New(theirs)) = ledger.claim(&other, b"ciphertext").await else {
+            panic!("another project's claim is new");
+        };
+        assert_ne!(theirs, key);
+        ledger.record(theirs, &answer("theirs")).await;
         assert_eq!(
             body(ledger.claim(&project, b"ciphertext").await),
             Ok("first".to_owned())
         );
         assert_eq!(
             body(ledger.claim(&other, b"ciphertext").await),
-            Err(ApiError::ReplayedRequest)
+            Ok("theirs".to_owned())
         );
 
         let Ok(Claim::New(failed)) = ledger.claim(&project, b"failed").await else {
             panic!("the first claim is new");
         };
         ledger
-            .record(failed, &project, &Err(ApiError::EnclaveUnavailable))
+            .record(failed, &Err(ApiError::EnclaveUnavailable))
             .await;
         assert_eq!(
             body(ledger.claim(&project, b"failed").await),
@@ -374,6 +392,24 @@ mod tests {
         ledger.release(released).await;
         assert_eq!(
             body(ledger.claim(&project, b"released").await),
+            Ok("new".to_owned())
+        );
+
+        // An answer at the cap is kept; a larger one releases its claim.
+        let largest = "x".repeat(MAX_KEPT_ANSWER_BYTES);
+        let Ok(Claim::New(kept)) = ledger.claim(&project, b"largest").await else {
+            panic!("the first claim is new");
+        };
+        ledger.record(kept, &answer(&largest)).await;
+        assert_eq!(body(ledger.claim(&project, b"largest").await), Ok(largest));
+        let Ok(Claim::New(dropped)) = ledger.claim(&project, b"too large").await else {
+            panic!("the first claim is new");
+        };
+        ledger
+            .record(dropped, &answer(&"x".repeat(MAX_KEPT_ANSWER_BYTES + 1)))
+            .await;
+        assert_eq!(
+            body(ledger.claim(&project, b"too large").await),
             Ok("new".to_owned())
         );
     }
@@ -396,23 +432,19 @@ mod tests {
     fn a_local_ledger_remembers_across_one_rotation_then_forgets() {
         crate::metrics::init_for_tests();
         let ledger = LocalLedger::new(Duration::from_secs(60), 16);
-        let project = ProjectId::for_tests("a");
         let now = Instant::now();
         let key = Key([1; 32]);
+        assert!(matches!(ledger.claim(key, now), Ok(Claim::New(_))));
         assert!(matches!(
-            ledger.claim(&project, key, now),
-            Ok(Claim::New(_))
-        ));
-        assert!(matches!(
-            ledger.claim(&project, key, now + Duration::from_secs(61)),
+            ledger.claim(key, now + Duration::from_secs(61)),
             Err(ApiError::OperationInProgress)
         ));
         assert!(matches!(
-            ledger.claim(&project, Key([2; 32]), now + Duration::from_secs(122)),
+            ledger.claim(Key([2; 32]), now + Duration::from_secs(122)),
             Ok(Claim::New(_))
         ));
         assert!(matches!(
-            ledger.claim(&project, key, now + Duration::from_secs(123)),
+            ledger.claim(key, now + Duration::from_secs(123)),
             Ok(Claim::New(_))
         ));
     }

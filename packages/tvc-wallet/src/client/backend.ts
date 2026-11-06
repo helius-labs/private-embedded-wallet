@@ -1,5 +1,5 @@
 import { awaitWithSignal } from "./request.js";
-import { TvcError } from "../protocol/error.js";
+import { TvcError, TvcHttpError } from "../protocol/error.js";
 import { canonicalizeJsonValue } from "../protocol/jcs.js";
 import { parseStrictJson } from "../protocol/json.js";
 import type { WalletDescriptor, WalletGrant } from "../protocol/types.js";
@@ -100,6 +100,17 @@ async function readAnswer(
   return readBoundedText(response, maxBytes, signal);
 }
 
+/** The enclave's answer to `pingBody`, a QOS ping encrypted to its quorum key. */
+export async function fetchPing(
+  endpoint: URL,
+  pingBody: string,
+  transport: TvcTransport,
+  signal?: AbortSignal,
+): Promise<string> {
+  const ping = await postJson(transport, endpointUrl(endpoint, "/v1/ping"), pingBody, signal);
+  return readAnswer(ping, "BootProofUnverified", MAX_PING_RESPONSE_BYTES, signal);
+}
+
 /** Discovery and the answer to `pingBody`, a QOS ping encrypted to the pinned quorum key. */
 export async function fetchSession(
   backend: TvcBackend,
@@ -114,9 +125,7 @@ export async function fetchSession(
         transport, endpointUrl(backend.endpoint, "/v1/info"), undefined, signal,
       );
       const infoText = await readAnswer(info, "DiscoveryUntrusted", MAX_DISCOVERY_RESPONSE_BYTES, signal);
-      const ping = await postJson(transport, endpointUrl(backend.endpoint, "/v1/ping"), pingBody, signal);
-      const pingText = await readAnswer(ping, "BootProofUnverified", MAX_PING_RESPONSE_BYTES, signal);
-      return { infoText, pingText };
+      return { infoText, pingText: await fetchPing(backend.endpoint, pingBody, transport, signal) };
     }
     case "gateway": {
       const response = await postJson(transport, gatewayUrl(backend.endpoint, "session"), pingBody, signal);
@@ -164,12 +173,38 @@ export function forwardedRequestBytes(backend: TvcBackend): number {
   return backend.kind === "gateway" ? GATEWAY_GRANT_BYTES : 0;
 }
 
+/** Room for a refusal's JSON: the enclave's `{"error"}` or a gateway's problem document. */
+const MAX_REFUSAL_BYTES = 4_096n;
+
+/**
+ * Whether a 403 names `DescriptorExpired`: the enclave answers
+ * `{"error": "DescriptorExpired"}`, which a gateway forwards as it is, and a
+ * gateway that refuses the descriptor itself answers a problem with that
+ * `code`.
+ */
+async function refusesExpiredDescriptor(response: Response, signal?: AbortSignal): Promise<boolean> {
+  if (response.status !== 403) return false;
+  let refusal: unknown;
+  try {
+    refusal = JSON.parse(await readBoundedText(response, MAX_REFUSAL_BYTES, signal));
+  } catch {
+    signal?.throwIfAborted();
+    return false;
+  }
+  if (!refusal || typeof refusal !== "object") return false;
+  const { code, error } = refusal as { code?: unknown; error?: unknown };
+  return code === "DescriptorExpired" || error === "DescriptorExpired";
+}
+
 /**
  * The application answers a rejected request with 4xx, and a release that
  * cannot serve one with 5xx; a gateway answers 424 when the enclave or Turnkey
- * did not.
+ * did not. A refused expired descriptor is `DescriptorExpired`.
  */
-function readOperationAnswer(response: Response, maxBytes: bigint, signal?: AbortSignal): Promise<string> {
+async function readOperationAnswer(response: Response, maxBytes: bigint, signal?: AbortSignal): Promise<string> {
+  if (await refusesExpiredDescriptor(response, signal)) {
+    throw new TvcHttpError("DescriptorExpired", response.status, response.headers.get("retry-after"));
+  }
   const unavailable = response.status >= 500 || response.status === 424;
   return readAnswer(response, unavailable ? "OperationUnavailable" : "OperationRejected", maxBytes, signal);
 }

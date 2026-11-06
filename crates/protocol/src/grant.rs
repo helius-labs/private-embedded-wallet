@@ -56,11 +56,11 @@ mod tests {
     use p256::SecretKey;
 
     use super::*;
-    use crate::types::{ClientGrant, Environment, OperationKind};
+    use crate::types::{ClientGrant, Network, OperationKind};
 
     const GRANT_SECRET: [u8; 32] = [6; 32];
     const NOW: u64 = 1_800_000_000_000;
-    const CLIENT: &str = "tvc-browser-p256-00112233445566778899aabbccddeeff";
+    const CLIENT: &str = "spr-client-p256-00112233445566778899aabbccddeeff";
 
     fn grant_public() -> Vec<u8> {
         let secret = SecretKey::from_slice(&GRANT_SECRET).unwrap();
@@ -75,7 +75,7 @@ mod tests {
         WalletDescriptor {
             version: API_VERSION,
             security_domain_id: [1; 32],
-            environment: Environment::Development,
+            network: Network::Devnet,
             turnkey_organization_id: "00000000-0000-4000-8000-000000000001".to_owned(),
             turnkey_wallet_id: wallet.to_owned(),
             address: "11111111111111111111111111111111".to_owned(),
@@ -83,6 +83,7 @@ mod tests {
                 client_public_key: vec![4; 65],
                 allowed_operations: vec![OperationKind::Bootstrap],
             }],
+            expires_at_ms: 1_800_086_400_000,
             provisioning_signature: vec![0; 64],
         }
     }
@@ -124,7 +125,7 @@ mod tests {
             verify(
                 &signed,
                 &mine,
-                "tvc-browser-p256-ffffffffffffffffffffffffffffffff",
+                "spr-client-p256-ffffffffffffffffffffffffffffffff",
                 NOW
             ),
             Some(ErrorCode::UnauthorizedClient)

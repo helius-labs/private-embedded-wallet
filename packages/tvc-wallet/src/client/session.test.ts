@@ -1,22 +1,15 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createVerifiedConnection, type ConnectedTvcRuntime } from "./connection.js";
+import type { ConnectedTvcRuntime } from "./connection.js";
 import { sessionFromConnector } from "./session.js";
-import type { OperationsConfig } from "./operation-executor.js";
-
-const operations: OperationsConfig = {
-  walletDescriptor: { version: 1, environment: "development", security_domain_id: "00".repeat(32),
-    turnkey_organization_id: "org", turnkey_wallet_id: "wallet", address: "11111111111111111111111111111111", allowed_clients: [], provisioning_signature: "" },
-  authorizer: { clientKeyId: "client", authorizeTvcRequest: async () => new Uint8Array() },
-};
-function runtime(label: string): ConnectedTvcRuntime {
+function runtime(label: string, nowMs: () => bigint = () => 1n): ConnectedTvcRuntime {
   return {
-    connection: createVerifiedConnection(label), backend: { kind: "enclave", endpoint: new URL("https://tvc.example") },
-    info: { version: 1, environment: "development", security_domain_id: "00".repeat(32), release_id: label,
+    backend: { kind: "enclave", endpoint: new URL("https://tvc.example") },
+    info: { version: 1, network: "devnet", security_domain_id: "00".repeat(32), release_id: label,
       manifest_digest: "11".repeat(32), executable_digest: "22".repeat(32), quorum_public_key: "", quorum_key_id: "quorum", quorum_key_epoch: "1",
-      ephemeral_public_key: "", supported_operations: [], max_encrypted_request_bytes: "262144", max_encrypted_response_bytes: "262144", proof_type: "", boot_proof_lookup_key: "" },
+      ephemeral_public_key: "", supported_operations: [], max_encrypted_request_bytes: "262144", max_encrypted_response_bytes: "262144", proof_type: "" },
     transport: { fetch: vi.fn() }, releasePolicyValidFromMs: 0n,
-    releasePolicyExpiresAtMs: 999999n, nowMs: () => 1n,
-    trustVerifier: { verifyOperationAppProof: vi.fn(), verifyCustodyProofs: vi.fn() },
+    releasePolicyExpiresAtMs: 999999n, nowMs,
+    trustVerifier: { verifyOperationAppProof: vi.fn() },
   };
 }
 function deferred<T>() {
@@ -26,14 +19,65 @@ function deferred<T>() {
 }
 afterEach(() => vi.useRealTimers());
 
-it("lets one caller cancel while another receives the shared verified connection", async () => {
+it("verifies once on first use and holds the connection", async () => {
+  const connect = vi.fn(async (_signal: AbortSignal) => runtime("held"));
+  const session = sessionFromConnector(connect);
+  const first = await session.context();
+  expect(first).toMatchObject({ info: { release_id: "held" } });
+  await expect(session.context()).resolves.toBe(first);
+  expect(connect).toHaveBeenCalledOnce();
+});
+
+it("verifies again once the release policy's window no longer holds, and after forget", async () => {
+  let now = 1n;
+  const connect = vi.fn(async (_signal: AbortSignal) => runtime(`at-${now}`, () => now));
+  const session = sessionFromConnector(connect);
+  const first = await session.context();
+  now = 1_000_000n;
+  connect.mockRejectedValueOnce(new Error("ExpiredRequest"));
+  await expect(session.context()).rejects.toThrow("ExpiredRequest");
+  expect(connect).toHaveBeenCalledTimes(2);
+  now = 2n;
+  const second = await session.context();
+  expect(second).not.toBe(first);
+  expect(connect).toHaveBeenCalledTimes(3);
+
+  session.forget(first);
+  await expect(session.context()).resolves.toBe(second);
+  session.forget(second);
+  const third = await session.context();
+  expect(third).not.toBe(second);
+  expect(connect).toHaveBeenCalledTimes(4);
+});
+
+it("verifies anew after reset, and a verification in flight at the reset never becomes current", async () => {
+  const ready = deferred<ConnectedTvcRuntime>();
+  const connect = vi.fn((_signal: AbortSignal) => ready.promise);
+  const session = sessionFromConnector(connect);
+  const inFlight = session.context();
+  await Promise.resolve();
+  session.reset();
+  connect.mockResolvedValueOnce(runtime("after"));
+  const after = await session.context();
+  expect(after.info.release_id).toBe("after");
+  ready.resolve(runtime("before"));
+  await expect(inFlight).resolves.toMatchObject({ info: { release_id: "before" } });
+  await expect(session.context()).resolves.toBe(after);
+
+  session.reset();
+  connect.mockResolvedValueOnce(runtime("again"));
+  await expect(session.context()).resolves.toMatchObject({ info: { release_id: "again" } });
+  expect(connect).toHaveBeenCalledTimes(3);
+});
+
+it("lets one caller cancel while another receives the shared verification", async () => {
   const connection = runtime("shared");
   const ready = deferred<ConnectedTvcRuntime>();
   const connect = vi.fn((_signal: AbortSignal) => ready.promise);
-  const session = sessionFromConnector(connect, operations);
+  const session = sessionFromConnector(connect);
   const controller = new AbortController();
-  const first = session.connectAndVerify({ signal: controller.signal });
-  const second = session.connectAndVerify();
+  const first = session.context({ signal: controller.signal });
+  const second = session.context();
   const rejected = expect(first).rejects.toThrow("cancelled");
   await Promise.resolve();
   controller.abort(new Error("cancelled"));
@@ -41,52 +85,49 @@ it("lets one caller cancel while another receives the shared verified connection
   expect(connect).toHaveBeenCalledOnce();
   expect(connect.mock.calls[0]![0].aborted).toBe(false);
   ready.resolve(connection);
-  await expect(second).resolves.toBe(connection.connection);
-  expect(session.requireOperationContext(connection.connection).operations).toBe(operations);
+  await expect(second).resolves.toMatchObject({ info: { release_id: "shared" } });
 });
 
-it("aborts an abandoned connection and refuses its late result after a replacement verifies", async () => {
-  const old = runtime("old");
-  const current = runtime("current");
+it("aborts an abandoned verification and refuses its late result after a replacement verifies", async () => {
   const ready = deferred<ConnectedTvcRuntime>();
-  const connect = vi.fn((_signal: AbortSignal) => ready.promise).mockResolvedValueOnce(current);
-  const session = sessionFromConnector(connect, operations);
-  // Establish an initial connection, then start a connector that ignores cancellation.
-  await session.connectAndVerify();
+  const connect = vi.fn((_signal: AbortSignal) => ready.promise);
+  const session = sessionFromConnector(connect);
+  // Start a connector that ignores cancellation, then abandon it.
   const controller = new AbortController();
-  const pending = session.connectAndVerify({ signal: controller.signal });
+  const pending = session.context({ signal: controller.signal });
   const rejected = expect(pending).rejects.toThrow("cancelled");
   await Promise.resolve();
   controller.abort(new Error("cancelled"));
   await rejected;
-  expect(connect.mock.calls[1]![0].aborted).toBe(true);
-  connect.mockResolvedValueOnce(current);
-  await expect(session.connectAndVerify()).resolves.toBe(current.connection);
-  ready.resolve(old);
+  expect(connect.mock.calls[0]![0].aborted).toBe(true);
+  connect.mockResolvedValueOnce(runtime("current"));
+  const current = await session.context();
+  expect(current.info.release_id).toBe("current");
+  ready.resolve(runtime("old"));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(session.requireOperationContext(current.connection).operations).toBe(operations);
-  expect(() => session.requireOperationContext(old.connection)).toThrow("OperationNotConfigured");
+  await expect(session.context()).resolves.toBe(current);
+  expect(connect).toHaveBeenCalledTimes(2);
 });
 
 it("bounds a stalled verification by default and releases its flight", async () => {
   vi.useFakeTimers();
   const connect = vi.fn((_signal: AbortSignal) => new Promise<ConnectedTvcRuntime>(() => {}));
-  const session = sessionFromConnector(connect, operations);
-  const pending = session.connectAndVerify();
+  const session = sessionFromConnector(connect);
+  const pending = session.context();
   const rejected = expect(pending).rejects.toMatchObject({ name: "TimeoutError" });
   await vi.advanceTimersByTimeAsync(120_000);
   await rejected;
   expect(connect.mock.calls[0]![0].aborted).toBe(true);
   connect.mockResolvedValueOnce(runtime("next"));
-  await expect(session.connectAndVerify()).resolves.toMatchObject({ releaseId: "next" });
+  await expect(session.context()).resolves.toMatchObject({ info: { release_id: "next" } });
   expect(vi.getTimerCount()).toBe(0);
 });
 
 it("uses the configured default verification deadline", async () => {
   vi.useFakeTimers();
   const connect = vi.fn((_signal: AbortSignal) => new Promise<ConnectedTvcRuntime>(() => {}));
-  const session = sessionFromConnector(connect, operations, 25);
-  const pending = session.connectAndVerify();
+  const session = sessionFromConnector(connect, 25);
+  const pending = session.context();
   const rejected = expect(pending).rejects.toMatchObject({ name: "TimeoutError" });
   await vi.advanceTimersByTimeAsync(25);
   await rejected;
@@ -98,24 +139,24 @@ it("keeps another caller alive when a shorter deadline expires", async () => {
   vi.useFakeTimers();
   const ready = deferred<ConnectedTvcRuntime>();
   const connect = vi.fn((_signal: AbortSignal) => ready.promise);
-  const session = sessionFromConnector(connect, operations);
-  const short = session.connectAndVerify({ timeoutMs: 10 });
-  const long = session.connectAndVerify({ timeoutMs: 100 });
+  const session = sessionFromConnector(connect);
+  const short = session.context({ timeoutMs: 10 });
+  const long = session.context({ timeoutMs: 100 });
   const rejected = expect(short).rejects.toMatchObject({ name: "TimeoutError" });
   await vi.advanceTimersByTimeAsync(10);
   await rejected;
   expect(connect.mock.calls[0]![0].aborted).toBe(false);
   ready.resolve(runtime("shared"));
-  await expect(long).resolves.toMatchObject({ releaseId: "shared" });
+  await expect(long).resolves.toMatchObject({ info: { release_id: "shared" } });
   expect(vi.getTimerCount()).toBe(0);
 });
 
 it("does not connect for an aborted caller or invalid timeout", async () => {
   const connect = vi.fn(async () => runtime("unused"));
-  const session = sessionFromConnector(connect, operations);
-  await expect(session.connectAndVerify({ signal: AbortSignal.abort(new Error("cancelled")) })).rejects.toThrow("cancelled");
+  const session = sessionFromConnector(connect);
+  await expect(session.context({ signal: AbortSignal.abort(new Error("cancelled")) })).rejects.toThrow("cancelled");
   for (const timeoutMs of [0, -1, NaN, Infinity, 0.5, 2_147_483_648]) {
-    await expect(session.connectAndVerify({ timeoutMs })).rejects.toThrow("InvalidRequestTimeout");
+    await expect(session.context({ timeoutMs })).rejects.toThrow("InvalidRequestTimeout");
   }
   expect(connect).not.toHaveBeenCalled();
 });

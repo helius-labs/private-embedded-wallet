@@ -1,0 +1,17 @@
+# Mainnet, over config.yaml. The mainnet Turnkey application does not exist
+# yet: until its enclave URL and organization replace the two values below,
+# the gateway refuses to start.
+network: mainnet
+enclave:
+    base_url: unset-until-the-mainnet-turnkey-application-exists
+turnkey:
+    tvc_organization_id: unset-until-the-mainnet-turnkey-application-exists
+provisioning:
+    expected_public_key: 04f87ca34fcd2b78f57321c662a66395e400744a1951655ed77fbd1482a84e7590359b5f9b157a84489db68b02984c90b641a05deec3cdfd67dd990aecc89a58e0
+    release_path: releases/mainnet.json
+wallet_grant:
+    expected_public_key: 048929b53b1b9d0b22be43a306583cdb9233e48da9e260cde61c6f93ceb1e5ea43973c01057c98779d47c03e5a5ed8e2ed1e0bc3d9685bc6deea2474d44fd57d5d
+enrollment:
+    domains:
+        - mainnet.helius-rpc.com
+        - beta-mainnet.helius-rpc.com
