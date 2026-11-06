@@ -675,16 +675,19 @@ export async function setup(): Promise<ExampleSetup> {
   const connection = await enclave.connectAndVerify();
   const organizationId = descriptor.turnkey_organization_id;
   const owner = await turnkeyClient(organizationId);
-  // Remove legacy service-only grants even when reusing a stored seed.
-  await grantEnclaveBootstrap(owner, organizationId, servicePublicKey, descriptor.address);
   const expected = { organizationId, walletAddress: descriptor.address, servicePublicKey };
   const tvc: TvcClient = {
     ...enclave,
-    bootstrap: (verified, options) => bootstrapWithApproval(
-      owner, expected,
-      (signal) => enclave.bootstrap(verified, { ...options, signal }),
-      options?.signal,
-    ),
+    // The grant names the enclave's current service key, so it is set before
+    // each bootstrap, including the one after a Quorum key rotation.
+    bootstrap: async (verified, options) => {
+      await grantEnclaveBootstrap(owner, organizationId, servicePublicKey, descriptor.address);
+      return bootstrapWithApproval(
+        owner, expected,
+        (signal) => enclave.bootstrap(verified, { ...options, signal }),
+        options?.signal,
+      );
+    },
   };
   return Object.freeze({
     zolana, tvc, connection,

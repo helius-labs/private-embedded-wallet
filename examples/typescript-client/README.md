@@ -26,13 +26,14 @@ operations.
 
 1. `setup()` reaches the enclave through the Helius-hosted tvc-gateway, or
    directly when `TVC_ENDPOINT` is set, verifies it against the client's release
-   policy and PCR pins, configures the Turnkey grant, and returns the client,
-   verified connection, and wallet signer.
+   policy and PCR pins, and returns the client, verified connection, and wallet
+   signer.
 2. `bootstrap` runs once per wallet. Its result, the public identity and the
    sealed seed, is stored in a file. Neither is a secret to the client. If the
    file is lost, `bootstrap` runs again and returns the same identity. Both
-   initial setup and recovery automatically approve the exact bootstrap request
-   through the configured owner session, within the same `bootstrap()` call.
+   initial setup and recovery first configure the Turnkey grant, then
+   automatically approve the exact bootstrap request through the configured
+   owner session, within the same `bootstrap()` call.
 3. `new TvcKeys({ client, connection, sealedSeed, identity })` is the SDK's
    `WalletKeys`, answered by the enclave.
 4. The SDK does the rest: `Wallet`, `syncWallet`, `buildDepositTransaction`,
@@ -53,8 +54,8 @@ client.proofService)` in place of `TvcKeys`. Nothing else changes.
   Solana wallet, and a root user's API key in it, as the key pair or a Turnkey
   API key file (`TURNKEY_API_KEY_PATH`). Helius creates these sub-organizations
   for an embedded-wallet project; the gateway refuses a wallet in any other
-  (`SubOrganizationNotOwned`). The example signs with the key, and `setup()`
-  uses it to enroll and to configure the enclave's grant. A browser integration
+  (`SubOrganizationNotOwned`). The example signs with the key, enrolls with
+  it, and configures the enclave's grant with it before a bootstrap. A browser integration
   uses the authenticated owner session instead; never embed a root API key in
   browser code.
 
@@ -143,9 +144,9 @@ The policy still requires **both** the owner and the service user. Automation
 runs in the owner client; it does not give the service the owner's credential.
 Turnkey [policy parameters](https://docs.turnkey.com/features/policies/language#activity-parameters)
 cannot inspect the payload, so that exact-message check remains essential.
-`setup()` reconciles the example's existing policies, including legacy grants
-that allowed the service to sign alone, before returning a usable client.
-Separately created signing grants must also be reviewed by the operator.
+Before each bootstrap the example sets its policy to name the enclave's current
+service user, so a Quorum key rotation needs no manual step. Separately created
+signing grants must be reviewed by the operator.
 
 The owner approval API can return the bootstrap signature. The adapter discards
 the result and does not log it; it must run in a trusted owner environment.
