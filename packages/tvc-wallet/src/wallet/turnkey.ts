@@ -12,6 +12,7 @@ import { awaitWithSignal } from "../client/request.js";
 import type { TvcTransport } from "../client/transport.js";
 import { createTvcRequestSigner } from "../platform/signer.js";
 import { API_VERSION } from "../protocol/constants.js";
+import { decodeDecimalU64 } from "../protocol/decimal.js";
 import { clientKeyIdFor } from "../protocol/digest.js";
 import { ENROLLMENT_DOMAINS, walletEnrollmentMessage } from "../protocol/enrollment.js";
 import { TvcError } from "../protocol/error.js";
@@ -89,6 +90,8 @@ const SOLANA = "ADDRESS_FORMAT_SOLANA";
 const MAX_ENROLLMENT_RESPONSE_BYTES = 64n * 1024n;
 /** Bounds `POST /enroll` once the owner signed, when no caller's signal does. */
 const SIGNED_ENROLLMENT_TIMEOUT_MS = 60_000;
+/** A descriptor that expires within this is enrolled again before the next request. */
+export const DESCRIPTOR_RENEWAL_MARGIN_MS = 300_000n;
 const DESCRIPTOR_KEYS = [
   "version",
   "security_domain_id",
@@ -97,6 +100,7 @@ const DESCRIPTOR_KEYS = [
   "turnkey_wallet_id",
   "address",
   "allowed_clients",
+  "expires_at_ms",
   "provisioning_signature",
 ] as const;
 const CLIENT_GRANT_KEYS = ["client_public_key", "allowed_operations"] as const;
@@ -185,6 +189,10 @@ function enrolledDescriptor(
   assertExactObjectKeys(descriptor, DESCRIPTOR_KEYS, "InvalidDescriptor");
   const [grant, ...others] = Array.isArray(descriptor.allowed_clients) ? descriptor.allowed_clients : [];
   assertExactObjectKeys(grant, CLIENT_GRANT_KEYS, "InvalidDescriptor");
+  if (typeof descriptor.expires_at_ms !== "string") {
+    throw new TvcError("InvalidDescriptor", "the descriptor names no expiry");
+  }
+  decodeDecimalU64(descriptor.expires_at_ms);
   if (
     others.length > 0 ||
     descriptor.version !== API_VERSION ||
@@ -269,6 +277,9 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
     });
     let enrolled: OperationsConfig | undefined;
     let pending: Enrollment | undefined;
+    /** Whether `config`'s descriptor still has the renewal margin ahead of it. */
+    const current = (config: OperationsConfig) =>
+      BigInt(config.descriptor.expires_at_ms) - nowMs() > DESCRIPTOR_RENEWAL_MARGIN_MS;
 
     const start = (): Enrollment => {
       const controller = new AbortController();
@@ -298,7 +309,8 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
       // already signed it: then it finishes, and later callers share it.
       async operations(signal) {
         signal?.throwIfAborted();
-        if (enrolled) return enrolled;
+        if (enrolled && current(enrolled)) return enrolled;
+        enrolled = undefined;
         const flight = (pending ??= start());
         flight.waiters += 1;
         try {
@@ -310,6 +322,9 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
             flight.controller.abort(signal?.reason);
           }
         }
+      },
+      expire(descriptor) {
+        if (enrolled?.descriptor === descriptor) enrolled = undefined;
       },
     };
   }

@@ -116,7 +116,8 @@ The gateway checks:
 - that the wallet account has the claimed address.
 
 It answers `{descriptor}`, signed with the provisioning key for that one client
-key. Enrolling again answers the same descriptor.
+key, with `expires_at_ms` set `provisioning.descriptor_ttl_secs` (a day in
+`config.yaml`) after `issuedAtMs`. Enrolling again answers the same descriptor.
 
 ### Operations
 
@@ -124,6 +125,8 @@ key. Enrolling again answers the same descriptor.
 gateway checks:
 
 - that it signed the descriptor, and that its client key is not revoked;
+- that the descriptor has not expired, allowing 60 s of clock skew
+  (`403 DescriptorExpired`: the client enrolls its key again);
 - that no request from the caller's project sent the ciphertext before;
 - that the descriptor's Turnkey sub-org is named after the caller's project.
 

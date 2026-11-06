@@ -6,6 +6,7 @@ import type { TvcKeys, TvcTransport, TvcTurnkey } from "@heliuslabs/spr-embedded
 import {
   ENROLLMENT_DOMAINS,
   decodeLowerHex,
+  descriptorDigest,
   encodeLowerHex,
   walletEnrollmentMessage,
   type Network,
@@ -130,7 +131,7 @@ describe("enrollment", () => {
     );
   });
 
-  it("answers the same descriptor for the same enrollment", async () => {
+  it("answers the same descriptor for the same enrollment, for a day from when the owner signed", async () => {
     const signed = enrollment();
     const first = await post("/enroll", signed);
     expect(first.status).toBe(200);
@@ -138,6 +139,7 @@ describe("enrollment", () => {
       network: "devnet",
       address: ownerAddress,
       allowed_clients: [{ client_public_key: clientPublicKey }],
+      expires_at_ms: String(signed.issuedAtMs + 86_400_000),
     });
     expect((await post("/enroll", signed)).body).toEqual(first.body);
   });
@@ -223,6 +225,41 @@ describe("a wallet enrolled through the gateway", () => {
     expect(await post("/operations", firstOperation().request)).toMatchObject(
       problem(400, "InvalidJson"),
     );
+  });
+});
+
+/** `descriptor` with `fields` changed, signed again with the testkit's provisioning key. */
+function provisioned(descriptor: WalletDescriptor, fields: Partial<WalletDescriptor>): WalletDescriptor {
+  const unsigned = { ...descriptor, ...fields, provisioning_signature: "" };
+  const signature = p256.sign(descriptorDigest(unsigned), decodeLowerHex(testkit.provisioningPrivateKeyHex), {
+    lowS: true,
+    prehash: false,
+  });
+  return { ...unsigned, provisioning_signature: encodeLowerHex(signature.toCompactRawBytes()) };
+}
+
+describe("a descriptor that expired", () => {
+  let expired: WalletDescriptor;
+  beforeAll(async () => {
+    const { descriptor } = (await post("/enroll", enrollment())).body as { descriptor: WalletDescriptor };
+    expired = provisioned(descriptor, { expires_at_ms: String(Date.now() - 2 * 60_000) });
+  });
+
+  it("is refused by the gateway before the enclave sees it", async () => {
+    const request = { version: 1, quorum_key_id: testkit.quorumKeyId, quorum_key_epoch: "1", ciphertext: "abcd" };
+    expect(await post("/operations", { descriptor: expired, request })).toMatchObject(
+      problem(403, "DescriptorExpired"),
+    );
+  });
+
+  it("is refused by the enclave, which says so to the client", async () => {
+    const tvc = createLocalTvcClient({
+      network: "devnet",
+      backend: { kind: "enclave", endpoint: new URL(enclaveUrl) },
+      solanaAddress: ownerAddress,
+      descriptor: expired,
+    });
+    await expect(tvc.open()).rejects.toMatchObject({ code: "DescriptorExpired", status: 403 });
   });
 });
 

@@ -1,11 +1,20 @@
 import type { OperationsConfig } from "../client/operation-executor.js";
+import type { WalletDescriptor } from "../protocol/types.js";
 
 /** The key the client signs requests with, and the descriptor that lists it. */
 export type TvcClientKey = {
   /** Names the key. When the current key's id changes, the client verifies the enclave again. */
   readonly id: string;
-  /** The descriptor that lists the key and the signer that signs with it, enrolling the key on first use. */
+  /**
+   * The descriptor that lists the key and the signer that signs with it,
+   * enrolling the key on first use and again when the descriptor expires.
+   */
   operations(signal?: AbortSignal): Promise<OperationsConfig>;
+  /**
+   * Drops `descriptor`, which the backend refused as expired, so the next
+   * `operations` enrolls the key again. A key that cannot enroll has none.
+   */
+  readonly expire?: (descriptor: WalletDescriptor) => void;
 };
 
 /** Where the client's request key comes from: the Turnkey session, or a fixed descriptor and signer. */

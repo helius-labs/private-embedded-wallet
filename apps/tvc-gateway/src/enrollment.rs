@@ -41,6 +41,8 @@ pub struct EnrollmentInput {
     pub solana_address: String,
     pub owner_public_key: [u8; 32],
     pub client_public_key: [u8; 65],
+    /// When the owner signed, in Unix ms.
+    pub issued_at_ms: u64,
 }
 
 pub struct Enrollment {
@@ -124,6 +126,7 @@ fn validate(request: &EnrollmentRequest) -> Result<EnrollmentInput, ApiError> {
         solana_address: request.solana_address.clone(),
         owner_public_key,
         client_public_key,
+        issued_at_ms: request.issued_at_ms,
     })
 }
 

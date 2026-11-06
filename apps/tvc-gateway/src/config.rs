@@ -117,6 +117,9 @@ pub struct ProvisioningConfig {
     /// policy descriptors are issued under and the authority set it verifies
     /// against. Relative to the working directory.
     pub release_path: PathBuf,
+    /// How long a descriptor admits its client key, from the time the owner
+    /// signed the enrollment. The client enrolls again near the end.
+    pub descriptor_ttl_secs: u64,
 }
 
 #[derive(Clone, Deserialize)]
@@ -212,6 +215,10 @@ impl Config {
             "dev_api.base_url must not end with '/'"
         );
         anyhow::ensure!(
+            self.provisioning.descriptor_ttl_secs > 0,
+            "provisioning.descriptor_ttl_secs must be positive"
+        );
+        anyhow::ensure!(
             self.enclave.max_in_flight_per_project > 0,
             "enclave.max_in_flight_per_project must be positive"
         );
@@ -283,6 +290,7 @@ mod tests {
         let config =
             devnet_config_with(&"a".repeat(MIN_SECRET_LEN)).expect("the committed config loads");
         assert_eq!(config.network, Network::Devnet);
+        assert_eq!(config.provisioning.descriptor_ttl_secs, 86_400);
         assert_eq!(
             config.enrollment.domains,
             ["devnet.helius-rpc.com", "beta-devnet.helius-rpc.com"]
@@ -322,6 +330,7 @@ mod tests {
         let config = committed_config("configs/mainnet.yaml", &secret, filled)
             .expect("the filled-in mainnet overlay loads");
         assert_eq!(config.network, Network::Mainnet);
+        assert_eq!(config.provisioning.descriptor_ttl_secs, 86_400);
         assert_eq!(
             config.enrollment.domains,
             ["mainnet.helius-rpc.com", "beta-mainnet.helius-rpc.com"]

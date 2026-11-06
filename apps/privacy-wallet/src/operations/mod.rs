@@ -68,6 +68,9 @@ const OPERATION_TIMEOUT: Duration = Duration::from_secs(75);
 pub(crate) enum Failure {
     /// The request is malformed or not authorized; answered with a generic 400.
     Invalid,
+    /// The request is authorized by a descriptor that has expired; answered
+    /// with a 403 that says so, for the client to enroll again.
+    DescriptorExpired,
     /// The enclave cannot serve; answered with a generic 503.
     Unavailable,
     /// The operation ran and failed at a named stage; answered inside the
@@ -88,6 +91,7 @@ pub(crate) async fn handle(state: &AppState, body: &[u8]) -> Response<Body> {
     match execute(state, body).await {
         Ok(response) => http::ok(response),
         Err(Failure::Invalid) => PublicError::InvalidRequest.into_response(),
+        Err(Failure::DescriptorExpired) => PublicError::DescriptorExpired.into_response(),
         // `execute` answers a stage failure inside the result.
         Err(Failure::Unavailable | Failure::Stage(_)) => PublicError::Unavailable.into_response(),
     }
@@ -228,7 +232,8 @@ async fn run(
 
 /// Binds the request to this release, checks its freshness, verifies the
 /// provisioner's signature over the descriptor and the client's signature over
-/// the request, and returns the Turnkey key the descriptor names.
+/// the request, refuses an expired descriptor, and returns the Turnkey key the
+/// descriptor names.
 fn validate<'a>(request: &'a OperationRequest, state: &AppState) -> Result<WalletKey<'a>, Failure> {
     // Also refuses a descriptor for another network and an empty Turnkey wallet ID.
     check_request_bindings(request, &state.info).map_err(|_| Failure::Invalid)?;
@@ -277,6 +282,10 @@ fn validate<'a>(request: &'a OperationRequest, state: &AppState) -> Result<Walle
     }
     zolana_tvc_protocol::verify_client_authorization(request, &grant.client_public_key)
         .map_err(|_| Failure::Invalid)?;
+    // Only an authorized request learns that its descriptor expired.
+    descriptor
+        .check_current(now)
+        .map_err(|_| Failure::DescriptorExpired)?;
 
     Ok(WalletKey {
         organization_id: &descriptor.turnkey_organization_id,

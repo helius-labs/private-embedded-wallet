@@ -13,6 +13,9 @@ pub(crate) enum PublicError {
     NotFound,
     Unavailable,
     InvalidRequest,
+    /// An authorized request's wallet descriptor has expired; the client
+    /// enrolls its key again.
+    DescriptorExpired,
 }
 
 impl PublicError {
@@ -23,6 +26,7 @@ impl PublicError {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::InvalidRequest => StatusCode::BAD_REQUEST,
+            Self::DescriptorExpired => StatusCode::FORBIDDEN,
         }
     }
 }

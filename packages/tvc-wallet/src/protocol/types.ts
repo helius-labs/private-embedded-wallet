@@ -108,6 +108,12 @@ export type WalletDescriptor = {
   turnkey_wallet_id: string;
   address: string;
   allowed_clients: ClientGrant[];
+  /**
+   * When the descriptor stops admitting its client key, in Unix ms. The
+   * provisioning signature covers it; the enclave allows the protocol's clock
+   * skew past it.
+   */
+  expires_at_ms: string;
   provisioning_signature: string;
 };
 

@@ -288,6 +288,7 @@
               "ApiKeyInvalid",
               "WaasNotEnabled",
               "InvalidDescriptor",
+              "DescriptorExpired",
               "ClientKeyRevoked",
               "WalletNotOwned",
               "SubOrganizationNotOwned",

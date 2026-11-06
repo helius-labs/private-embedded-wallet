@@ -23,6 +23,7 @@ import {
 } from "./protocol/digest.js";
 import { signWalletGrant } from "./protocol/grant.js";
 import { API_VERSION } from "./protocol/constants.js";
+import { encodeDecimalU64 } from "./protocol/decimal.js";
 import { decodeLowerHex, encodeLowerHex } from "./protocol/hex.js";
 import { requireNetwork } from "./protocol/network.js";
 import type { Network, OperationKind, WalletDescriptor } from "./protocol/types.js";
@@ -60,6 +61,8 @@ const LOCAL_PROVISIONING_SECRET = decodeLowerHex(localTestkit.provisioningPrivat
 const LOCAL_CLIENT_SECRET = decodeLowerHex(localTestkit.clientPrivateKeyHex);
 const LOCAL_GRANT_SECRET = decodeLowerHex(localTestkit.grantPrivateKeyHex);
 const LOCAL_GRANT_LIFETIME_MS = 900_000n;
+/** The testkit signs its own descriptor for a day, as a gateway does. */
+const LOCAL_DESCRIPTOR_LIFETIME_MS = 86_400_000n;
 const digestLabel = (label: string) => encodeLowerHex(sha256(te.encode(label)));
 const LOCAL_OPERATIONS = localTestkit.operations as readonly OperationKind[];
 
@@ -101,7 +104,7 @@ export type LocalTvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTu
     }
 );
 
-function localDescriptor(network: Network, solanaAddress: string): WalletDescriptor {
+function localDescriptor(network: Network, solanaAddress: string, nowMs: bigint): WalletDescriptor {
   const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
   const unsigned = {
     version: API_VERSION,
@@ -116,6 +119,7 @@ function localDescriptor(network: Network, solanaAddress: string): WalletDescrip
         allowed_operations: [...LOCAL_OPERATIONS],
       },
     ],
+    expires_at_ms: encodeDecimalU64(nowMs + LOCAL_DESCRIPTOR_LIFETIME_MS),
     provisioning_signature: "",
   } satisfies WalletDescriptor;
   const signature = p256.sign(
@@ -150,7 +154,11 @@ export function createLocalTvcClient<Account extends TvcTurnkeyWalletAccount>(
   if ("turnkey" in config) {
     keys = clientKeysOf(config, { network, backend: config.backend, transport: config.transport, nowMs: config.nowMs });
   } else {
-    fixed = { descriptor: config.descriptor ?? localDescriptor(network, config.solanaAddress), signer: localSigner() };
+    const nowMs = config.nowMs?.() ?? BigInt(Date.now());
+    fixed = {
+      descriptor: config.descriptor ?? localDescriptor(network, config.solanaAddress, nowMs),
+      signer: localSigner(),
+    };
     keys = clientKeysOf(fixed, { network, backend: config.backend });
   }
   const backend: TvcBackend =

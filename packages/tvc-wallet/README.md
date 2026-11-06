@@ -191,7 +191,12 @@ to `<endpoint>/enroll`. The gateway answers a descriptor for the key, which
 the client checks and keeps in memory for that key. Concurrent first calls
 share one enrollment. Cancelling every one of them stops it only until the
 owner has signed; after that the client finishes it and keeps the descriptor,
-so the owner never signs twice for one key. A new login, or
+so the owner never signs twice for one key. A descriptor lives a day (the
+gateway's `descriptor_ttl_secs`) from the enrollment: the client enrolls the
+key again before a request once its descriptor expires within five minutes,
+and once more, repeating the request, when the gateway or the enclave refuses
+it as expired (`DescriptorExpired`, a `TvcHttpError` with status 403 if it
+persists). A new login, or
 `refreshSession` without the current public key, brings a new session key:
 the client enrolls it before the next request and verifies the enclave again.
 The sealed seed is bound to the wallet (network, security domain, Turnkey

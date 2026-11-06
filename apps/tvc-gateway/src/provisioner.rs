@@ -33,6 +33,7 @@ pub struct Provisioner {
     secret: Zeroizing<[u8; 32]>,
     public_key: [u8; 65],
     policy: ReleasePolicy,
+    descriptor_ttl_ms: u64,
 }
 
 impl Provisioner {
@@ -45,6 +46,7 @@ impl Provisioner {
             secret,
             public_key,
             policy,
+            descriptor_ttl_ms: config.descriptor_ttl_secs.saturating_mul(1_000),
         })
     }
 
@@ -62,7 +64,9 @@ impl Provisioner {
     }
 
     /// One client key may drive every operation the release allows, for one
-    /// Turnkey wallet. The enclave refuses a narrowed or reordered list.
+    /// Turnkey wallet, until the descriptor lifetime after the owner signed.
+    /// The enclave refuses a narrowed or reordered list. The same enrollment
+    /// always signs to the same descriptor.
     pub fn sign(&self, input: &EnrollmentInput) -> Result<WalletDescriptor, ApiError> {
         let mut descriptor = WalletDescriptor {
             version: API_VERSION,
@@ -75,6 +79,7 @@ impl Provisioner {
                 client_public_key: input.client_public_key.to_vec(),
                 allowed_operations: self.policy.allowed_operations.clone(),
             }],
+            expires_at_ms: input.issued_at_ms.saturating_add(self.descriptor_ttl_ms),
             provisioning_signature: Vec::new(),
         };
         let digest = descriptor_digest(&descriptor).map_err(|error| {
@@ -89,8 +94,9 @@ impl Provisioner {
         Ok(descriptor)
     }
 
-    /// Accepts a descriptor this provisioner signed under the current release.
-    pub fn verify(&self, descriptor: &WalletDescriptor) -> Result<(), ApiError> {
+    /// Accepts a descriptor this provisioner signed under the current release
+    /// that has not expired at `now_ms`, with the protocol's clock skew.
+    pub fn verify(&self, descriptor: &WalletDescriptor, now_ms: u64) -> Result<(), ApiError> {
         let invalid = ApiError::InvalidDescriptor;
         if descriptor.version != API_VERSION
             || descriptor.security_domain_id != self.policy.security_domain_id
@@ -105,7 +111,10 @@ impl Provisioner {
             &digest,
             &descriptor.provisioning_signature,
         )
-        .map_err(|_| invalid)
+        .map_err(|_| invalid)?;
+        descriptor
+            .check_current(now_ms)
+            .map_err(|_| ApiError::DescriptorExpired)
     }
 }
 
@@ -175,6 +184,7 @@ pub(crate) mod tests {
     use zolana_tvc_protocol::OperationKind;
 
     pub const TEST_SECRET: [u8; 32] = [7; 32];
+    pub const TEST_DESCRIPTOR_TTL_MS: u64 = 86_400_000;
 
     pub fn provisioner() -> Provisioner {
         let secret = Zeroizing::new(TEST_SECRET);
@@ -183,6 +193,7 @@ pub(crate) mod tests {
             secret,
             public_key,
             policy: test_policy(),
+            descriptor_ttl_ms: TEST_DESCRIPTOR_TTL_MS,
         }
     }
 
@@ -220,14 +231,37 @@ pub(crate) mod tests {
         let provisioner = provisioner();
         let input = crate::enrollment::tests::input();
         let mut descriptor = provisioner.sign(&input).expect("signing failed");
-        assert_eq!(provisioner.verify(&descriptor), Ok(()));
+        assert_eq!(provisioner.verify(&descriptor, input.issued_at_ms), Ok(()));
         assert_eq!(
             descriptor.allowed_clients[0].allowed_operations,
             test_policy().allowed_operations
         );
         descriptor.turnkey_wallet_id.push('x');
         assert_eq!(
-            provisioner.verify(&descriptor),
+            provisioner.verify(&descriptor, input.issued_at_ms),
+            Err(ApiError::InvalidDescriptor)
+        );
+    }
+
+    #[test]
+    fn a_descriptor_expires_its_lifetime_after_the_owner_signed() {
+        let provisioner = provisioner();
+        let input = crate::enrollment::tests::input();
+        let descriptor = provisioner.sign(&input).expect("signing failed");
+        let expires = input.issued_at_ms + TEST_DESCRIPTOR_TTL_MS;
+        assert_eq!(descriptor.expires_at_ms, expires);
+        assert_eq!(provisioner.sign(&input), Ok(descriptor.clone()));
+        let skew = zolana_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
+        assert_eq!(provisioner.verify(&descriptor, expires + skew), Ok(()));
+        assert_eq!(
+            provisioner.verify(&descriptor, expires + skew + 1),
+            Err(ApiError::DescriptorExpired)
+        );
+        // The provisioning signature covers the expiry.
+        let mut extended = descriptor;
+        extended.expires_at_ms += 1;
+        assert_eq!(
+            provisioner.verify(&extended, input.issued_at_ms),
             Err(ApiError::InvalidDescriptor)
         );
     }
@@ -240,6 +274,7 @@ pub(crate) mod tests {
                 crate::config::public_key_of(&TEST_SECRET).expect("valid key"),
             ),
             release_path: "unused".into(),
+            descriptor_ttl_secs: 86_400,
         };
         assert!(signing_key(&config(format!(" 0x{}\n", "07".repeat(32)))).is_ok());
         assert!(signing_key(&config("07".repeat(31))).is_err());
@@ -296,6 +331,7 @@ mod release_file_tests {
                 crate::config::public_key_of(&TEST_SECRET).expect("valid key"),
             ),
             release_path: path,
+            descriptor_ttl_secs: 86_400,
         };
         Provisioner::new(&config, network)
     }

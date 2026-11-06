@@ -83,6 +83,7 @@ mod tests {
                 client_public_key: vec![4; 65],
                 allowed_operations: vec![OperationKind::Bootstrap],
             }],
+            expires_at_ms: 1_800_086_400_000,
             provisioning_signature: vec![0; 64],
         }
     }

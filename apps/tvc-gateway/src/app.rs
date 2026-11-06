@@ -258,7 +258,7 @@ pub(crate) async fn operations(
         mut request,
     }): ApiJson<Operation>,
 ) -> Result<Response, ApiError> {
-    state.provisioner.verify(&descriptor)?;
+    state.provisioner.verify(&descriptor, clock_ms()?)?;
     let [client] = descriptor.allowed_clients.as_slice() else {
         return Err(ApiError::InvalidDescriptor);
     };
@@ -546,6 +546,19 @@ mod tests {
         assert_eq!(
             operations(operation(&tampered, "abcd")).await,
             (StatusCode::FORBIDDEN, "InvalidDescriptor".to_owned())
+        );
+        // Enrolled two days ago, for a day.
+        let two_days_ago = provisioner::now_ms().expect("clock") - 2 * 86_400_000;
+        let expired = state
+            .provisioner
+            .sign(&crate::enrollment::EnrollmentInput {
+                issued_at_ms: two_days_ago,
+                ..crate::enrollment::tests::input()
+            })
+            .expect("descriptor did not sign");
+        assert_eq!(
+            operations(operation(&expired, "abcd")).await,
+            (StatusCode::FORBIDDEN, "DescriptorExpired".to_owned())
         );
     }
 

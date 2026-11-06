@@ -23,6 +23,10 @@ enclave:
 turnkey:
     api_base_url: https://api.turnkey.com
     ownership_cache_secs: 600
+provisioning:
+    # A descriptor admits its client key for a day from the enrollment; the
+    # client enrolls again before then.
+    descriptor_ttl_secs: 86400
 wallet_grant:
     ttl_secs: 120
     revoked_client_key_ids: []

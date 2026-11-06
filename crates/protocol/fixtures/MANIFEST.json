@@ -1,21 +1,21 @@
 {
   "algorithm": "sha256",
   "files": {
-    "authorization-mutation.json": "aa48350d9c4aaa9820f235f10fd2b0cbffc02236b7f6735922776a11d7bd079f",
+    "authorization-mutation.json": "4421068d70c47ef8818598fedeb4d55fb2d2fda342479f98229fd6f4fb761364",
     "canonical-u64.json": "adf29d66e4dd4509698b0eb48d17da07130cbbb9249779cd85bf245291fa10ec",
-    "descriptor-digest.json": "892a0a07703272e0b9a97e8b4da6556f6f7303e99f9ff690b2c45720c099f960",
+    "descriptor-digest.json": "cf381693b591f8d69d0760cf53913379d86758e58f24da023c44d9be693148fb",
     "digests.json": "d4135d036d0e93ce56cae8c4b06922555d1d853df6089edb70cadc9ad6f110f1",
     "discovery-binding.json": "bbdb8ba45a029b22cc135599f99845b1be0e5266b3f4097604bb2c6dfcd4d24b",
     "http-skeleton.json": "10b6f06f563ebda5172e11540bf5c3962215ab80e5c11718d08c028778e5405b",
     "jcs-object-sort.json": "58d5e81815ffd1c39ec0cd3a3fda05ca50901875a13821ff05756f8f92a5783e",
     "json-reject.json": "3108301e4d4e0f648add6e0e9bc1b835b7ea1921ac24ff0b7f7e2a1cd5f79640",
-    "p256-signatures.json": "be4272ccb0d7d7c336e1aecf64a35051627271af3a31e01eb7de2d4986a19622",
+    "p256-signatures.json": "cb62923d5dd87b26b36a16c6e9fdfff5c97bb4701dae4d5be66c173205f67505",
     "proof-payload-utf8.json": "fce1f29f28b5edac9809540bac9f41aeee6e2a32bb5eb688b3e8982a7e8a989f",
     "qos-borsh-envelope.json": "2e8bc9d5afde86a65205c3472c883275f5de470192ea0c76afe544a88189bf61",
     "qos-negative.json": "0a9698ba5aba75b5b0fdd19e1da97101631be5d496fe6a254da1b533723a3980",
     "qos-p256-public.json": "d8332b125d10478c8ca74f5ff6bc5a9b20ea567b93c6a35eb4126bcb8abc5311",
-    "request-digest.json": "92092d6e9e66b2f7accd5dc2d81030c95cfaab2e136c12a65b95d2032d8f15c4",
+    "request-digest.json": "c38be8de9849d51bab7abff6823e7fa7b9c23c95c8d24bfb406f1322156c4bb1",
     "signed-release-policy.json": "90f59bf2b0d04ebdec010f5860f6df25f8f5bacd2412bc04f891f6ea652ce890",
-    "wallet-grant-digest.json": "467e82331e726b457fad858e1102e38655eb4e6a5ef92a8abc852cade101253d"
+    "wallet-grant-digest.json": "706914ea0a24316d09456941f421d4ec7e356fe2c43d43752458adaa33ef040d"
   }
 }

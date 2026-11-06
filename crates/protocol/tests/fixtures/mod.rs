@@ -199,6 +199,7 @@ fn sample_descriptor(client_public: &[u8], security_domain: [u8; 32]) -> WalletD
             client_public_key: client_public.to_vec(),
             allowed_operations: OPERATIONS.to_vec(),
         }],
+        expires_at_ms: 1_800_086_400_000,
         provisioning_signature: vec![0u8; 64],
     }
 }

@@ -10,12 +10,18 @@ import { clientAuthMessage, clientKeyIdFor, requestDigest } from "../protocol/di
 import { walletEnrollmentMessage } from "../protocol/enrollment.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
-import { turnkeyClientKeys, type TvcTurnkey, type TvcTurnkeySession } from "./turnkey.js";
+import {
+  DESCRIPTOR_RENEWAL_MARGIN_MS,
+  turnkeyClientKeys,
+  type TvcTurnkey,
+  type TvcTurnkeySession,
+} from "./turnkey.js";
 
 const ORGANIZATION_ID = "00000000-0000-4000-8000-00000000000a";
 const WALLET_ID = "00000000-0000-4000-8000-00000000000b";
 const ENDPOINT = new URL("https://devnet.helius-rpc.com/v1/private-wallet?api-key=key");
 const NOW_MS = 1_800_000_000_000n;
+const DAY_MS = 86_400_000n;
 const P256_ORDER = p256.CURVE.n;
 const te = new TextEncoder();
 
@@ -92,6 +98,7 @@ function fakeGateway(answer: (enrollment: Enrollment) => Response | undefined = 
           allowed_operations: ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"],
         },
       ],
+      expires_at_ms: String(BigInt(body.issuedAtMs) + DAY_MS),
       provisioning_signature: "22".repeat(64),
     };
     return answer(body) ?? new Response(JSON.stringify({ descriptor }), { status: 200 });
@@ -99,13 +106,18 @@ function fakeGateway(answer: (enrollment: Enrollment) => Response | undefined = 
   return { transport: { fetch }, enrollments };
 }
 
-function keysOf(turnkey: TvcTurnkey, transport: TvcTransport, solanaAddress?: string) {
+function keysOf(
+  turnkey: TvcTurnkey,
+  transport: TvcTransport,
+  solanaAddress?: string,
+  nowMs: () => bigint = () => NOW_MS,
+) {
   return turnkeyClientKeys({
     turnkey,
     network: "devnet",
     endpoint: ENDPOINT,
     transport,
-    nowMs: () => NOW_MS,
+    nowMs,
     ...(solanaAddress === undefined ? {} : { solanaAddress }),
   });
 }
@@ -364,6 +376,53 @@ describe("the Turnkey session key", () => {
     expect(gateway.transport.fetch).toHaveBeenCalledOnce();
   });
 
+  it("enrolls again when the descriptor expires within five minutes, or the backend refused it", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    let now = NOW_MS;
+    const key = await keysOf(turnkey, gateway.transport, undefined, () => now).current();
+    const first = await key.operations();
+    expect(first.descriptor.expires_at_ms).toBe(String(NOW_MS + DAY_MS));
+
+    now = NOW_MS + DAY_MS - DESCRIPTOR_RENEWAL_MARGIN_MS - 1n;
+    expect(await key.operations()).toBe(first);
+    now += 1n;
+    const second = await key.operations();
+    expect(second).not.toBe(first);
+    expect(gateway.enrollments.map(({ body }) => BigInt(body.issuedAtMs))).toEqual([NOW_MS, now]);
+
+    // A refusal of a descriptor it no longer holds changes nothing.
+    key.expire!(first.descriptor);
+    expect(await key.operations()).toBe(second);
+    key.expire!(second.descriptor);
+    expect(await key.operations()).not.toBe(second);
+    expect(gateway.enrollments).toHaveLength(3);
+    expect(turnkey.signMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a descriptor that names no expiry", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway((body) => {
+      const descriptor = {
+        version: 1,
+        security_domain_id: "11".repeat(32),
+        network: "devnet",
+        turnkey_organization_id: body.organizationId,
+        turnkey_wallet_id: body.turnkeyWalletId,
+        address: body.solanaAddress,
+        allowed_clients: [{ client_public_key: body.clientPublicKey, allowed_operations: ["Decrypt"] }],
+        expires_at_ms: 1,
+        provisioning_signature: "22".repeat(64),
+      };
+      return new Response(JSON.stringify({ descriptor }));
+    });
+    await expect((await keysOf(turnkey, gateway.transport).current()).operations()).rejects.toMatchObject({
+      code: "InvalidDescriptor",
+    });
+  });
+
   it("refuses a refused enrollment or another key's descriptor, and enrolls again next time", async () => {
     const { turnkey, login } = fakeTurnkey();
     login();
@@ -385,6 +444,7 @@ describe("the Turnkey session key", () => {
           turnkey_wallet_id: body.turnkeyWalletId,
           address: body.solanaAddress,
           allowed_clients: [{ client_public_key: other, allowed_operations: ["Decrypt"] }],
+          expires_at_ms: String(BigInt(body.issuedAtMs) + DAY_MS),
           provisioning_signature: "22".repeat(64),
         },
       }));

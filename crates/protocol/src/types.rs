@@ -5,8 +5,9 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
+use crate::constants::MAX_CLOCK_SKEW_MS;
 use crate::encoding::{self, decimal_u64, hex};
-use crate::error::TvcError;
+use crate::error::{ErrorCode, TvcError};
 
 /// The Solana network a release, a descriptor and a running enclave serve.
 /// Every check is equality with the network the checker expects.
@@ -103,6 +104,10 @@ pub struct WalletDescriptor {
     pub turnkey_wallet_id: String,
     pub address: String,
     pub allowed_clients: Vec<ClientGrant>,
+    /// When the descriptor stops admitting its client key, in Unix ms. The
+    /// provisioning signature covers it.
+    #[serde(with = "decimal_u64")]
+    pub expires_at_ms: u64,
     #[serde(with = "hex")]
     pub provisioning_signature: Vec<u8>,
 }
@@ -110,6 +115,15 @@ pub struct WalletDescriptor {
 impl WalletDescriptor {
     pub fn wallet_id(&self) -> String {
         format!("wallet-{}", self.turnkey_wallet_id)
+    }
+
+    /// Refuses the descriptor once `now_ms` is more than the clock skew past
+    /// its expiry: `DescriptorExpired`.
+    pub fn check_current(&self, now_ms: u64) -> Result<(), TvcError> {
+        if now_ms > self.expires_at_ms.saturating_add(MAX_CLOCK_SKEW_MS) {
+            return Err(TvcError::new(ErrorCode::DescriptorExpired));
+        }
+        Ok(())
     }
 }
 

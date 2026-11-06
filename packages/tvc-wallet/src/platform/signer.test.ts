@@ -18,6 +18,7 @@ const WALLET_DESCRIPTOR = {
       allowed_operations: ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"],
     },
   ],
+  expires_at_ms: "1750086400000",
   provisioning_signature: "66".repeat(64),
 } satisfies WalletDescriptor;
 

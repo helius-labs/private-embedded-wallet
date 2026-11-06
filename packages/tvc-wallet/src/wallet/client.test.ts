@@ -181,6 +181,65 @@ describe("open", () => {
   });
 });
 
+describe("a descriptor the backend refuses as expired", () => {
+  beforeAll(() => initializePoseidon());
+
+  const expired = () => new TvcHttpError("DescriptorExpired", 403, null);
+
+  /** A key that enrolls a new descriptor each time `expire` drops the current one. */
+  function renewingKey(address: string) {
+    const descriptors = [1, 2, 3, 4].map(
+      (n) => ({ address, network: "devnet", expires_at_ms: String(n) }) as unknown as WalletDescriptor,
+    );
+    let current = 0;
+    const expire = vi.fn((descriptor: WalletDescriptor) => {
+      if (descriptor === descriptors[current]) current += 1;
+    });
+    const key: TvcClientKey = {
+      id: "a",
+      operations: vi.fn(async () => ({ descriptor: descriptors[current]!, signer })),
+      expire,
+    };
+    return { keys: { current: async () => key } satisfies TvcClientKeys, descriptors, expire };
+  }
+
+  it("enrolls the key again once and repeats the operation, without verifying again", async () => {
+    const { identity, bootstrap } = wallet();
+    const session = verifiedSession();
+    const { keys, descriptors, expire } = renewingKey(identity.solanaAddress);
+    const client = clientFromSession(session, { network: "devnet", servicePublicKey: "02".padEnd(66, "1"), keys, prover });
+    execute.mockReset();
+    execute.mockRejectedValueOnce(expired()).mockResolvedValueOnce(bootstrap);
+    const opened = await client.open();
+    expect(expire).toHaveBeenCalledWith(descriptors[0]);
+    expect(execute.mock.calls.map(([context]) => context.operations.descriptor)).toEqual([
+      descriptors[0],
+      descriptors[1],
+    ]);
+
+    const [viewingPublicKey] = opened.viewingPublicKeys();
+    const request = [{ viewingPublicKey: viewingPublicKey!, firstNullifier: new Uint8Array(32) as never }];
+    execute.mockRejectedValueOnce(expired()).mockRejectedValueOnce(expired());
+    await expect(opened.transactionKeys(request)).rejects.toMatchObject({ code: "DescriptorExpired" });
+    expect(expire).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(4);
+    expect(session.forget).not.toHaveBeenCalled();
+    expect(session.context).toHaveBeenCalledTimes(4);
+    expect(session.reset).not.toHaveBeenCalled();
+  });
+
+  it("is the caller's to replace when the key cannot enroll", async () => {
+    const { identity, client } = fixture();
+    const keys = await client.open({ identity, sealedSeed: { sealedSeed: "cd".repeat(16) } });
+    const [viewingPublicKey] = keys.viewingPublicKeys();
+    execute.mockRejectedValueOnce(expired());
+    await expect(
+      keys.transactionKeys([{ viewingPublicKey: viewingPublicKey!, firstNullifier: new Uint8Array(32) as never }]),
+    ).rejects.toMatchObject({ code: "DescriptorExpired" });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+});
+
 describe("a client key that changes", () => {
   beforeAll(() => initializePoseidon());
 

@@ -166,6 +166,7 @@ fn descriptor(address: [u8; 32]) -> WalletDescriptor {
             client_public_key: vec![0x04; 65],
             allowed_operations: OPERATIONS.to_vec(),
         }],
+        expires_at_ms: 1_900_000_000_000,
         provisioning_signature: vec![0u8; 64],
     }
 }
@@ -903,7 +904,13 @@ mod local {
             }
         }
 
+        /// A descriptor for the testkit client key, signed by the testkit
+        /// provisioning key, that expires a day from now.
         fn descriptor(&self) -> WalletDescriptor {
+            self.descriptor_expiring(now_ms().expect("clock") + 86_400_000)
+        }
+
+        fn descriptor_expiring(&self, expires_at_ms: u64) -> WalletDescriptor {
             let client_public = public_key_uncompressed(
                 &p256::SecretKey::from_slice(&self.client_secret)
                     .expect("client scalar")
@@ -920,6 +927,7 @@ mod local {
                     client_public_key: client_public.to_vec(),
                     allowed_operations: OPERATIONS.to_vec(),
                 }],
+                expires_at_ms,
                 provisioning_signature: Vec::new(),
             };
             let provisioning: [u8; 32] =
@@ -935,9 +943,18 @@ mod local {
         }
 
         fn request(&self, operation: Operation, sealed: Option<Vec<u8>>) -> OperationRequest {
+            self.request_under(self.descriptor(), operation, sealed)
+        }
+
+        /// `operation` under `descriptor`, signed by the testkit client key.
+        fn request_under(
+            &self,
+            descriptor: WalletDescriptor,
+            operation: Operation,
+            sealed: Option<Vec<u8>>,
+        ) -> OperationRequest {
             let info = &self.state.info;
             let now = now_ms().expect("clock");
-            let descriptor = self.descriptor();
             let client_key_id = client_key_id(&descriptor.allowed_clients[0].client_public_key);
             let response_public = public_key_uncompressed(
                 &p256::SecretKey::from_slice(&self.response_secret)
@@ -1084,6 +1101,40 @@ mod local {
             failure(harness.call_with_grant(&request, Some(forged)).await),
             Failure::Invalid
         );
+    }
+
+    #[tokio::test]
+    async fn an_expired_descriptor_is_refused_after_the_clock_skew_and_says_so() {
+        let harness = Harness::new(LocalProverTrust::StandIn(Anchors::PRODUCTION));
+        let now = now_ms().expect("clock");
+        let within_skew = harness.descriptor_expiring(now - MAX_CLOCK_SKEW_MS + 10_000);
+        let current = harness.request_under(within_skew, Operation::Bootstrap, None);
+        assert!(matches!(
+            harness.call(&current).await,
+            Ok(OperationResult::Bootstrap { .. })
+        ));
+
+        let past = harness.descriptor_expiring(now - MAX_CLOCK_SKEW_MS - 1_000);
+        let expired = harness.request_under(past, Operation::Bootstrap, None);
+        assert_eq!(
+            failure(harness.call(&expired).await),
+            Failure::DescriptorExpired
+        );
+
+        // An expired descriptor whose request another key signed is only invalid.
+        let mut unsigned = expired.clone();
+        unsigned.authorization.signature = vec![0x01; 64];
+        assert_eq!(failure(harness.call(&unsigned).await), Failure::Invalid);
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_answers_an_expired_descriptor_with_a_403_that_names_it() {
+        let response = PublicError::DescriptorExpired.into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = axum::body::to_bytes(response.into_body(), 1_024)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], br#"{"error":"DescriptorExpired"}"#);
     }
 
     /// A prover that answers `/prove/<key>` with a fixed proof once the

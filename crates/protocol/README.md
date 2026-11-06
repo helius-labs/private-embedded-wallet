@@ -130,10 +130,14 @@ reads the witness.
 A wallet descriptor is the operator's grant that lets client keys drive the
 enclave operations of one Turnkey wallet. It binds a security domain, the
 network, a Turnkey organization and wallet id, the Solana
-address, and the allowed clients (each a P-256 public key with its allowed
-operations), under a provisioning signature over the descriptor digest that
-the enclave verifies against the provisioning public key compiled into it. A
-descriptor names public keys and identifiers only; it is not a secret.
+address, the allowed clients (each a P-256 public key with its allowed
+operations) and `expires_at_ms`, under a provisioning signature over the
+descriptor digest that the enclave verifies against the provisioning public
+key compiled into it. Once a request's signatures check out, the enclave
+refuses it with `403 {"error":"DescriptorExpired"}` when its clock is more
+than 60 s past `expires_at_ms`, so a client knows to enroll its key again; a
+gateway in front refuses the same descriptor the same way. A descriptor names
+public keys and identifiers only; it is not a secret.
 
 The sealed seed is the derivation seed encrypted to the Quorum key. Its
 envelope names the Quorum key id and epoch and the wallet id hash; its

@@ -42,6 +42,8 @@ pub enum ApiError {
 
     #[error("this gateway did not provision the descriptor for the current release")]
     InvalidDescriptor,
+    #[error("the descriptor has expired: enroll the client key again")]
+    DescriptorExpired,
     #[error("the descriptor's client key is revoked")]
     ClientKeyRevoked,
     #[error("the wallet does not hold the claimed address")]
@@ -122,6 +124,7 @@ impl ApiError {
             | Self::ApiKeyRequired
             | Self::ApiKeyInvalid => StatusCode::UNAUTHORIZED,
             Self::InvalidDescriptor
+            | Self::DescriptorExpired
             | Self::ClientKeyRevoked
             | Self::WalletNotOwned
             | Self::SubOrganizationNotOwned

@@ -19,7 +19,7 @@ import type {
   SealedSeed,
   WalletDescriptor,
 } from "../protocol/types.js";
-import { fixedClientKeys, type TvcClientKeys } from "./client-keys.js";
+import { fixedClientKeys, type TvcClientKey, type TvcClientKeys } from "./client-keys.js";
 import { EnclaveKeys, type TvcEnclave, type TvcKeys } from "./keys.js";
 import {
   checkDecrypt,
@@ -258,14 +258,18 @@ export function clientFromSession(
   /** The key the current verification was made for. */
   let verifiedFor: string | undefined;
 
+  type Prepared = {
+    readonly runtime: ConnectedTvcRuntime;
+    readonly context: OperationExecutionContext;
+    readonly key: TvcClientKey;
+  };
+
   /**
    * The verified connection and the current request key, enrolled. A key
    * other than the last one's, after a new login, verifies the enclave again.
    * A release that fails verification enrolls nothing.
    */
-  async function prepare(
-    options: OperationOptions = {},
-  ): Promise<{ runtime: ConnectedTvcRuntime; context: OperationExecutionContext }> {
+  async function prepare(options: OperationOptions = {}): Promise<Prepared> {
     const scope = requestScope(options, setup.requestTimeoutMs);
     try {
       const key = await keys.current(scope.signal);
@@ -275,7 +279,7 @@ export function clientFromSession(
       }
       const runtime = await session.context({ ...options, signal: scope.signal });
       const operations = await key.operations(scope.signal);
-      return { runtime, context: { ...runtime, operations } };
+      return { runtime, context: { ...runtime, operations }, key };
     } finally {
       scope.dispose();
     }
@@ -284,10 +288,11 @@ export function clientFromSession(
   /**
    * One operation over the verified connection. A refused or failed exchange
    * may mean the release moved on, such as to a new Quorum key epoch, so the
-   * next call verifies again; a rate limit says nothing about the release.
+   * next call verifies again; a rate limit or an expired descriptor says
+   * nothing about the release.
    */
   async function execute<TOperation extends Operation>(
-    prepared: { runtime: ConnectedTvcRuntime; context: OperationExecutionContext },
+    prepared: Prepared,
     operation: TOperation,
     sealedSeed: SealedSeed | undefined,
     options?: OperationOptions,
@@ -295,8 +300,26 @@ export function clientFromSession(
     try {
       return await executeOperation(prepared.context, operation, sealedSeed, options);
     } catch (error) {
-      if (error instanceof TvcHttpError && error.status !== 429) session.forget(prepared.runtime);
+      if (error instanceof TvcHttpError && error.status !== 429 && error.code !== "DescriptorExpired") {
+        session.forget(prepared.runtime);
+      }
       throw error;
+    }
+  }
+
+  /**
+   * `attempt` with the current key's descriptor, and once more after the key
+   * enrolls again when the backend refused that descriptor as expired, such
+   * as on a clock that runs behind the gateway's.
+   */
+  async function enrolled<T>(options: OperationOptions | undefined, attempt: (prepared: Prepared) => Promise<T>) {
+    const prepared = await prepare(options);
+    try {
+      return await attempt(prepared);
+    } catch (error) {
+      if (!(error instanceof TvcError) || error.code !== "DescriptorExpired" || !prepared.key.expire) throw error;
+      prepared.key.expire(prepared.context.operations.descriptor);
+      return attempt(await prepare(options));
     }
   }
 
@@ -307,11 +330,12 @@ export function clientFromSession(
       sealedSeed: SealedSeed,
       options?: OperationOptions,
     ) {
-      const prepared = await prepare(options);
-      if (prepared.context.operations.descriptor.address !== solanaAddress) {
-        throw new TvcError("ShieldedIdentityChanged", "the stored identity is another wallet's");
-      }
-      return execute(prepared, operation, sealedSeed, options);
+      return enrolled(options, (prepared) => {
+        if (prepared.context.operations.descriptor.address !== solanaAddress) {
+          throw new TvcError("ShieldedIdentityChanged", "the stored identity is another wallet's");
+        }
+        return execute(prepared, operation, sealedSeed, options);
+      });
     }
     return {
       async decrypt(sealedSeed, items, options) {
@@ -332,12 +356,13 @@ export function clientFromSession(
   }
 
   async function bootstrap(options: OperationOptions): Promise<BootstrapResult> {
-    const prepared = await prepare(options);
-    const result = await execute(prepared, { type: "Bootstrap" }, undefined, options);
-    if (result.solana_address !== prepared.context.operations.descriptor.address) {
-      throw new TvcError("ReleaseBindingMismatch");
-    }
-    return result;
+    return enrolled(options, async (prepared) => {
+      const result = await execute(prepared, { type: "Bootstrap" }, undefined, options);
+      if (result.solana_address !== prepared.context.operations.descriptor.address) {
+        throw new TvcError("ReleaseBindingMismatch");
+      }
+      return result;
+    });
   }
 
   async function bootstrapApproved(options: TvcOpenOptions = {}): Promise<BootstrapResult> {

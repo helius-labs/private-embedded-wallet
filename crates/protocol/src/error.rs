@@ -36,6 +36,7 @@ pub enum ErrorCode {
     DiscoveryUntrusted,
     NetworkMismatch,
     ReleasePolicyInvalid,
+    DescriptorExpired,
 }
 
 impl ErrorCode {
@@ -117,6 +118,7 @@ mod tests {
                 "DiscoveryUntrusted",
                 "NetworkMismatch",
                 "ReleasePolicyInvalid",
+                "DescriptorExpired",
             ]
         );
         for code in ErrorCode::VARIANTS {
