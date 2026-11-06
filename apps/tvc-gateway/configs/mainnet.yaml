@@ -12,4 +12,3 @@ wallet_grant:
 enrollment:
     domains:
         - mainnet.helius-rpc.com
-        - beta-mainnet.helius-rpc.com

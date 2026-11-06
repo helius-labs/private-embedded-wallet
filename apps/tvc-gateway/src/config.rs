@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(config.provisioning.descriptor_ttl_secs, 86_400);
         assert_eq!(
             config.enrollment.domains,
-            ["mainnet.helius-rpc.com", "beta-mainnet.helius-rpc.com"]
+            ["mainnet.helius-rpc.com"]
         );
         assert_eq!(
             config.provisioning.release_path,
