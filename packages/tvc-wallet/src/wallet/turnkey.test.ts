@@ -110,6 +110,33 @@ function keysOf(turnkey: TvcTurnkey, transport: TvcTransport, solanaAddress?: st
   });
 }
 
+/** A request for `descriptor` under the key `clientKeyId`, shown to its signer with the text to sign. */
+function requestInput(descriptor: WalletDescriptor, clientKeyId: string): SignTvcRequestInput & { request: OperationRequest } {
+  const request = {
+    version: 1,
+    request_id: "aa".repeat(32),
+    issued_at_ms: "1800000000000",
+    expires_at_ms: "1800000300000",
+    target_release_id: "release",
+    target_manifest_digest: "11".repeat(32),
+    target_executable_digest: "22".repeat(32),
+    quorum_key_id: "quorum",
+    quorum_key_epoch: "1",
+    wallet_descriptor: descriptor,
+    sealed_seed: null,
+    client_response_public_key: `04${"77".repeat(64)}`,
+    operation: { type: "Bootstrap" },
+    authorization: { client_key_id: clientKeyId, signature: "" },
+  } satisfies OperationRequest;
+  const message = clientAuthMessage(requestDigest(request));
+  return {
+    operation: request.operation,
+    request,
+    clientAuthDigest: sha256(te.encode(message)),
+    clientAuthMessage: message,
+  };
+}
+
 describe("the Turnkey session key", () => {
   it("is enrolled once, by the wallet owner, for the network's gatekeeper host", async () => {
     const { turnkey, address, account, ownerPublic, login } = fakeTurnkey();
@@ -169,29 +196,8 @@ describe("the Turnkey session key", () => {
     const { turnkey, login } = fakeTurnkey();
     const sessionKey = login();
     const { descriptor, signer } = await (await keysOf(turnkey, fakeGateway().transport).current()).operations();
-    const request = {
-      version: 1,
-      request_id: "aa".repeat(32),
-      issued_at_ms: "1800000000000",
-      expires_at_ms: "1800000300000",
-      target_release_id: "release",
-      target_manifest_digest: "11".repeat(32),
-      target_executable_digest: "22".repeat(32),
-      quorum_key_id: "quorum",
-      quorum_key_epoch: "1",
-      wallet_descriptor: descriptor,
-      sealed_seed: null,
-      client_response_public_key: `04${"77".repeat(64)}`,
-      operation: { type: "Bootstrap" },
-      authorization: { client_key_id: signer.clientKeyId, signature: "" },
-    } satisfies OperationRequest;
-    const message = clientAuthMessage(requestDigest(request));
-    const input: SignTvcRequestInput = {
-      operation: request.operation,
-      request,
-      clientAuthDigest: sha256(te.encode(message)),
-      clientAuthMessage: message,
-    };
+    const input = requestInput(descriptor, signer.clientKeyId);
+    const { request, clientAuthMessage: message } = input;
     const signature = await signer.signRequest(input);
     expect(turnkey.signWithApiKey).toHaveBeenCalledWith({ message, publicKey: sessionKey });
     const publicKey = decodeLowerHex(descriptor.allowed_clients[0]!.client_public_key);
@@ -199,6 +205,64 @@ describe("the Turnkey session key", () => {
     await expect(signer.signRequest({ ...input, clientAuthMessage: `${message}0` })).rejects.toMatchObject({
       code: "OperationNotAllowed",
     });
+    expect(request.authorization.client_key_id).toBe(signer.clientKeyId);
+  });
+
+  it("never has two signWithApiKey calls on one Turnkey client in flight", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const sign = turnkey.signWithApiKey.getMockImplementation()!;
+    let inFlight = 0;
+    let most = 0;
+    let calls = 0;
+    turnkey.signWithApiKey.mockImplementation(async (params) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        if (++calls === 2) throw new Error("declined");
+        return await sign(params);
+      } finally {
+        inFlight -= 1;
+      }
+    });
+    // Two clients of one Turnkey client, as two createTvcClient calls would be.
+    const signers = await Promise.all(
+      [fakeGateway(), fakeGateway()].map(async (gateway) => (await (await keysOf(turnkey, gateway.transport).current()).operations())),
+    );
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, index) => {
+        const { descriptor, signer } = signers[index % 2]!;
+        return signer.signRequest(requestInput(descriptor, signer.clientKeyId));
+      }),
+    );
+    expect(most).toBe(1);
+    expect(turnkey.signWithApiKey).toHaveBeenCalledTimes(6);
+    // A failed call does not hold up the ones after it.
+    expect(results.map(({ status }) => status)).toEqual([
+      "fulfilled", "rejected", "fulfilled", "fulfilled", "fulfilled", "fulfilled",
+    ]);
+  });
+
+  it("signs each request of another Turnkey client independently", async () => {
+    const first = fakeTurnkey();
+    const second = fakeTurnkey();
+    first.login();
+    second.login();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const sign = first.turnkey.signWithApiKey.getMockImplementation()!;
+    first.turnkey.signWithApiKey.mockImplementationOnce(async (params) => {
+      await held;
+      return sign(params);
+    });
+    const [a, b] = await Promise.all(
+      [first, second].map(async ({ turnkey }) => (await (await keysOf(turnkey, fakeGateway().transport).current()).operations())),
+    );
+    const waiting = a!.signer.signRequest(requestInput(a!.descriptor, a!.signer.clientKeyId));
+    await expect(b!.signer.signRequest(requestInput(b!.descriptor, b!.signer.clientKeyId))).resolves.toHaveLength(64);
+    release();
+    await expect(waiting).resolves.toHaveLength(64);
   });
 
   it("is enrolled again after a new login, and kept for a session it has seen", async () => {

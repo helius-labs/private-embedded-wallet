@@ -174,7 +174,11 @@ non-exportable P-256 key for each login session. The client signs every
 request with it through `signWithApiKey`, over the client-auth text
 `spr-tvc-client-auth-v1:<request digest, lowercase hex>` (ECDSA P-256 over
 SHA-256), normalizes the signature to low S, and checks it against the key
-before it sends.
+before it sends. Its `signWithApiKey` calls on one Turnkey client run one at
+a time: `@turnkey/core` points the stamper at the given key for each call and
+restores the previous key afterwards, so overlapping calls could leave the
+application's stamper on a stale key. An application that calls
+`signWithApiKey` itself should not overlap it with the client's requests.
 
 On first use the client enrolls the key with the gateway. It finds the
 wallet's Solana account (`fetchWallets`; connected wallets are skipped), has

@@ -110,6 +110,21 @@ type Enrollment = {
   signed: boolean;
 };
 
+/**
+ * The tail of each Turnkey client's `signWithApiKey` calls. `@turnkey/core`
+ * 2.7.1 sets the stamper's temporary public key for the call and restores the
+ * one it found when the call ends, so two overlapping calls can restore the
+ * first call's key last and leave the application's stamper pinned to it.
+ */
+const apiKeySignatures = new WeakMap<object, Promise<void>>();
+
+/** `sign` once every earlier `signWithApiKey` call of the client on `turnkey` has ended. */
+function signingAlone<T>(turnkey: object, sign: () => Promise<T>): Promise<T> {
+  const turn = (apiKeySignatures.get(turnkey) ?? Promise.resolve()).then(sign);
+  apiKeySignatures.set(turnkey, turn.then(() => undefined, () => undefined));
+  return turn;
+}
+
 /** The uncompressed SEC1 form of a Turnkey session key, which descriptors list. */
 function uncompressedSessionKey(publicKey: string): Uint8Array {
   try {
@@ -248,7 +263,9 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
     const signer = createTvcRequestSigner({
       clientKeyId,
       sign: async (message) =>
-        hexSignature(await turnkey.signWithApiKey({ message, publicKey: session.publicKey })),
+        hexSignature(
+          await signingAlone(turnkey, () => turnkey.signWithApiKey({ message, publicKey: session.publicKey })),
+        ),
     });
     let enrolled: OperationsConfig | undefined;
     let pending: Enrollment | undefined;
