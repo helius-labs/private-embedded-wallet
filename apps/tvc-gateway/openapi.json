@@ -11,8 +11,12 @@
   },
   "servers": [
     {
-      "url": "https://beta-devnet.helius-rpc.com",
+      "url": "https://devnet.helius-rpc.com",
       "description": "Devnet"
+    },
+    {
+      "url": "https://mainnet.helius-rpc.com",
+      "description": "Mainnet"
     }
   ],
   "paths": {

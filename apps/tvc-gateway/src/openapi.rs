@@ -18,7 +18,10 @@ use crate::error::{ApiError, Problem};
                        carries discovery and the ping. The client verifies them against the \
                        release it pins.",
     ),
-    servers((url = "https://beta-devnet.helius-rpc.com", description = "Devnet")),
+    servers(
+        (url = "https://devnet.helius-rpc.com", description = "Devnet"),
+        (url = "https://mainnet.helius-rpc.com", description = "Mainnet")
+    ),
     paths(crate::app::session, crate::app::enroll, crate::app::operations),
     components(schemas(Problem)),
     modifiers(&HeliusApiKey, &ErrorCodes),
