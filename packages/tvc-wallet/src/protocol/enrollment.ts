@@ -1,4 +1,4 @@
-import { TvcError } from "./error.js";
+import { SprEmbeddedWalletError } from "./error.js";
 import { requireNetwork } from "./network.js";
 import type { Network } from "./types.js";
 
@@ -41,7 +41,7 @@ export type WalletEnrollment = {
 export function walletEnrollmentMessage(enrollment: WalletEnrollment): string {
   const { issuedAtMs } = enrollment;
   if (!Number.isSafeInteger(issuedAtMs) || issuedAtMs < 0 || issuedAtMs > MAX_ISSUED_AT_MS) {
-    throw new TvcError("InvalidDecimal", "issuedAtMs must be a time in milliseconds");
+    throw new SprEmbeddedWalletError("InvalidDecimal", "issuedAtMs must be a time in milliseconds");
   }
   const network = requireNetwork(enrollment.network);
   const fields = [
@@ -52,7 +52,7 @@ export function walletEnrollmentMessage(enrollment: WalletEnrollment): string {
     enrollment.clientPublicKey,
   ];
   if (fields.some((field) => /[\r\n]/u.test(field))) {
-    throw new TvcError("InvalidDescriptor", "enrollment fields cannot contain a line break");
+    throw new SprEmbeddedWalletError("InvalidDescriptor", "enrollment fields cannot contain a line break");
   }
   return [
     `${enrollment.domain} wants you to sign in with your Solana account:`,

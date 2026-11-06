@@ -30,16 +30,16 @@ import { SignedTeePolicy } from "@heliuslabs/spr/client";
 import type { AssetBalance } from "@heliuslabs/spr/transaction";
 import { DEFAULT_SOLANA_ACCOUNTS, Turnkey } from "@turnkey/sdk-server";
 import {
-  createTvcClient,
+  createSprEmbeddedWallet,
   parseStoredWallet,
   type Network,
   type StoredWallet,
-  type TvcClient,
-  type TvcKeys,
-  type TvcOpenOptions,
-  type TvcTurnkey,
+  type SprEmbeddedWallet,
+  type SprEmbeddedWalletKeys,
+  type SprEmbeddedWalletOpenOptions,
+  type SprEmbeddedWalletTurnkey,
 } from "@heliuslabs/spr-embedded-wallet";
-import { createLocalTvcClient, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
+import { createLocalSprEmbeddedWallet, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
 import { bootstrapWithApproval } from "./bootstrap-approval.js";
 
 export type Client = Awaited<ReturnType<typeof createSprClient>>;
@@ -47,16 +47,16 @@ export type Client = Awaited<ReturnType<typeof createSprClient>>;
 export interface ExampleSetup {
   readonly zolana: Client;
   /** The wallet's keys, held by the enclave: the SDK's `WalletKeys`. */
-  readonly keys: TvcKeys;
+  readonly keys: SprEmbeddedWalletKeys;
   /** The wallet owner signs transactions and pays fees. */
   readonly signer: TransactionPartialSigner;
 }
 
 /** The enclave's client, the owner's transaction signer, and how the owner approves a bootstrap. */
 interface WalletClient {
-  readonly tvc: TvcClient;
+  readonly tvc: SprEmbeddedWallet;
   readonly signer: TransactionPartialSigner;
-  readonly approve?: TvcOpenOptions["approve"];
+  readonly approve?: SprEmbeddedWalletOpenOptions["approve"];
 }
 
 export interface ConfirmedTransaction {
@@ -140,7 +140,7 @@ async function gatewayClientFromEnv(network: Network): Promise<WalletClient> {
   const solanaAddress = await walletAddress(turnkey, owner, organizationId);
   // The enclave seals proofs to /v1/spr beside the gateway unless TVC_PROVER_URL names another prover.
   const prover = process.env["TVC_PROVER_URL"]?.trim();
-  const tvc = createTvcClient({
+  const tvc = createSprEmbeddedWallet({
     network,
     endpoint: gatewayEndpoint(network),
     turnkey,
@@ -191,7 +191,7 @@ export function apiKeyTurnkey(
   api: Pick<TurnkeyApi, "getWallets" | "getWalletAccounts" | "signRawPayload">,
   organizationId: string,
   key: { publicKey: string; privateKey: string },
-): TvcTurnkey {
+): SprEmbeddedWalletTurnkey {
   const signingKey = apiSigningKey(key);
   return {
     getSession: async () => ({ publicKey: key.publicKey, organizationId }),
@@ -349,7 +349,7 @@ export async function grantEnclaveBootstrap(
  * organization's one Solana account, else a new wallet's.
  */
 async function walletAddress(
-  turnkey: TvcTurnkey,
+  turnkey: SprEmbeddedWalletTurnkey,
   owner: Pick<TurnkeyApi, "createWallet">,
   organizationId: string,
 ): Promise<string> {
@@ -431,7 +431,7 @@ async function localTestkit(network: Network, endpoint: string): Promise<WalletC
   // with --live-prover, under the network's policy; otherwise the testkit's
   // stand-in prover.
   const liveProver = process.env["TVC_PROVER_URL"]?.trim();
-  const tvc = createLocalTvcClient({
+  const tvc = createLocalSprEmbeddedWallet({
     network,
     backend: { kind: "enclave", endpoint: new URL(endpoint) },
     solanaAddress: signer.address,
@@ -473,7 +473,7 @@ async function loadWallet(
 }
 
 /** The stored wallet, or a wallet the enclave bootstraps once and the file then keeps. */
-async function openWallet(tvc: TvcClient, path: string, options: TvcOpenOptions): Promise<TvcKeys> {
+async function openWallet(tvc: SprEmbeddedWallet, path: string, options: SprEmbeddedWalletOpenOptions): Promise<SprEmbeddedWalletKeys> {
   const stored = await loadWallet(path);
   const keys = await tvc.open(stored, options);
   if (!stored) await writeFile(path, JSON.stringify(keys.stored, null, 2), { mode: 0o600 });

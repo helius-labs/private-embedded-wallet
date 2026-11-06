@@ -2,7 +2,7 @@ import { ShieldedAddress, ShieldedPublicKey, type Bytes32 } from "@heliuslabs/sp
 import { X25519PublicKey } from "@heliuslabs/spr/keypair";
 import { address, getAddressEncoder } from "@solana/kit";
 
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type { ShieldedIdentity } from "./client.js";
 
@@ -15,7 +15,7 @@ export function shieldedAddressOf(identity: ShieldedIdentity): ShieldedAddress {
     X25519PublicKey.fromBytes(decodeLowerHex(identity.shieldedViewingPublicKey)),
   );
   if (encodeLowerHex(result.ownerHash()) !== identity.shieldedOwnerHash) {
-    throw new TvcError("ShieldedIdentityChanged");
+    throw new SprEmbeddedWalletError("ShieldedIdentityChanged");
   }
   return result;
 }

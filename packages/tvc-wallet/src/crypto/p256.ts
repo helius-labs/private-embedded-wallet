@@ -1,19 +1,19 @@
 import { p256 } from "@noble/curves/p256";
 import { sha256 } from "@noble/hashes/sha256";
 import { RAW_P256_SIGNATURE_LEN, SEC1_UNCOMPRESSED_LEN } from "../protocol/constants.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 
 export function parseUncompressedSec1(bytes: Uint8Array): Uint8Array {
   if (bytes.length === 33 && (bytes[0] === 0x02 || bytes[0] === 0x03)) {
-    throw new TvcError("CompressedKeyRejected");
+    throw new SprEmbeddedWalletError("CompressedKeyRejected");
   }
   if (bytes.length !== SEC1_UNCOMPRESSED_LEN || bytes[0] !== 0x04) {
-    throw new TvcError("InvalidPublicKey");
+    throw new SprEmbeddedWalletError("InvalidPublicKey");
   }
   try {
     p256.ProjectivePoint.fromHex(bytes);
   } catch {
-    throw new TvcError("InvalidPublicKey");
+    throw new SprEmbeddedWalletError("InvalidPublicKey");
   }
   return bytes;
 }
@@ -21,13 +21,13 @@ export function parseUncompressedSec1(bytes: Uint8Array): Uint8Array {
 function parseRawLowS(signature: Uint8Array) {
   if (signature.length !== RAW_P256_SIGNATURE_LEN) {
     if (signature.length > 0 && signature[0] === 0x30) {
-      throw new TvcError("DerSignatureRejected");
+      throw new SprEmbeddedWalletError("DerSignatureRejected");
     }
-    throw new TvcError("InvalidSignature");
+    throw new SprEmbeddedWalletError("InvalidSignature");
   }
   const sig = p256.Signature.fromCompact(signature);
   if (sig.hasHighS()) {
-    throw new TvcError("HighSSignature");
+    throw new SprEmbeddedWalletError("HighSSignature");
   }
   return sig;
 }
@@ -45,7 +45,7 @@ export function verifyP256Prehash(
   parseUncompressedSec1(publicSec1);
   const sig = parseRawLowS(signature);
   if (!p256.verify(sig, digest, publicSec1, { prehash: false })) {
-    throw new TvcError("InvalidSignature");
+    throw new SprEmbeddedWalletError("InvalidSignature");
   }
 }
 

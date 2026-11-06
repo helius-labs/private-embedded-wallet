@@ -2,11 +2,11 @@ import { gcm } from "@noble/ciphers/aes";
 import { randomBytes } from "@noble/hashes/utils";
 
 import { fetchWithSignal, gatewayUrl, httpError, readBoundedBytes, readBoundedText } from "../client/http.js";
-import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
-import { TvcError, TvcHttpError } from "../protocol/error.js";
+import { createDefaultTransport, type SprEmbeddedWalletTransport } from "../client/transport.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletHttpError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type { ProverRequest, ProverSealing, SealedProverRequest } from "../protocol/types.js";
-import type { HeldProverPolicy, TvcProverPolicy } from "./prover-policy.js";
+import type { HeldProverPolicy, SprEmbeddedWalletProverPolicy } from "./prover-policy.js";
 
 /** The encrypted prover wire contract, v1 (zolana `prover/tee/WIRE_CONTRACT.md`). */
 const HEADER_VERSION = "Spr-Tee";
@@ -40,16 +40,16 @@ export function isProveCircuit(value: unknown): value is keyof typeof FAMILIES {
  * the attestation and proof routes are appended to its path and its query is
  * kept. `policy` is the signed policy file of the network the enclave serves;
  * the client downloads its network's file,
- * `TvcProverPolicy.forNetwork(network)`, when it is absent.
+ * `SprEmbeddedWalletProverPolicy.forNetwork(network)`, when it is absent.
  */
-export type TvcProverConfig = {
+export type SprEmbeddedWalletProverConfig = {
   readonly url: string;
-  readonly policy?: TvcProverPolicy;
-  readonly transport?: TvcTransport;
+  readonly policy?: SprEmbeddedWalletProverPolicy;
+  readonly transport?: SprEmbeddedWalletTransport;
 };
 
 /** A client's prover with its policy settled, which every wallet it opens shares. */
-export type TvcProver = TvcProverConfig & { readonly policy: TvcProverPolicy };
+export type SprEmbeddedWalletProver = SprEmbeddedWalletProverConfig & { readonly policy: SprEmbeddedWalletProverPolicy };
 
 /** A prover's answer to a sealed request that could not be opened as a proof. */
 export type ProverAnswer =
@@ -58,7 +58,7 @@ export type ProverAnswer =
 
 function slotCount(value: unknown): number {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PROVE_INPUTS) {
-    throw new TvcError("InvalidProverRequest");
+    throw new SprEmbeddedWalletError("InvalidProverRequest");
   }
   return value.length;
 }
@@ -66,7 +66,7 @@ function slotCount(value: unknown): number {
 /** The proving key file name, without `.key`; mirrors the enclave's `proving_key`. */
 export function provingKeyName(request: ProverRequest): string {
   const circuit = request["circuitType"];
-  if (!isProveCircuit(circuit)) throw new TvcError("InvalidProverRequest");
+  if (!isProveCircuit(circuit)) throw new SprEmbeddedWalletError("InvalidProverRequest");
   const inputs = slotCount(request["inputs"]);
   const outputs = circuit.startsWith("merge") ? 1 : slotCount(request["outputs"]);
   return `${FAMILIES[circuit]}_${inputs}_${outputs}`;
@@ -93,7 +93,7 @@ export type ProverAttestation = {
  * attestation; the client only carries it.
  */
 export async function fetchAttestation(
-  config: TvcProverConfig,
+  config: SprEmbeddedWalletProverConfig,
   signal?: AbortSignal,
 ): Promise<ProverAttestation> {
   const nonce = encodeLowerHex(randomBytes(32));
@@ -106,11 +106,11 @@ export async function fetchAttestation(
   try {
     attestation = JSON.parse(await readBoundedText(response, MAX_ATTESTATION_BYTES, signal));
   } catch (error) {
-    if (error instanceof TvcError && error.code === "ResponseTooLarge") throw error;
-    throw new TvcError("ProverAttestationInvalid");
+    if (error instanceof SprEmbeddedWalletError && error.code === "ResponseTooLarge") throw error;
+    throw new SprEmbeddedWalletError("ProverAttestationInvalid");
   }
   if (typeof attestation !== "object" || attestation === null || Array.isArray(attestation)) {
-    throw new TvcError("ProverAttestationInvalid");
+    throw new SprEmbeddedWalletError("ProverAttestationInvalid");
   }
   return { nonce, attestation: attestation as Record<string, unknown>, fetchedAtMs: Date.now() };
 }
@@ -135,7 +135,7 @@ export function sealingFor(
  * caller attests again.
  */
 export async function submitSealed(
-  config: TvcProverConfig,
+  config: SprEmbeddedWalletProverConfig,
   sealed: SealedProverRequest,
   signal?: AbortSignal,
 ): Promise<ProverAnswer> {
@@ -159,7 +159,7 @@ export async function submitSealed(
   if (response.headers.get(HEADER_VERSION) !== VERSION) {
     if (response.ok) {
       void response.body?.cancel().catch(() => undefined);
-      throw new TvcError("ProverAnswerUnencrypted");
+      throw new SprEmbeddedWalletError("ProverAnswerUnencrypted");
     }
     if (response.status === 400 && (await errorCode(response, signal)) === KEY_LOST) {
       return { kind: "keyLost" };
@@ -171,12 +171,12 @@ export async function submitSealed(
     await readBoundedBytes(response, MAX_ANSWER_BYTES, signal),
   );
   if (status < 200 || status >= 300) {
-    throw new TvcHttpError("ProverRefused", status, response.headers.get("retry-after"));
+    throw new SprEmbeddedWalletHttpError("ProverRefused", status, response.headers.get("retry-after"));
   }
   try {
     return { kind: "proof", body: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) };
   } catch {
-    throw new TvcError("ProverAnswerInvalid");
+    throw new SprEmbeddedWalletError("ProverAnswerInvalid");
   }
 }
 
@@ -194,9 +194,9 @@ export function decryptProverAnswer(
       encrypted.subarray(RESPONSE_NONCE_BYTES),
     );
   } catch {
-    throw new TvcError("ProverAnswerInvalid");
+    throw new SprEmbeddedWalletError("ProverAnswerInvalid");
   }
-  if (plaintext.length < 2) throw new TvcError("ProverAnswerInvalid");
+  if (plaintext.length < 2) throw new SprEmbeddedWalletError("ProverAnswerInvalid");
   return {
     status: new DataView(plaintext.buffer, plaintext.byteOffset).getUint16(0, false),
     body: plaintext.subarray(2),

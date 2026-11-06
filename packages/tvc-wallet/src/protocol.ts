@@ -44,5 +44,5 @@ export {
   walletEnrollmentMessage,
   type WalletEnrollment,
 } from "./protocol/enrollment.js";
-export { TvcError, TvcHttpError, TvcOperationError } from "./protocol/error.js";
+export { SprEmbeddedWalletError, SprEmbeddedWalletHttpError, SprEmbeddedWalletOperationError } from "./protocol/error.js";
 export { decodeLowerHex, encodeLowerHex } from "./protocol/hex.js";

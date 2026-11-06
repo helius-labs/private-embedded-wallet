@@ -16,7 +16,7 @@ import {
   resultDigest,
   sealedSeedDigest,
 } from "./digest.js";
-import { TvcError } from "./error.js";
+import { SprEmbeddedWalletError } from "./error.js";
 import type { HealthResponse, ServiceInfo } from "./types.js";
 import { SERVICE_INFO_KEYS } from "./types.js";
 import {
@@ -113,7 +113,7 @@ describe("canonical u64", () => {
       expect(decodeDecimalU64(row.encoded)).toBe(input);
     }
     for (const bad of fixture.negative) {
-      expect(() => decodeDecimalU64(bad)).toThrowError(TvcError);
+      expect(() => decodeDecimalU64(bad)).toThrowError(SprEmbeddedWalletError);
     }
   });
 });

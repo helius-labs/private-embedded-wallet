@@ -9,23 +9,23 @@ import {
   TVC_APP_PROOF_SCHEME,
   TVC_QOS_PING_PROOF_TYPE,
 } from "../protocol/constants.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import { canonicalizeJsonValue } from "../protocol/jcs.js";
 import { parseStrictJson } from "../protocol/json.js";
 import type { ReleaseTrust } from "../protocol/releases.js";
 import { SERVICE_INFO_KEYS, type Network, type ServiceInfo } from "../protocol/types.js";
-import { createDefaultTransport, type TvcTransport } from "./transport.js";
+import { createDefaultTransport, type SprEmbeddedWalletTransport } from "./transport.js";
 import { verifyBootProof, type QosIdentityPcrs } from "../verify/index.js";
 import type {
   TurnkeyAppProofWire,
   TurnkeyBootProofWire,
 } from "../verify/internal/turnkey-proof-seam.js";
 import { bindDiscoveryToPolicy, verifySignedReleasePolicy } from "../verify/release-policy.js";
-import { fetchPing, fetchSession, lookupBootProof, type TvcBackend } from "./backend.js";
+import { fetchPing, fetchSession, lookupBootProof, type SprEmbeddedWalletBackend } from "./backend.js";
 import { assertExactObjectKeys } from "./http.js";
 import { requireCurrentReleasePolicy } from "./operation-executor.js";
-import type { TvcTrustVerifier } from "./trust.js";
+import type { SprEmbeddedWalletTrustVerifier } from "./trust.js";
 
 const PING_RESPONSE_KEYS = ["version", "tvc_app_proof"] as const;
 
@@ -39,11 +39,11 @@ type QosPingResponse = {
   };
 };
 
-export type TvcConnectionConfig = {
+export type SprEmbeddedWalletConnectionConfig = {
   /** The network the enclave serves; the release policy must name it. */
   network: Network;
   /** Where the client reaches the enclave. */
-  backend: TvcBackend;
+  backend: SprEmbeddedWalletBackend;
   /** The release the enclave is verified against. */
   release: ReleaseTrust;
   /**
@@ -52,20 +52,20 @@ export type TvcConnectionConfig = {
    * whole life.
    */
   nowMs?: () => bigint;
-  transport?: TvcTransport;
+  transport?: SprEmbeddedWalletTransport;
   /** Total deadline for each verification or operation, including proof lookup. Defaults to two minutes. */
   requestTimeoutMs?: number;
 };
 
 /** What one verification established: the release's discovery, bound to the policy, and how to check each answer. */
 export type ConnectedTvcRuntime = {
-  readonly backend: TvcBackend;
+  readonly backend: SprEmbeddedWalletBackend;
   readonly info: ServiceInfo;
-  readonly transport: TvcTransport;
+  readonly transport: SprEmbeddedWalletTransport;
   readonly releasePolicyValidFromMs: bigint;
   readonly releasePolicyExpiresAtMs: bigint;
   readonly nowMs: () => bigint;
-  readonly trustVerifier: TvcTrustVerifier;
+  readonly trustVerifier: SprEmbeddedWalletTrustVerifier;
   readonly requestTimeoutMs?: number;
 };
 
@@ -75,7 +75,7 @@ export function parseServiceInfo(text: string): ServiceInfo {
 
 function requireQosPublicKey(value: string): Uint8Array {
   const bytes = decodeLowerHex(value);
-  if (bytes.length !== QOS_P256_PUBLIC_LEN) throw new TvcError("InvalidPublicKey");
+  if (bytes.length !== QOS_P256_PUBLIC_LEN) throw new SprEmbeddedWalletError("InvalidPublicKey");
   return bytes;
 }
 
@@ -100,11 +100,11 @@ export function qosPingChallenge(quorumPublicKey: string): QosPingChallenge {
 
 export function verifyQosPingAnswer(text: string, challenge: QosPingChallenge): TurnkeyAppProofWire {
   const parsed = parseStrictJson<QosPingResponse>(text, PING_RESPONSE_KEYS);
-  if (parsed.version !== API_VERSION) throw new TvcError("UnsupportedVersion");
+  if (parsed.version !== API_VERSION) throw new SprEmbeddedWalletError("UnsupportedVersion");
   assertExactObjectKeys(parsed.tvc_app_proof, TVC_APP_PROOF_KEYS, "TurnkeyEvidenceInvalid");
   const proof = parsed.tvc_app_proof;
   if (proof.scheme !== TVC_APP_PROOF_SCHEME || proof.proof_payload !== challenge.payload) {
-    throw new TvcError("TurnkeyEvidenceInvalid");
+    throw new SprEmbeddedWalletError("TurnkeyEvidenceInvalid");
   }
   // `proof.public_key` is self-asserted here and carries no weight until
   // verifyBootProof ties it to a pinned-PCR Nitro attestation. Discovery's
@@ -136,7 +136,7 @@ export type VerifyLiveReplicaInput = {
   readonly turnkeyTrustRootId: string;
   /** Turnkey's Boot Proof for the replica whose ephemeral public key is given. */
   readonly bootProof: (ephemeralPublicKey: string, signal?: AbortSignal) => Promise<TurnkeyBootProofWire>;
-  readonly transport?: TvcTransport;
+  readonly transport?: SprEmbeddedWalletTransport;
   readonly nowMs?: bigint;
   readonly signal?: AbortSignal;
 };
@@ -147,11 +147,11 @@ export type VerifyLiveReplicaInput = {
  * signs it with an ephemeral key whose Boot Proof chains to the pinned AWS
  * Nitro root, carries the pinned PCR0-3, and attests the manifest digest
  * `info` reports. The QOS manifest names the Quorum key, so this verifies
- * both values a release policy pins. Throws `TvcError` otherwise.
+ * both values a release policy pins. Throws `SprEmbeddedWalletError` otherwise.
  */
 export async function verifyLiveReplica(input: VerifyLiveReplicaInput): Promise<void> {
   if (input.turnkeyTrustRootId !== EXPECTED_TURNKEY_TRUST_ROOT_ID) {
-    throw new TvcError("ReleasePolicyInvalid", `this client pins the trust root ${EXPECTED_TURNKEY_TRUST_ROOT_ID}`);
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid", `this client pins the trust root ${EXPECTED_TURNKEY_TRUST_ROOT_ID}`);
   }
   const info = parseServiceInfo(JSON.stringify(input.info));
   const transport = input.transport ?? createDefaultTransport();
@@ -171,7 +171,7 @@ export async function verifyLiveReplica(input: VerifyLiveReplicaInput): Promise<
 }
 
 export async function connectAndVerifyTvc(
-  config: TvcConnectionConfig,
+  config: SprEmbeddedWalletConnectionConfig,
   signal?: AbortSignal,
 ): Promise<ConnectedTvcRuntime> {
   signal?.throwIfAborted();
@@ -203,7 +203,7 @@ export async function connectAndVerifyTvc(
 
   const releasePolicyValidFromMs = BigInt(releasePolicy.policy.validFromMs);
   const releasePolicyExpiresAtMs = BigInt(releasePolicy.policy.expiresAtMs);
-  const trustVerifier: TvcTrustVerifier = Object.freeze({
+  const trustVerifier: SprEmbeddedWalletTrustVerifier = Object.freeze({
     async verifyOperationAppProof(operationAppProof, operationSignal, operationBootProof) {
       operationSignal?.throwIfAborted();
       const verificationNow = nowMs();

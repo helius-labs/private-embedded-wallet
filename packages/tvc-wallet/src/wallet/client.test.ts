@@ -3,8 +3,8 @@ import { p256 } from "@noble/curves/p256";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ConnectedTvcRuntime } from "../client/connection.js";
-import type { TvcSession } from "../client/session.js";
-import { TvcError, TvcHttpError } from "../protocol/error.js";
+import type { SprEmbeddedWalletSession } from "../client/session.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletHttpError } from "../protocol/error.js";
 import { encodeLowerHex } from "../protocol/hex.js";
 import type { ReleaseTrust } from "../protocol/releases.js";
 import type { BootstrapResult, ReleasePolicy, WalletDescriptor } from "../protocol/types.js";
@@ -13,14 +13,14 @@ import { policySigningDigest } from "../verify/release-policy.js";
 import {
   clientFromSession,
   createClient,
-  createTvcClient,
+  createSprEmbeddedWallet,
   proverFor,
   type ShieldedIdentity,
-  type TvcClientConfig,
+  type SprEmbeddedWalletConfig,
 } from "./client.js";
-import { fixedClientKeys, type TvcClientKey, type TvcClientKeys } from "./client-keys.js";
-import { TvcProverPolicy } from "./prover-policy.js";
-import type { TvcTurnkey } from "./turnkey.js";
+import { fixedClientKeys, type SprEmbeddedWalletClientKey, type SprEmbeddedWalletClientKeys } from "./client-keys.js";
+import { SprEmbeddedWalletProverPolicy } from "./prover-policy.js";
+import type { SprEmbeddedWalletTurnkey } from "./turnkey.js";
 
 const execute = vi.hoisted(() => vi.fn());
 vi.mock("./operations.js", async (importOriginal) => ({
@@ -32,7 +32,7 @@ vi.mock("./operations.js", async (importOriginal) => ({
 const pins = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("../protocol/releases.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../protocol/releases.js")>();
-  const { TvcError: Refused } = await import("../protocol/error.js");
+  const { SprEmbeddedWalletError: Refused } = await import("../protocol/error.js");
   return {
     ...actual,
     releaseFor: (network: string) => {
@@ -66,7 +66,7 @@ function wallet() {
   return { address, identity, bootstrap, descriptor };
 }
 
-const prover = { url: "https://prover.invalid/v1/spr", policy: new TvcProverPolicy("https://prover.invalid/policy") };
+const prover = { url: "https://prover.invalid/v1/spr", policy: new SprEmbeddedWalletProverPolicy("https://prover.invalid/policy") };
 
 /** A session whose verification always holds until it is reset. */
 function verifiedSession() {
@@ -77,7 +77,7 @@ function verifiedSession() {
     reset: vi.fn(() => {
       current = { verified: (current as unknown as { verified: number }).verified + 1 } as unknown as ConnectedTvcRuntime;
     }),
-  } satisfies TvcSession;
+  } satisfies SprEmbeddedWalletSession;
   return session;
 }
 
@@ -153,7 +153,7 @@ describe("open", () => {
     await expect(client.open(undefined, { approve: async () => {} })).rejects.toMatchObject({
       code: "BootstrapNotRun",
     });
-    session.context.mockRejectedValueOnce(new TvcError("BootProofUnverified"));
+    session.context.mockRejectedValueOnce(new SprEmbeddedWalletError("BootProofUnverified"));
     const refused = vi.fn();
     await expect(client.open(undefined, { approve: refused })).rejects.toMatchObject({
       code: "BootProofUnverified",
@@ -167,10 +167,10 @@ describe("open", () => {
     const [viewingPublicKey] = keys.viewingPublicKeys();
     const request = [{ viewingPublicKey: viewingPublicKey!, firstNullifier: new Uint8Array(32) as never }];
     for (const [error, forgets] of [
-      [new TvcHttpError("OperationRejected", 400, null), true],
-      [new TvcHttpError("OperationUnavailable", 424, null), true],
-      [new TvcHttpError("OperationRejected", 429, "1"), false],
-      [new TvcError("ReleaseBindingMismatch"), false],
+      [new SprEmbeddedWalletHttpError("OperationRejected", 400, null), true],
+      [new SprEmbeddedWalletHttpError("OperationUnavailable", 424, null), true],
+      [new SprEmbeddedWalletHttpError("OperationRejected", 429, "1"), false],
+      [new SprEmbeddedWalletError("ReleaseBindingMismatch"), false],
     ] as const) {
       session.forget.mockClear();
       execute.mockRejectedValueOnce(error);
@@ -184,7 +184,7 @@ describe("open", () => {
 describe("a descriptor the backend refuses as expired", () => {
   beforeAll(() => initializePoseidon());
 
-  const expired = () => new TvcHttpError("DescriptorExpired", 403, null);
+  const expired = () => new SprEmbeddedWalletHttpError("DescriptorExpired", 403, null);
 
   /** A key that enrolls a new descriptor each time `expire` drops the current one. */
   function renewingKey(address: string) {
@@ -195,12 +195,12 @@ describe("a descriptor the backend refuses as expired", () => {
     const expire = vi.fn((descriptor: WalletDescriptor) => {
       if (descriptor === descriptors[current]) current += 1;
     });
-    const key: TvcClientKey = {
+    const key: SprEmbeddedWalletClientKey = {
       id: "a",
       operations: vi.fn(async () => ({ descriptor: descriptors[current]!, signer })),
       expire,
     };
-    return { keys: { current: async () => key } satisfies TvcClientKeys, descriptors, expire };
+    return { keys: { current: async () => key } satisfies SprEmbeddedWalletClientKeys, descriptors, expire };
   }
 
   it("enrolls the key again once and repeats the operation, without verifying again", async () => {
@@ -248,7 +248,7 @@ describe("a client key that changes", () => {
     const enrolled: string[] = [];
     const descriptorOf = (id: string) =>
       ({ address, network: "devnet", allowed_clients: [{ client_public_key: id }] }) as unknown as WalletDescriptor;
-    const key = (id: string): TvcClientKey => ({
+    const key = (id: string): SprEmbeddedWalletClientKey => ({
       id,
       operations: vi.fn(async () => {
         enrolled.push(id);
@@ -256,8 +256,8 @@ describe("a client key that changes", () => {
       }),
     });
     const available = { a: key("a"), b: key("b") };
-    let current: TvcClientKey = available.a;
-    const keys: TvcClientKeys = { current: vi.fn(async () => current) };
+    let current: SprEmbeddedWalletClientKey = available.a;
+    const keys: SprEmbeddedWalletClientKeys = { current: vi.fn(async () => current) };
     return { keys, enrolled, use: (id: "a" | "b") => { current = available[id]; } };
   }
 
@@ -349,9 +349,9 @@ function releaseSignedBy(signing: Uint8Array): ReleaseTrust {
   };
 }
 
-describe("createTvcClient", () => {
+describe("createSprEmbeddedWallet", () => {
   const descriptor = { address: "11111111111111111111111111111111", network: "devnet" } as WalletDescriptor;
-  const turnkey: TvcTurnkey = {
+  const turnkey: SprEmbeddedWalletTurnkey = {
     getSession: () => Promise.resolve(undefined),
     signWithApiKey: () => Promise.reject(new Error("unused")),
     fetchWallets: () => Promise.reject(new Error("unused")),
@@ -361,13 +361,13 @@ describe("createTvcClient", () => {
   pins.set("devnet", releaseSignedBy(pinnedSigning));
 
   it("pins the package's release of its network and names its Turnkey service key", () => {
-    expect(() => createTvcClient({ network: "mainnet", endpoint, turnkey })).toThrowError(
+    expect(() => createSprEmbeddedWallet({ network: "mainnet", endpoint, turnkey })).toThrowError(
       /ReleaseNotPinned/,
     );
     expect(() =>
-      createTvcClient({ network: "testnet" as "devnet", endpoint, turnkey }),
+      createSprEmbeddedWallet({ network: "testnet" as "devnet", endpoint, turnkey }),
     ).toThrowError(/UnknownNetwork/);
-    const client = createTvcClient({ network: "devnet", endpoint, turnkey });
+    const client = createSprEmbeddedWallet({ network: "devnet", endpoint, turnkey });
     expect(client.network).toBe("devnet");
     expect(client.servicePublicKey).toBe(encodeLowerHex(p256.getPublicKey(pinnedSigning, true)));
 
@@ -401,8 +401,8 @@ describe("createTvcClient", () => {
       backend: { kind: "enclave", endpoint: new URL("https://enclave.example") },
       descriptor,
       signer,
-    } as TvcClientConfig;
-    const client = createTvcClient(config);
+    } as SprEmbeddedWalletConfig;
+    const client = createSprEmbeddedWallet(config);
     expect(client.servicePublicKey).toBe(encodeLowerHex(p256.getPublicKey(pinnedSigning, true)));
     await expect(client.open()).rejects.toMatchObject({ code: "DiscoveryUntrusted", status: 503 });
     expect(fetch).toHaveBeenCalledOnce();
@@ -411,13 +411,13 @@ describe("createTvcClient", () => {
 
   it("says so when no Turnkey session is active, before it verifies", async () => {
     const fetch = vi.fn();
-    const client = createTvcClient({ network: "devnet", endpoint, turnkey, transport: { fetch } });
+    const client = createSprEmbeddedWallet({ network: "devnet", endpoint, turnkey, transport: { fetch } });
     await expect(client.open()).rejects.toMatchObject({ code: "TurnkeySessionRequired" });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("proves beside the gateway under the network's policy unless told otherwise", () => {
-    const forNetwork = vi.spyOn(TvcProverPolicy, "forNetwork");
+    const forNetwork = vi.spyOn(SprEmbeddedWalletProverPolicy, "forNetwork");
     try {
       const transport = { fetch: vi.fn() };
       const beside = proverFor("devnet", endpoint, undefined, transport);
@@ -429,7 +429,7 @@ describe("createTvcClient", () => {
       expect(named.url).toBe("https://prover.example/v1/spr");
       expect(forNetwork).toHaveBeenLastCalledWith("mainnet", undefined);
 
-      const policy = new TvcProverPolicy("https://policy.example/devnet.json");
+      const policy = new SprEmbeddedWalletProverPolicy("https://policy.example/devnet.json");
       expect(proverFor("devnet", endpoint, { url: "https://prover.example", policy }, undefined).policy).toBe(
         policy,
       );

@@ -1,7 +1,7 @@
 import devnet from "../releases/devnet.json";
 import mainnet from "../releases/mainnet.json";
 import type { QosIdentityPcrs } from "../verify/index.js";
-import { TvcError } from "./error.js";
+import { SprEmbeddedWalletError } from "./error.js";
 import type { Network, PinnedReleaseAuthorities, SignedReleasePolicy } from "./types.js";
 
 /** The trust a client pins for one enclave release. */
@@ -34,7 +34,7 @@ export const RELEASES: Readonly<Partial<Record<Network, ReleaseTrust>>> = Object
 export function releaseFor(network: Network): ReleaseTrust {
   const release = Object.hasOwn(RELEASES, network) ? RELEASES[network] : undefined;
   if (release === undefined) {
-    throw new TvcError("ReleaseNotPinned", `this package pins no ${network} release`);
+    throw new SprEmbeddedWalletError("ReleaseNotPinned", `this package pins no ${network} release`);
   }
   return release;
 }

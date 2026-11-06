@@ -4,7 +4,7 @@ A Zolana shielded wallet whose privacy keys live in a Turnkey Verifiable
 Compute enclave. The enclave holds the nullifier and viewing keys and answers
 the Zolana SDK's `WalletKeys` interface with them: it opens ciphertexts, derives
 nullifiers, mints per-transaction keys, and completes proof witnesses. The
-client runs every wallet flow with the Zolana TypeScript SDK, `TvcKeys` in
+client runs every wallet flow with the Zolana TypeScript SDK, `SprEmbeddedWalletKeys` in
 place of `LocalKeys`: sync, selection, transfers, withdrawals, splits, merges,
 rings, deposits, registration, signing, and submission.
 
@@ -21,7 +21,7 @@ Helius API key.
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
 | [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet`: one-request sessions with Boot Proofs, enrollment, and wallet grants. |
-| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the Turnkey session key as the client key, the five operations, `TvcKeys` for the Zolana SDK. |
+| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the Turnkey session key as the client key, the five operations, `SprEmbeddedWalletKeys` for the Zolana SDK. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
 | [`examples/typescript-client`](examples/typescript-client) | The client on a Turnkey API key, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: per-network releases, service keys, the localnet for `just headless-e2e`. |
@@ -57,7 +57,7 @@ The enclave serves five operations at `POST /v1/operations`:
 | `Prove` | The witness sealed to an attested prover. The SDK assembles it with the nullifier-secret slots open; the enclave fills them, checks the prover's attestation against the network's signed prover policy, and encrypts the witness to that prover's key. The client posts it and opens the proof. |
 
 They are exactly the Zolana SDK's `ShieldedKeys` and `ProofAuthority` methods,
-so `TvcKeys` implements the SDK's `WalletKeys` and every SDK flow runs
+so `SprEmbeddedWalletKeys` implements the SDK's `WalletKeys` and every SDK flow runs
 unchanged over the enclave. Everything else is the client's: registration and
 deposits with the ordinary Turnkey wallet, input selection, output encryption,
 and signing and submitting every Solana transaction with the application's

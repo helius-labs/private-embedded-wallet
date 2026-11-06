@@ -1,6 +1,6 @@
 import { isAddress } from "@solana/kit";
 
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import { decodeLowerHex } from "../protocol/hex.js";
 import type { ShieldedIdentity, StoredWallet } from "./client.js";
 
@@ -57,7 +57,7 @@ export function parseStoredWallet(value: unknown): StoredWallet {
         hasOnlyKeys(value.sealedSeed, ["sealedSeed"]) &&
         isLowerHex(value.sealedSeed.sealedSeed)))
   ) {
-    throw new TvcError("StorageCorrupted");
+    throw new SprEmbeddedWalletError("StorageCorrupted");
   }
   return value as StoredWallet;
 }

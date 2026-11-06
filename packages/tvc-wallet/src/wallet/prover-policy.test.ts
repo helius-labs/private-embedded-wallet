@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { TvcTransport } from "../client/transport.js";
-import { PROVER_POLICY_URLS, TvcProverPolicy, attestationReuseMs } from "./prover-policy.js";
+import type { SprEmbeddedWalletTransport } from "../client/transport.js";
+import { PROVER_POLICY_URLS, SprEmbeddedWalletProverPolicy, attestationReuseMs } from "./prover-policy.js";
 import { POLICY_URL, policyFile } from "./prover-policy.testkit.js";
 
 const NOW_MS = 1_800_000_000_000;
@@ -10,7 +10,7 @@ const NOW_SECS = NOW_MS / 1_000;
 /** Answers each download with the next of `answers`, the last one repeating. */
 function served(...answers: (() => Response)[]) {
   const urls: URL[] = [];
-  const transport: TvcTransport = {
+  const transport: SprEmbeddedWalletTransport = {
     fetch: vi.fn(async (url: URL) => {
       urls.push(url);
       return (answers.length > 1 ? answers.shift() : answers[0])!();
@@ -21,17 +21,17 @@ function served(...answers: (() => Response)[]) {
 
 const file = (options: Parameters<typeof policyFile>[0]) => () => Response.json(policyFile(options));
 
-describe("TvcProverPolicy", () => {
+describe("SprEmbeddedWalletProverPolicy", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("downloads the file the SDK pins for each network", async () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
     const { transport, urls } = served(file({ expiresAt: NOW_SECS + 3_600 }));
     for (const network of ["devnet", "mainnet"] as const) {
-      await TvcProverPolicy.forNetwork(network, transport).current();
+      await SprEmbeddedWalletProverPolicy.forNetwork(network, transport).current();
     }
     expect(urls.map(String)).toEqual([PROVER_POLICY_URLS.devnet, PROVER_POLICY_URLS.mainnet]);
-    expect(() => TvcProverPolicy.forNetwork("testnet" as "devnet")).toThrowError(/UnknownNetwork/);
+    expect(() => SprEmbeddedWalletProverPolicy.forNetwork("testnet" as "devnet")).toThrowError(/UnknownNetwork/);
   });
 
   it("holds the file for its max age and downloads it again after", async () => {
@@ -40,7 +40,7 @@ describe("TvcProverPolicy", () => {
       file({ expiresAt: NOW_SECS + 3_600 }),
       file({ version: 2, expiresAt: NOW_SECS + 7_200 }),
     );
-    const policy = new TvcProverPolicy(POLICY_URL, transport);
+    const policy = new SprEmbeddedWalletProverPolicy(POLICY_URL, transport);
     const first = await policy.current();
     expect(first).toMatchObject({ version: 1, maxAgeSecs: 600, expiresAt: NOW_SECS + 3_600 });
     expect(first.file).toEqual(policyFile({ expiresAt: NOW_SECS + 3_600 }));
@@ -59,7 +59,7 @@ describe("TvcProverPolicy", () => {
       file({ expiresAt: NOW_SECS + 900 }),
       () => new Response("down", { status: 503 }),
     );
-    const policy = new TvcProverPolicy(POLICY_URL, transport);
+    const policy = new SprEmbeddedWalletProverPolicy(POLICY_URL, transport);
     const held = await policy.current();
     now.mockReturnValue(NOW_MS + 600_000);
     expect((await policy.current()).file).toBe(held.file);
@@ -73,7 +73,7 @@ describe("TvcProverPolicy", () => {
       file({ version: 2, expiresAt: NOW_SECS + 3_600 }),
       file({ version: 1, expiresAt: NOW_SECS + 7_200 }),
     );
-    const policy = new TvcProverPolicy(POLICY_URL, transport);
+    const policy = new SprEmbeddedWalletProverPolicy(POLICY_URL, transport);
     expect(await policy.current()).toMatchObject({ version: 2 });
     policy.invalidate();
     expect(await policy.current()).toMatchObject({ version: 1 });
@@ -83,7 +83,7 @@ describe("TvcProverPolicy", () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
     let release!: () => void;
     const signals: AbortSignal[] = [];
-    const transport: TvcTransport = {
+    const transport: SprEmbeddedWalletTransport = {
       fetch: vi.fn(async (_url: URL, init?: RequestInit) => {
         signals.push(init!.signal!);
         await new Promise<void>((done) => (release = done));
@@ -91,7 +91,7 @@ describe("TvcProverPolicy", () => {
         return Response.json(policyFile({ expiresAt: NOW_SECS + 3_600 }));
       }),
     };
-    const policy = new TvcProverPolicy(POLICY_URL, transport);
+    const policy = new SprEmbeddedWalletProverPolicy(POLICY_URL, transport);
     const first = new AbortController();
     const cancelled = policy.current(first.signal);
     const waiting = policy.current();
@@ -138,13 +138,13 @@ describe("TvcProverPolicy", () => {
       { release: good.release, freshness: { ...good.freshness, extra: 1 } },
     ]) {
       const { transport } = served(() => Response.json(body));
-      await expect(new TvcProverPolicy(POLICY_URL, transport).current(), JSON.stringify(body)).rejects.toMatchObject({
+      await expect(new SprEmbeddedWalletProverPolicy(POLICY_URL, transport).current(), JSON.stringify(body)).rejects.toMatchObject({
         code: "ProverPolicyInvalid",
       });
     }
     for (const expired of [file({ expiresAt: NOW_SECS }), file({ expiresAt: NOW_SECS + 3_600, freshUntil: NOW_SECS })]) {
       const { transport } = served(expired);
-      await expect(new TvcProverPolicy(POLICY_URL, transport).current()).rejects.toMatchObject({
+      await expect(new SprEmbeddedWalletProverPolicy(POLICY_URL, transport).current()).rejects.toMatchObject({
         code: "ProverPolicyExpired",
       });
     }
@@ -153,7 +153,7 @@ describe("TvcProverPolicy", () => {
   it("stays in force until the earlier of the release and freshness expiries", async () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
     const { transport } = served(file({ expiresAt: NOW_SECS + 7_200, freshUntil: NOW_SECS + 900 }));
-    expect(await new TvcProverPolicy(POLICY_URL, transport).current()).toMatchObject({
+    expect(await new SprEmbeddedWalletProverPolicy(POLICY_URL, transport).current()).toMatchObject({
       version: 1,
       issuedAt: NOW_SECS + 900 - 3_600,
       expiresAt: NOW_SECS + 900,

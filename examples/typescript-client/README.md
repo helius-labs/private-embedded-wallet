@@ -27,7 +27,7 @@ operations.
 
 ```ts
 const turnkey = apiKeyTurnkey(owner, organizationId, apiKey); // the owner's API key as the Turnkey session
-const tvc = createTvcClient({
+const tvc = createSprEmbeddedWallet({
   network, // SPR_NETWORK: the pinned release, the prover policy, the enrollment chain
   endpoint, // the network's /v1/private-wallet on its Helius host
   turnkey, // signs every request, and is enrolled with the gateway on first use
@@ -38,7 +38,7 @@ const keys = await tvc.open(stored, { approve });
 if (!stored) await writeFile(walletPath, JSON.stringify(keys.stored));
 ```
 
-1. `createTvcClient` names the enclave of the network `SPR_NETWORK` names,
+1. `createSprEmbeddedWallet` names the enclave of the network `SPR_NETWORK` names,
    behind that network's Helius-hosted tvc-gateway. The client verifies it
    against the release the package pins for the network on its first call.
    A browser passes its logged-in Turnkey client as `turnkey`; here
@@ -169,7 +169,7 @@ two-note merge all finalized on devnet.
 The examples run against the local testkit and a fresh Zolana localnet, with
 a disposable keypair as the wallet in place of Turnkey and pinned process keys
 in place of Nitro attestation. The Rust testkit runs the real handlers of the
-five operations; `createLocalTvcClient` from
+five operations; `createLocalSprEmbeddedWallet` from
 `@heliuslabs/spr-embedded-wallet/testing` still verifies envelopes, signatures
 and bindings, and accepts loopback HTTP only. The testkit needs no bootstrap
 approval. It needs a

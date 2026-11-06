@@ -3,13 +3,13 @@ import type { MergeInputs, ProverInputs } from "@heliuslabs/spr/client";
 import { gcm } from "@noble/ciphers/aes";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { TvcTransport } from "../client/transport.js";
-import { TvcError, TvcOperationError } from "../protocol/error.js";
+import type { SprEmbeddedWalletTransport } from "../client/transport.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type { ProverSealing, SealedProverRequest, SealedSeed } from "../protocol/types.js";
 import type { ShieldedIdentity } from "./client.js";
-import { EnclaveKeys, type TvcEnclave } from "./keys.js";
-import { TvcProverPolicy } from "./prover-policy.js";
+import { EnclaveKeys, type SprEmbeddedWalletEnclave } from "./keys.js";
+import { SprEmbeddedWalletProverPolicy } from "./prover-policy.js";
 import { POLICY_URL, policyFile } from "./prover-policy.testkit.js";
 import type { OperationOptions } from "./operations.js";
 
@@ -61,7 +61,7 @@ function sealedAnswer(status: number, body: unknown): Uint8Array<ArrayBuffer> {
 function proverTransport(answers: readonly Response[] = []) {
   const queue = [...answers];
   const seen: { method: string; url: URL; headers: Headers }[] = [];
-  const transport: TvcTransport = {
+  const transport: SprEmbeddedWalletTransport = {
     fetch: vi.fn(async (url: URL, init?: RequestInit) => {
       seen.push({ method: init?.method ?? "GET", url, headers: new Headers(init?.headers) });
       if (url.href === POLICY_URL) return Response.json(POLICY);
@@ -99,7 +99,7 @@ function fixture(answers: readonly Response[] = []) {
     prove: vi.fn(async (_k: unknown, _r: unknown, prover: ProverSealing) =>
       sealedFor(prover.target),
     ),
-  } satisfies TvcEnclave;
+  } satisfies SprEmbeddedWalletEnclave;
   const { transport, seen } = proverTransport(answers);
   return {
     address,
@@ -110,12 +110,12 @@ function fixture(answers: readonly Response[] = []) {
       enclave,
       sealedSeed,
       identity,
-      prover: { url: PROVER_URL, policy: new TvcProverPolicy(POLICY_URL, transport), transport },
+      prover: { url: PROVER_URL, policy: new SprEmbeddedWalletProverPolicy(POLICY_URL, transport), transport },
     }),
   };
 }
 
-describe("TvcKeys", () => {
+describe("SprEmbeddedWalletKeys", () => {
   beforeAll(() => initializePoseidon());
 
   it("is the bootstrapped identity, holds its one viewing key, and stores what reopens it", () => {
@@ -133,7 +133,7 @@ describe("TvcKeys", () => {
           enclave,
           sealedSeed,
           identity: { ...identity, shieldedOwnerHash: "00".repeat(32) },
-          prover: { url: PROVER_URL, policy: new TvcProverPolicy(POLICY_URL) },
+          prover: { url: PROVER_URL, policy: new SprEmbeddedWalletProverPolicy(POLICY_URL) },
         }),
     ).toThrowError(/ShieldedIdentityChanged/);
   });
@@ -223,7 +223,7 @@ describe("TvcKeys", () => {
   it("splits on the byte ceiling, preserves order, and propagates other failures", async () => {
     const { keys, enclave } = fixture();
     enclave.derive.mockImplementation(async (_k, items) => {
-      if (items.length > 2) throw new TvcError("RequestTooLarge");
+      if (items.length > 2) throw new SprEmbeddedWalletError("RequestTooLarge");
       return items.map((item) => (item as { first_nullifier: string }).first_nullifier);
     });
     const requests = Array.from({ length: 7 }, (_, index) => ({
@@ -235,7 +235,7 @@ describe("TvcKeys", () => {
 
     for (const code of ["RequestTooLarge", "OperationRejected"] as const) {
       enclave.derive.mockClear();
-      enclave.derive.mockRejectedValue(new TvcError(code));
+      enclave.derive.mockRejectedValue(new SprEmbeddedWalletError(code));
       await expect(keys.derive(requests.slice(0, 1))).rejects.toMatchObject({ code });
       expect(enclave.derive).toHaveBeenCalledTimes(1);
     }
@@ -349,7 +349,7 @@ describe("TvcKeys", () => {
     });
     const inputs = { circuit: "merge" } as unknown as MergeInputs;
     await keys.proveMerge(inputs);
-    enclave.prove.mockRejectedValueOnce(new TvcOperationError("Prove", "Prover"));
+    enclave.prove.mockRejectedValueOnce(new SprEmbeddedWalletOperationError("Prove", "Prover"));
     await keys.proveMerge(inputs);
     expect(seen.filter(({ url }) => url.pathname.endsWith("/attestation"))).toHaveLength(2);
     expect(seen.filter(({ url }) => url.href === POLICY_URL)).toHaveLength(2);
@@ -357,13 +357,13 @@ describe("TvcKeys", () => {
 
     // Only the structured stage counts, never an error's text.
     const plain = fixture();
-    plain.enclave.prove.mockRejectedValueOnce(new TvcError("OperationFailed", "Prover"));
+    plain.enclave.prove.mockRejectedValueOnce(new SprEmbeddedWalletError("OperationFailed", "Prover"));
     await expect(plain.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed" });
     expect(plain.enclave.prove).toHaveBeenCalledOnce();
 
     // A fresh policy and attestation the enclave refuses are the caller's error.
     const refused = fixture();
-    refused.enclave.prove.mockRejectedValue(new TvcOperationError("Prove", "Prover"));
+    refused.enclave.prove.mockRejectedValue(new SprEmbeddedWalletOperationError("Prove", "Prover"));
     await expect(refused.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed", stage: "Prover" });
     expect(refused.enclave.prove).toHaveBeenCalledTimes(2);
   });
@@ -406,7 +406,7 @@ describe("TvcKeys", () => {
         : new Response("upstream unavailable", { status, headers: { "Retry-After": "3" } });
       const { keys, enclave, seen } = fixture([response]);
       await expect(keys.proveMerge(inputs)).rejects.toMatchObject({
-        name: "TvcHttpError", code: "ProverRefused", status, retryAfter: "3",
+        name: "SprEmbeddedWalletHttpError", code: "ProverRefused", status, retryAfter: "3",
       });
       expect(enclave.prove).toHaveBeenCalledTimes(1);
       expect(seen.filter(({ url }) => url.pathname.includes("/prove/"))).toHaveLength(1);

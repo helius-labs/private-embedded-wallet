@@ -1,16 +1,16 @@
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 
 /** Applies to one verification or enclave operation, including its proof lookup. */
-export interface TvcRequestOptions {
+export interface SprEmbeddedWalletRequestOptions {
   readonly signal?: AbortSignal;
   /** Total time allowed in milliseconds. Defaults to the client setting, or two minutes. */
   readonly timeoutMs?: number;
 }
 
-export function requestScope(options: TvcRequestOptions = {}, defaultTimeoutMs = 120_000) {
+export function requestScope(options: SprEmbeddedWalletRequestOptions = {}, defaultTimeoutMs = 120_000) {
   const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
-    throw new TvcError("InvalidRequestTimeout");
+    throw new SprEmbeddedWalletError("InvalidRequestTimeout");
   }
   const controller = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;

@@ -6,7 +6,7 @@ import {
 import { canonicalizeJsonValue } from "../protocol/jcs.js";
 import { releasePolicyDigest } from "../protocol/digest.js";
 import { decodeLowerHex } from "../protocol/hex.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import type {
   Network,
   PinnedReleaseAuthorities,
@@ -31,39 +31,39 @@ export function verifySignedReleasePolicy(
   nowMs: bigint,
 ): void {
   if (signed.policy.version !== API_VERSION) {
-    throw new TvcError("UnsupportedVersion");
+    throw new SprEmbeddedWalletError("UnsupportedVersion");
   }
   if (signed.policy.network !== network) {
-    throw new TvcError("NetworkMismatch");
+    throw new SprEmbeddedWalletError("NetworkMismatch");
   }
   if (authorities.threshold < 1 || authorities.keys.length === 0) {
-    throw new TvcError("ReleasePolicyInvalid");
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid");
   }
   if (signed.authoritySetId !== authorities.authoritySetId) {
-    throw new TvcError("ReleasePolicyInvalid");
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid");
   }
   if (signed.policy.turnkeyTrustRootId !== EXPECTED_TURNKEY_TRUST_ROOT_ID) {
-    throw new TvcError("ReleasePolicyInvalid");
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid");
   }
   if (
     BigInt(signed.policy.revocationEpoch) <
     BigInt(authorities.minimumRevocationEpoch)
   ) {
-    throw new TvcError("ReleasePolicyInvalid");
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid");
   }
   const validFrom = BigInt(signed.policy.validFromMs);
   const expires = BigInt(signed.policy.expiresAtMs);
   if (nowMs < validFrom || nowMs > expires) {
-    throw new TvcError("ExpiredRequest");
+    throw new SprEmbeddedWalletError("ExpiredRequest");
   }
   if (signed.signatures.length === 0) {
-    throw new TvcError("ReleasePolicyInvalid");
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid");
   }
 
   const byId = new Map<string, Uint8Array>();
   for (const key of authorities.keys) {
     if (byId.has(key.keyId)) {
-      throw new TvcError("ReleasePolicyInvalid");
+      throw new SprEmbeddedWalletError("ReleasePolicyInvalid");
     }
     byId.set(key.keyId, decodeLowerHex(key.publicKey));
   }
@@ -85,7 +85,7 @@ export function verifySignedReleasePolicy(
     accepted += 1;
   }
   if (accepted < authorities.threshold) {
-    throw new TvcError("ReleasePolicyInvalid");
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid");
   }
 }
 
@@ -99,34 +99,34 @@ export function bindDiscoveryToPolicy(
 ): void {
   const policy = signed.policy;
   if (info.network !== policy.network) {
-    throw new TvcError("NetworkMismatch");
+    throw new SprEmbeddedWalletError("NetworkMismatch");
   }
   if (info.version !== API_VERSION) {
-    throw new TvcError("UnsupportedVersion");
+    throw new SprEmbeddedWalletError("UnsupportedVersion");
   }
   if (info.proof_type !== TVC_APP_PROOF_TYPE) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (info.release_id !== policy.releaseId) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (info.security_domain_id !== policy.securityDomainId) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (info.quorum_key_id !== policy.quorumKeyId) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (info.quorum_key_epoch !== policy.quorumKeyEpoch) {
-    throw new TvcError("QuorumKeyEpochMismatch");
+    throw new SprEmbeddedWalletError("QuorumKeyEpochMismatch");
   }
   if (info.quorum_public_key !== policy.quorumPublicKey) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (!policy.acceptedManifestDigests.includes(info.manifest_digest)) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (!policy.acceptedExecutableDigests.includes(info.executable_digest)) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (
     info.supported_operations.length !== policy.allowedOperations.length ||
@@ -134,7 +134,7 @@ export function bindDiscoveryToPolicy(
       (operation, index) => operation !== policy.allowedOperations[index],
     )
   ) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (
     BigInt(info.max_encrypted_request_bytes) !==
@@ -142,6 +142,6 @@ export function bindDiscoveryToPolicy(
     BigInt(info.max_encrypted_response_bytes) !==
       BigInt(policy.maxEncryptedResponseBytes)
   ) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
 }

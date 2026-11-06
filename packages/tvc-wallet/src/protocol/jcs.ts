@@ -1,4 +1,4 @@
-import { TvcError } from "./error.js";
+import { SprEmbeddedWalletError } from "./error.js";
 
 function appendJsonString(out: string[], value: string): void {
   out.push('"');
@@ -44,7 +44,7 @@ function appendJcs(out: string[], value: unknown): void {
   }
   if (typeof value === "number") {
     if (!Number.isInteger(value) || !Number.isFinite(value)) {
-      throw new TvcError("InvalidCanonicalJson");
+      throw new SprEmbeddedWalletError("InvalidCanonicalJson");
     }
     out.push(String(value));
     return;
@@ -74,7 +74,7 @@ function appendJcs(out: string[], value: unknown): void {
     out.push("}");
     return;
   }
-  throw new TvcError("InvalidCanonicalJson");
+  throw new SprEmbeddedWalletError("InvalidCanonicalJson");
 }
 
 export function canonicalizeJsonValue(value: unknown): string {

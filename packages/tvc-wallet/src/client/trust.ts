@@ -3,7 +3,7 @@ import type {
   TurnkeyBootProofWire,
 } from "../verify/internal/turnkey-proof-seam.js";
 
-export type TvcTrustVerifier = {
+export type SprEmbeddedWalletTrustVerifier = {
   /** `bootProof` is the replica's Boot Proof when the gateway returned it with the answer. */
   verifyOperationAppProof(
     proof: TurnkeyAppProofWire,

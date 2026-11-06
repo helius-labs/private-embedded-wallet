@@ -11,7 +11,7 @@ import {
 } from "./constants.js";
 import { canonicalizeJsonValue } from "./jcs.js";
 import { encodeLowerHex } from "./hex.js";
-import { TvcError } from "./error.js";
+import { SprEmbeddedWalletError } from "./error.js";
 
 const te = new TextEncoder();
 
@@ -28,11 +28,11 @@ export function requestDigest(request: object): Uint8Array {
   const cloned = structuredClone(request) as Record<string, unknown>;
   const authorization = cloned.authorization as Record<string, unknown> | undefined;
   if (!authorization || typeof authorization !== "object") {
-    throw new TvcError("InvalidCanonicalJson");
+    throw new SprEmbeddedWalletError("InvalidCanonicalJson");
   }
   delete authorization.signature;
   if (!("client_key_id" in authorization)) {
-    throw new TvcError("InvalidCanonicalJson");
+    throw new SprEmbeddedWalletError("InvalidCanonicalJson");
   }
   return domainSeparatedHash(REQUEST_DIGEST_DOMAIN, te.encode(canonicalizeJsonValue(cloned)));
 }
@@ -48,7 +48,7 @@ export function clientAuthDigest(requestDigestBytes: Uint8Array): Uint8Array {
  * SHA-256 of its UTF-8 bytes, as Turnkey's `signWithApiKey` signs.
  */
 export function clientAuthMessage(requestDigestBytes: Uint8Array): string {
-  if (requestDigestBytes.length !== SHA256_LEN) throw new TvcError("InvalidDigest");
+  if (requestDigestBytes.length !== SHA256_LEN) throw new SprEmbeddedWalletError("InvalidDigest");
   return `${CLIENT_AUTH_DOMAIN}:${encodeLowerHex(requestDigestBytes)}`;
 }
 

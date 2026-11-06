@@ -2,8 +2,8 @@
  * Clients for tests and local deployments, and `verifyLiveReplica` for the
  * release tooling.
  *
- * `createTestTvcClient` verifies an enclave exactly as `createTvcClient` does,
- * against a release and backend the caller names. `createLocalTvcClient` is
+ * `createTestSprEmbeddedWallet` verifies an enclave exactly as `createSprEmbeddedWallet` does,
+ * against a release and backend the caller names. `createLocalSprEmbeddedWallet` is
  * the explicitly unsafe local testkit: it preserves the encrypted operation
  * protocol and all response binding checks, but replaces Nitro and Turnkey
  * evidence with pinned local process keys. It accepts loopback HTTP only and
@@ -13,11 +13,11 @@ import { p256 } from "@noble/curves/p256";
 import { sha256 } from "@noble/hashes/sha256";
 import localTestkit from "./local-testkit.json";
 
-import { createLocalTvcSession } from "./client/local-session.js";
-import type { TvcBackend } from "./client/backend.js";
-import type { TvcRequestSigner } from "./client/operation-executor.js";
-import type { TvcTransport } from "./client/transport.js";
-import { createTvcRequestSigner } from "./platform/signer.js";
+import { createLocalSprEmbeddedWalletSession } from "./client/local-session.js";
+import type { SprEmbeddedWalletBackend } from "./client/backend.js";
+import type { SprRequestSigner } from "./client/operation-executor.js";
+import type { SprEmbeddedWalletTransport } from "./client/transport.js";
+import { createSprRequestSigner } from "./platform/signer.js";
 import {
   clientKeyIdFor,
   descriptorDigest,
@@ -34,28 +34,28 @@ import {
   createClient,
   proverFor,
   turnkeyServicePublicKey,
-  type TestTvcClientConfig,
-  type TvcClient,
+  type TestSprEmbeddedWalletConfig,
+  type SprEmbeddedWallet,
 } from "./wallet/client.js";
-import type { TvcClientKeys } from "./wallet/client-keys.js";
-import type { TvcProverConfig } from "./wallet/prover.js";
-import { TvcProverPolicy } from "./wallet/prover-policy.js";
-import type { TvcTurnkey, TvcTurnkeyWalletAccount } from "./wallet/turnkey.js";
+import type { SprEmbeddedWalletClientKeys } from "./wallet/client-keys.js";
+import type { SprEmbeddedWalletProverConfig } from "./wallet/prover.js";
+import { SprEmbeddedWalletProverPolicy } from "./wallet/prover-policy.js";
+import type { SprEmbeddedWalletTurnkey, SprEmbeddedWalletTurnkeyWalletAccount } from "./wallet/turnkey.js";
 
 export type {
   BootProofResolver,
   EnclaveBackend,
   GatewayBackend,
   ResolveBootProofInput,
-  TvcBackend,
+  SprEmbeddedWalletBackend,
 } from "./client/backend.js";
-export type { SignTvcRequestInput, TvcRequestSigner } from "./client/operation-executor.js";
+export type { SignTvcRequestInput, SprRequestSigner } from "./client/operation-executor.js";
 export { verifyLiveReplica, type VerifyLiveReplicaInput } from "./client/connection.js";
-export { createTvcRequestSigner, type TvcRequestKey } from "./platform/signer.js";
+export { createSprRequestSigner, type SprRequestKey } from "./platform/signer.js";
 export type { ReleaseTrust } from "./protocol/releases.js";
 export type { QosIdentityPcrs } from "./verify/index.js";
-export type { TestTvcClientConfig, TestTvcClientKey } from "./wallet/client.js";
-export type { TvcProverConfig } from "./wallet/prover.js";
+export type { TestSprEmbeddedWalletConfig, TestSprEmbeddedWalletKey } from "./wallet/client.js";
+export type { SprEmbeddedWalletProverConfig } from "./wallet/prover.js";
 
 const te = new TextEncoder();
 if (localTestkit.version !== 1) throw new Error("UnsupportedLocalTestkitFixture");
@@ -68,7 +68,7 @@ const LOCAL_DESCRIPTOR_LIFETIME_MS = 86_400_000n;
 const digestLabel = (label: string) => encodeLowerHex(sha256(te.encode(label)));
 const LOCAL_OPERATIONS = localTestkit.operations as readonly OperationKind[];
 
-export type LocalTvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = {
+export type LocalSprEmbeddedWalletConfig<Account extends SprEmbeddedWalletTurnkeyWalletAccount = SprEmbeddedWalletTurnkeyWalletAccount> = {
   /** The network the testkit was built for (`SPR_NETWORK`, devnet by default). */
   readonly network: Network;
   /**
@@ -76,15 +76,15 @@ export type LocalTvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTu
    * Without a `walletGrant`, the testkit signs one for each request it sends
    * the enclave.
    */
-  readonly backend: TvcBackend;
+  readonly backend: SprEmbeddedWalletBackend;
   /**
    * The testkit's stand-in prover (`localProverConfig`), or with
    * `--live-prover` a TEE prover of the network under its policy. Defaults to
    * `/v1/spr` beside the backend's endpoint.
    */
-  readonly prover?: TvcProverConfig;
+  readonly prover?: SprEmbeddedWalletProverConfig;
   readonly nowMs?: () => bigint;
-  readonly transport?: TvcTransport;
+  readonly transport?: SprEmbeddedWalletTransport;
 } & (
   | {
       /** The wallet the testkit holds; the testkit client key signs. */
@@ -99,9 +99,9 @@ export type LocalTvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTu
   | {
       /**
        * A Turnkey session in place of the testkit client key, enrolled through
-       * the tvc-gateway `backend` names, as `createTvcClient` does.
+       * the tvc-gateway `backend` names, as `createSprEmbeddedWallet` does.
        */
-      readonly turnkey: TvcTurnkey<Account>;
+      readonly turnkey: SprEmbeddedWalletTurnkey<Account>;
       readonly solanaAddress?: string;
     }
 );
@@ -137,22 +137,22 @@ function localDescriptor(network: Network, solanaAddress: string, nowMs: bigint)
 
 /**
  * A client of `config.backend` verified against `config.release`, or the
- * package's pin for `config.network`, with every check `createTvcClient`
+ * package's pin for `config.network`, with every check `createSprEmbeddedWallet`
  * makes: for a test deployment, or to reach an enclave without a gateway.
  */
-export function createTestTvcClient<Account extends TvcTurnkeyWalletAccount>(
-  config: TestTvcClientConfig<Account>,
-): TvcClient {
+export function createTestSprEmbeddedWallet<Account extends SprEmbeddedWalletTurnkeyWalletAccount>(
+  config: TestSprEmbeddedWalletConfig<Account>,
+): SprEmbeddedWallet {
   return createClient(config);
 }
 
 /** The unattested testkit's client, for the network the testkit was built for. */
-export function createLocalTvcClient<Account extends TvcTurnkeyWalletAccount>(
-  config: LocalTvcClientConfig<Account>,
-): TvcClient {
+export function createLocalSprEmbeddedWallet<Account extends SprEmbeddedWalletTurnkeyWalletAccount>(
+  config: LocalSprEmbeddedWalletConfig<Account>,
+): SprEmbeddedWallet {
   const network = requireNetwork(config.network);
-  let fixed: { readonly descriptor: WalletDescriptor; readonly signer: TvcRequestSigner } | undefined;
-  let keys: TvcClientKeys;
+  let fixed: { readonly descriptor: WalletDescriptor; readonly signer: SprRequestSigner } | undefined;
+  let keys: SprEmbeddedWalletClientKeys;
   if ("turnkey" in config) {
     keys = clientKeysOf(config, { network, backend: config.backend, transport: config.transport, nowMs: config.nowMs });
   } else {
@@ -163,7 +163,7 @@ export function createLocalTvcClient<Account extends TvcTurnkeyWalletAccount>(
     };
     keys = clientKeysOf(fixed, { network, backend: config.backend });
   }
-  const backend: TvcBackend =
+  const backend: SprEmbeddedWalletBackend =
     config.backend.kind === "enclave" && !config.backend.walletGrant && fixed
       ? {
           ...config.backend,
@@ -177,7 +177,7 @@ export function createLocalTvcClient<Account extends TvcTurnkeyWalletAccount>(
         }
       : config.backend;
   return clientFromSession(
-    createLocalTvcSession({
+    createLocalSprEmbeddedWalletSession({
       network,
       backend,
       expectedReleaseId: localTestkit.releaseId,
@@ -203,7 +203,7 @@ export function createLocalTvcClient<Account extends TvcTurnkeyWalletAccount>(
 /** The testkit client key's signer. */
 function localSigner() {
   const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
-  return createTvcRequestSigner({
+  return createSprRequestSigner({
     clientKeyId: clientKeyIdFor(clientPublic),
     async sign(message: string) {
       return p256
@@ -218,11 +218,11 @@ function localSigner() {
  * --prover-tee-port`), with the policy file it publishes. The local enclave
  * trusts its fixture root and the testkit's policy signer; nothing else does.
  */
-export function localProverConfig(url: string, transport?: TvcTransport): TvcProverConfig {
+export function localProverConfig(url: string, transport?: SprEmbeddedWalletTransport): SprEmbeddedWalletProverConfig {
   const base = new URL(url);
   if (base.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(base.hostname)) {
     throw new Error("LocalProverRequiresLoopback");
   }
-  const policy = new TvcProverPolicy(new URL("/local/prover-policy", base), transport);
+  const policy = new SprEmbeddedWalletProverPolicy(new URL("/local/prover-policy", base), transport);
   return { url, policy, ...(transport ? { transport } : {}) };
 }

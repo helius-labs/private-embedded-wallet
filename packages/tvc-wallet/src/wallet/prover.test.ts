@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { TvcTransport } from "../client/transport.js";
+import type { SprEmbeddedWalletTransport } from "../client/transport.js";
 import { decodeLowerHex } from "../protocol/hex.js";
 import {
   decryptProverAnswer,
@@ -10,7 +10,7 @@ import {
   sealingFor,
   submitSealed,
 } from "./prover.js";
-import { TvcProverPolicy, type HeldProverPolicy } from "./prover-policy.js";
+import { SprEmbeddedWalletProverPolicy, type HeldProverPolicy } from "./prover-policy.js";
 import { POLICY_URL, policyFile } from "./prover-policy.testkit.js";
 
 const HELD: HeldProverPolicy = {
@@ -96,10 +96,10 @@ describe("proving key routes", () => {
 describe("attestation", () => {
   const request = merge("merge", 8);
   const config = (response: Response) => {
-    const transport: TvcTransport = { fetch: vi.fn(async () => response) };
+    const transport: SprEmbeddedWalletTransport = { fetch: vi.fn(async () => response) };
     return {
       url: "https://gateway.test/v1/spr/?api-key=k",
-      policy: new TvcProverPolicy(POLICY_URL, transport),
+      policy: new SprEmbeddedWalletProverPolicy(POLICY_URL, transport),
       transport,
     };
   };
@@ -118,7 +118,7 @@ describe("attestation", () => {
 
   it("seals the same route behind a proxy and posts to the proxy", async () => {
     const seen: URL[] = [];
-    const transport: TvcTransport = {
+    const transport: SprEmbeddedWalletTransport = {
       fetch: vi.fn(async (url: URL) => {
         seen.push(url);
         return Response.json({ code: "tee_decryption_failed" }, { status: 400 });
@@ -126,7 +126,7 @@ describe("attestation", () => {
     };
     const proxied = {
       url: "https://app.test/api/tvc/spr/prover?session=s",
-      policy: new TvcProverPolicy(POLICY_URL, transport),
+      policy: new SprEmbeddedWalletProverPolicy(POLICY_URL, transport),
       transport,
     };
     const attested = { nonce: "42".repeat(32), attestation: {}, fetchedAtMs: 0 };

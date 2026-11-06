@@ -5,7 +5,7 @@ import { getAddressDecoder } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SignTvcRequestInput } from "../client/operation-executor.js";
-import type { TvcTransport } from "../client/transport.js";
+import type { SprEmbeddedWalletTransport } from "../client/transport.js";
 import { clientAuthMessage, clientKeyIdFor, requestDigest } from "../protocol/digest.js";
 import { walletEnrollmentMessage } from "../protocol/enrollment.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
@@ -13,8 +13,8 @@ import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
 import {
   DESCRIPTOR_RENEWAL_MARGIN_MS,
   turnkeyClientKeys,
-  type TvcTurnkey,
-  type TvcTurnkeySession,
+  type SprEmbeddedWalletTurnkey,
+  type SprEmbeddedWalletTurnkeySession,
 } from "./turnkey.js";
 
 const ORGANIZATION_ID = "00000000-0000-4000-8000-00000000000a";
@@ -47,7 +47,7 @@ function fakeTurnkey() {
     session = { organizationId: ORGANIZATION_ID, publicKey };
     return publicKey;
   };
-  let session: TvcTurnkeySession | undefined;
+  let session: SprEmbeddedWalletTurnkeySession | undefined;
   const account = { address, addressFormat: "ADDRESS_FORMAT_SOLANA", source: "embedded" };
   const turnkey = {
     getSession: vi.fn(async () => session),
@@ -75,7 +75,7 @@ function fakeTurnkey() {
       const signature = ed25519.sign(te.encode(message), owner);
       return { r: encodeLowerHex(signature.slice(0, 32)), s: encodeLowerHex(signature.slice(32)), v: "00" };
     }),
-  } satisfies TvcTurnkey;
+  } satisfies SprEmbeddedWalletTurnkey;
   return { turnkey, address, account, ownerPublic, login, logout: () => { session = undefined; } };
 }
 
@@ -107,8 +107,8 @@ function fakeGateway(answer: (enrollment: Enrollment) => Response | undefined = 
 }
 
 function keysOf(
-  turnkey: TvcTurnkey,
-  transport: TvcTransport,
+  turnkey: SprEmbeddedWalletTurnkey,
+  transport: SprEmbeddedWalletTransport,
   solanaAddress?: string,
   nowMs: () => bigint = () => NOW_MS,
 ) {
@@ -238,7 +238,7 @@ describe("the Turnkey session key", () => {
         inFlight -= 1;
       }
     });
-    // Two clients of one Turnkey client, as two createTvcClient calls would be.
+    // Two clients of one Turnkey client, as two createSprEmbeddedWallet calls would be.
     const signers = await Promise.all(
       [fakeGateway(), fakeGateway()].map(async (gateway) => (await (await keysOf(turnkey, gateway.transport).current()).operations())),
     );
