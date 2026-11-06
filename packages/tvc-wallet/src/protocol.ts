@@ -39,6 +39,7 @@ export {
   walletGrantDigest,
 } from "./protocol/digest.js";
 export {
+  ENROLLMENT_DOMAINS,
   WALLET_ENROLLMENT_STATEMENT,
   walletEnrollmentMessage,
   type WalletEnrollment,

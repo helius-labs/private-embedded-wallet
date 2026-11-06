@@ -13,7 +13,7 @@ import type { TvcTransport } from "../client/transport.js";
 import { createTvcRequestSigner } from "../platform/signer.js";
 import { API_VERSION } from "../protocol/constants.js";
 import { clientKeyIdFor } from "../protocol/digest.js";
-import { walletEnrollmentMessage } from "../protocol/enrollment.js";
+import { ENROLLMENT_DOMAINS, walletEnrollmentMessage } from "../protocol/enrollment.js";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import { parseStrictJson } from "../protocol/json.js";
@@ -207,7 +207,7 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
     };
     const signed = await awaitWithSignal(
       turnkey.signMessage({
-        message: walletEnrollmentMessage({ domain: endpoint.host, network, ...enrollment }),
+        message: walletEnrollmentMessage({ domain: ENROLLMENT_DOMAINS[network], network, ...enrollment }),
         walletAccount: account,
         encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
         hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",

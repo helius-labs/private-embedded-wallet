@@ -111,7 +111,7 @@ function keysOf(turnkey: TvcTurnkey, transport: TvcTransport, solanaAddress?: st
 }
 
 describe("the Turnkey session key", () => {
-  it("is enrolled once, by the wallet owner, for the gateway's host and network", async () => {
+  it("is enrolled once, by the wallet owner, for the network's gatekeeper host", async () => {
     const { turnkey, address, account, ownerPublic, login } = fakeTurnkey();
     const sessionKey = login();
     const gateway = fakeGateway();
@@ -145,6 +145,24 @@ describe("the Turnkey session key", () => {
     expect(ed25519.verify(decodeLowerHex(body.ownerSignature), te.encode(message), ownerPublic)).toBe(true);
     expect(first.descriptor.allowed_clients[0]?.client_public_key).toBe(clientPublicKey);
     expect(first.signer.clientKeyId).toBe(clientKeyIdFor(decodeLowerHex(clientPublicKey)));
+  });
+
+  it("signs the enrollment for the network's gatekeeper host when the app proxies the gateway", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    const proxy = new URL("https://wallet.example/api/tvc");
+    const keys = turnkeyClientKeys({ turnkey, network: "devnet", endpoint: proxy, transport: gateway.transport, nowMs: () => NOW_MS });
+
+    await (await keys.current()).operations();
+
+    const [{ url, body }] = gateway.enrollments as [{ url: URL; body: Enrollment }];
+    expect(url.href).toBe("https://wallet.example/api/tvc/enroll");
+    expect(turnkey.signMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: walletEnrollmentMessage({ domain: "devnet.helius-rpc.com", network: "devnet", ...body }),
+      }),
+    );
   });
 
   it("signs the client-auth text with signWithApiKey, normalized to low S", async () => {

@@ -32,9 +32,12 @@ await syncWallet({ client: zolana, wallet, keys });
 
 `createTvcClient({ network, endpoint, turnkey, solanaAddress?, prover?, nowMs?, transport?, requestTimeoutMs? })`:
 
-- `endpoint` is the network's tvc-gateway, Helius's
-  `https://<network>.helius-rpc.com/v1/private-wallet?api-key=…` or an
-  application's proxy of it. Its query travels on every route.
+- `endpoint` is the network's tvc-gateway: Helius's
+  `https://<network>.helius-rpc.com/v1/private-wallet?api-key=…`, or, in
+  production, a route on the application's own origin that forwards to it and
+  adds the API key on the server, so the key never reaches the browser (as
+  wallet-kit does for Solana RPC). Its query travels on every route. Set
+  `prover` too when the route serves only the gateway.
 - `turnkey` is the application's Turnkey client with a logged-in session:
   `@turnkey/core`'s `TurnkeyClient`, or what `useTurnkey()` returns in
   `@turnkey/react-wallet-kit`, as it is. The client uses four of its methods,
@@ -175,8 +178,9 @@ before it sends.
 On first use the client enrolls the key with the gateway. It finds the
 wallet's Solana account (`fetchWallets`; connected wallets are skipped), has
 the wallet sign `walletEnrollmentMessage` with Ed25519 (`signMessage`, a text
-payload, unhashed), a Sign-In With Solana message for the endpoint's host
-whose chain is the network, and posts
+payload, unhashed), a Sign-In With Solana message for the network's gatekeeper host
+(`ENROLLMENT_DOMAINS[network]`, whatever host `endpoint` names, so a proxy
+works) whose chain is the network, and posts
 `{organizationId, turnkeyWalletId, solanaAddress, clientPublicKey, issuedAtMs, ownerSignature}`
 to `<endpoint>/enroll`. The gateway answers a descriptor for the key, which
 the client checks and keeps in memory for that key. A new login, or

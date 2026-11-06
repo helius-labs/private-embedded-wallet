@@ -8,9 +8,20 @@ const ENROLLMENT_LIFETIME_MS = 5 * 60 * 1_000;
 /** `9999-12-31T23:59:59.999Z`, the last instant with a four-digit year, less the lifetime. */
 const MAX_ISSUED_AT_MS = 253_402_300_799_999 - ENROLLMENT_LIFETIME_MS;
 
+/**
+ * The host a wallet owner enrolls with for each network: Helius gatekeeper's,
+ * which every tvc-gateway of that network accepts. A client signs for it
+ * wherever it sends `/enroll`, so an app can serve the gateway API from its
+ * own origin and keep the Helius API key on its server.
+ */
+export const ENROLLMENT_DOMAINS: Readonly<Record<Network, string>> = Object.freeze({
+  devnet: "devnet.helius-rpc.com",
+  mainnet: "mainnet.helius-rpc.com",
+});
+
 /** `POST /enroll`, less the owner's signature over {@link walletEnrollmentMessage}. */
 export type WalletEnrollment = {
-  /** The host of the gateway endpoint, such as `beta-devnet.helius-rpc.com`. It is not sent. */
+  /** A host the gateway accepts, normally `ENROLLMENT_DOMAINS[network]`. It is not sent. */
   readonly domain: string;
   /** The network the gateway serves, the message's chain. It is not sent. */
   readonly network: Network;

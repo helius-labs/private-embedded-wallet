@@ -117,7 +117,9 @@ export default async function setup({ provide }: GlobalSetupContext) {
     TVC_GATEWAY_PROVISIONING__RELEASE_PATH: join(releaseDir, "release.json"),
     TVC_GATEWAY_WALLET_GRANT__PRIVATE_KEY: testkit.grantPrivateKeyHex,
     TVC_GATEWAY_WALLET_GRANT__EXPECTED_PUBLIC_KEY: p256Public(testkit.grantPrivateKeyHex, false),
-    TVC_GATEWAY_ENROLLMENT__DOMAINS: JSON.stringify([`127.0.0.1:${gatewayPort}`]),
+    // The client reaches this gateway at 127.0.0.1, as through an app's proxy,
+    // and signs for the network's gatekeeper host.
+    TVC_GATEWAY_ENROLLMENT__DOMAINS: JSON.stringify(["devnet.helius-rpc.com"]),
   });
 
   const teardown = async () => {

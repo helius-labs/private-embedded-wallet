@@ -4,6 +4,7 @@ import { p256 } from "@noble/curves/p256";
 import { getAddressDecoder } from "@solana/kit";
 import type { TvcKeys, TvcTransport, TvcTurnkey } from "@heliuslabs/spr-embedded-wallet";
 import {
+  ENROLLMENT_DOMAINS,
   decodeLowerHex,
   encodeLowerHex,
   walletEnrollmentMessage,
@@ -60,9 +61,9 @@ function problem(status: number, code: string) {
 function enrollment({
   issuedAtMs = Date.now(),
   signer = ownerSeed,
-  domain = new URL(gatewayUrl).host,
-  network = "devnet" as Network,
-} = {}) {
+  network = "devnet",
+  domain = ENROLLMENT_DOMAINS[network],
+}: { issuedAtMs?: number; signer?: Uint8Array; network?: Network; domain?: string } = {}) {
   const fields = {
     organizationId: ORGANIZATION_ID,
     turnkeyWalletId: TURNKEY_WALLET_ID,
@@ -118,7 +119,7 @@ describe("enrollment", () => {
   });
 
   it("refuses an enrollment signed for another network", async () => {
-    expect(await post("/enroll", enrollment({ network: "mainnet" }))).toMatchObject(
+    expect(await post("/enroll", enrollment({ network: "mainnet", domain: ENROLLMENT_DOMAINS.devnet }))).toMatchObject(
       problem(400, "InvalidOwnerEnrollmentSignature"),
     );
   });
