@@ -20,7 +20,7 @@ function fixture() {
     "../../../../crates/protocol/fixtures/wallet-grant-digest.json", import.meta.url,
   ), "utf8")) as { grant: WalletGrant };
   const info = {
-    version: 2, network: "devnet", security_domain_id: "00".repeat(32),
+    version: 1, network: "devnet", security_domain_id: "00".repeat(32),
     release_id: "test-é", manifest_digest: "11".repeat(32), executable_digest: "22".repeat(32),
     quorum_public_key: encodeLowerHex(publicKey) + encodeLowerHex(publicKey),
     quorum_key_id: "quorum-é", quorum_key_epoch: "1", ephemeral_public_key: "",

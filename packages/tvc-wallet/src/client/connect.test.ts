@@ -94,7 +94,7 @@ function connectFixture() {
   const executableDigest = "22".repeat(32);
 
   const policy: ReleasePolicy = {
-    version: 2,
+    version: 1,
     releaseId: "connect-poc",
     network: "devnet",
     tvcApplicationId: "wallet-dev",
@@ -137,7 +137,7 @@ function connectFixture() {
     ],
   };
   const info: ServiceInfo = {
-    version: 2,
+    version: 1,
     network: "devnet",
     security_domain_id: policy.securityDomainId,
     release_id: policy.releaseId,
@@ -176,7 +176,7 @@ function connectFixture() {
       qosDecrypt(quorumEncryptionSecret, decodeLowerHex(encryptedChallenge))
     );
     return canonicalizeJsonValue({
-      version: 2,
+      version: 1,
       tvc_app_proof: {
         scheme: "SIGNATURE_SCHEME_EPHEMERAL_KEY_P256",
         public_key: ephemeralPublicKey,

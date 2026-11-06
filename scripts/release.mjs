@@ -36,7 +36,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const DEPLOY_DIR = join(ROOT, "apps/privacy-wallet/deploy");
 const NETWORKS = ["devnet", "mainnet"];
 /** `API_VERSION` in crates/protocol/src/constants.rs: the release policy and `/v1/info` version. */
-const API_VERSION = 2;
+const API_VERSION = 1;
 /** The operations, in the order the enclave advertises them and clients compare them. */
 const OPERATIONS = ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"];
 const HEX = (bytes) => new RegExp(`^[0-9a-f]{${2 * bytes}}$`);

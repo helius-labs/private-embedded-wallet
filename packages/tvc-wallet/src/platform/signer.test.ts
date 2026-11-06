@@ -6,7 +6,7 @@ import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
 
 const CLIENT_KEY_ID = "tvc-browser-p256-" + "11".repeat(16);
 const WALLET_DESCRIPTOR = {
-  version: 2,
+  version: 1,
   security_domain_id: "44".repeat(32),
   network: "devnet",
   turnkey_organization_id: "00000000-0000-0000-0000-00000000000b",
@@ -23,7 +23,7 @@ const WALLET_DESCRIPTOR = {
 
 function request(): OperationRequest {
   return {
-    version: 2,
+    version: 1,
     request_id: "aa".repeat(32),
     issued_at_ms: "1750000000000",
     expires_at_ms: "1750000300000",

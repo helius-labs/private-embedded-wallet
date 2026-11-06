@@ -6,7 +6,7 @@ const sealedSeed = {
   sealedSeed: "11".repeat(64),
 };
 const descriptor = {
-  version: 2,
+  version: 1,
   security_domain_id: "aa".repeat(32),
   network: "devnet",
   turnkey_organization_id: "00000000-0000-0000-0000-00000000000b",
@@ -52,7 +52,7 @@ describe("browser wallet state", () => {
   it("rejects another state format or a descriptor of another protocol or network", () => {
     for (const state of [
       { ...baseState(), version: 2 },
-      { ...baseState(), walletDescriptor: { ...descriptor, version: 1 } },
+      { ...baseState(), walletDescriptor: { ...descriptor, version: 2 } },
       { ...baseState(), walletDescriptor: { ...descriptor, network: "testnet" } },
     ]) {
       expect(() => parsePersistentBrowserTvcWalletState(state)).toThrowError("StorageCorrupted");

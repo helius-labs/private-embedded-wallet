@@ -1,4 +1,4 @@
-export const API_VERSION = 2;
+export const API_VERSION = 1;
 export const TVC_APP_PROOF_TYPE = "zolana.tvc.wallet_operation.v1";
 export const EXPECTED_TURNKEY_TRUST_ROOT_ID = "aws-nitro-root-g1";
 export const TVC_APP_PROOF_SCHEME = "SIGNATURE_SCHEME_EPHEMERAL_KEY_P256";
