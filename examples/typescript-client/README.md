@@ -46,8 +46,10 @@ if (!stored) await writeFile(walletPath, JSON.stringify(keys.stored));
    the session key, `signWithApiKey` signs with its private half, and the
    wallet signs the enrollment through `signRawPayload`.
 2. `open` bootstraps the wallet once and the example stores `keys.stored`,
-   the public identity and the sealed seed, in a file. Neither is a secret to
-   the client. Later runs reopen the stored wallet without a call. If the file
+   the public identity and the sealed seed, in a file. The file is sensitive:
+   with a current descriptor of the wallet the sealed seed runs the wallet's
+   enclave operations, so keep it private to the user. Later runs reopen the
+   stored wallet without a call. If the file
    is lost, the next run bootstraps again and gets the same identity. Before a
    bootstrap, `approve` configures the Turnkey grant, then approves the exact
    bootstrap request through the configured owner session while it runs.

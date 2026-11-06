@@ -42,9 +42,10 @@ function isIdentity(value: unknown): value is ShieldedIdentity {
 }
 
 /**
- * `keys.stored` read back from wherever the application kept it, such as
- * `JSON.parse` of a file or an IndexedDB record: the identity and, unless it
- * was lost, the sealed seed. Anything else is `StorageCorrupted`.
+ * `keys.stored` read back from the application's private storage for the
+ * user, such as `JSON.parse` of an IndexedDB record: the identity and, unless
+ * it was lost, the sealed seed. Anything else is `StorageCorrupted`. The value
+ * is sensitive; see `StoredWallet`.
  */
 export function parseStoredWallet(value: unknown): StoredWallet {
   if (

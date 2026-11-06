@@ -405,8 +405,10 @@ pub enum OperationResult {
         #[serde(with = "hex")]
         shielded_viewing_public_key: Vec<u8>,
         /// The derivation seed sealed to the Quorum key: presented on every
-        /// later operation, reproducible by another bootstrap, never a secret
-        /// to the client. No secret appears elsewhere in this result.
+        /// later operation and reproducible by another bootstrap. Opaque to
+        /// the client but sensitive, since any current descriptor of the
+        /// wallet opens it in the enclave. No other secret appears in this
+        /// result.
         #[serde(with = "hex")]
         sealed_seed: Vec<u8>,
         turnkey_activity_id: String,

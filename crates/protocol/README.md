@@ -149,7 +149,11 @@ the enclave accepts it under any descriptor of the same wallet, whichever
 client key that descriptor lists, and only under the Quorum key epoch it was
 issued for. A client that signs in again with a new key opens the seed it
 already holds. It contains nothing the Turnkey wallet cannot reproduce, so
-losing it costs one more `Bootstrap`.
+losing it costs one more `Bootstrap`. It is sensitive all the same: it runs
+every operation but `Bootstrap` for the wallet without the owner or Turnkey,
+with a current descriptor of the wallet and that descriptor's client key until
+the descriptor expires, or with the provisioning key, which issues
+descriptors, for as long as the image trusts that key.
 
 ## Wallet grant
 

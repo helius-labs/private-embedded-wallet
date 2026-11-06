@@ -53,8 +53,17 @@ await syncWallet({ client: zolana, wallet, keys });
   prover and the prover's policy file.
 
 `tvc.open(stored?, { approve?, signal?, timeoutMs? })` returns `TvcKeys`, the
-SDK's `WalletKeys`, with `keys.stored` to persist. Neither part of it is a
-secret to the client:
+SDK's `WalletKeys`, with `keys.stored` to persist.
+
+`keys.stored` is sensitive. Its sealed seed opens the wallet's privacy keys
+inside the enclave under any descriptor of the wallet: with a current
+descriptor and its client key, such as a stolen session, it lets the holder
+decrypt the wallet's notes, derive its nullifiers and complete its proofs
+until that descriptor expires, and with tvc-gateway's provisioning key, which
+issues descriptors, for as long as that key does. It cannot sign a
+transaction. Keep it like the user's session: in storage only the application
+reads for that user, and out of logs, analytics, crash reports and shared
+backups.
 
 - `stored` with its `sealedSeed` reopens the wallet without a call, under
   any session key of the wallet: a new login needs no bootstrap.

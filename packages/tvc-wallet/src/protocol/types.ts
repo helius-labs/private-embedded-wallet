@@ -231,8 +231,10 @@ export type OperationRequest = {
 
 /**
  * The derivation seed sealed to the Quorum key, as bootstrap returned it.
- * Presented on every later request; opaque to the client, not a secret, and
- * reproducible by another bootstrap of the same wallet.
+ * Presented on every later request and reproducible by another bootstrap of
+ * the same wallet. Opaque to the client, but sensitive: under any current
+ * descriptor of the wallet it lets the enclave run the wallet's operations
+ * (see `StoredWallet`).
  */
 export type SealedSeed = {
   sealedSeed: string;

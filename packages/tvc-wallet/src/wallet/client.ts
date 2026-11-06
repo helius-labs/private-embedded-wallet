@@ -88,7 +88,14 @@ export type ShieldedIdentity = {
   readonly shieldedViewingPublicKey: string;
 };
 
-/** What an application keeps to reopen a wallet, `keys.stored`. Neither part is a secret to the client. */
+/**
+ * What an application keeps to reopen a wallet, `keys.stored`. Sensitive: with
+ * a current descriptor of the wallet and its client key, or with tvc-gateway's
+ * provisioning key, the sealed seed lets the enclave decrypt, derive and prove
+ * for the wallet, until that descriptor expires or for as long as that key
+ * issues descriptors. Keep it like the user's session, out of logs and shared
+ * storage.
+ */
 export type StoredWallet = {
   readonly identity: ShieldedIdentity;
   /**
