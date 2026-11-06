@@ -36,7 +36,7 @@ function fixture() {
       walletDescriptor: descriptor,
       authorizer: { clientKeyId: clientKeyIdFor(publicKey), authorizeTvcRequest: sign },
     },
-    acceptedManifestDigests: [info.manifest_digest], releasePolicyValidFromMs: 0n,
+    releasePolicyValidFromMs: 0n,
     releasePolicyExpiresAtMs: 9999999n, nowMs: () => 1000n,
     trustVerifier: { verifyOperationAppProof: async () => {}, verifyCustodyProofs: () => {} },
   };

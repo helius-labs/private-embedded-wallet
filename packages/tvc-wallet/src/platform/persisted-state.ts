@@ -5,7 +5,8 @@ import { isAddress } from "@solana/kit";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex } from "../protocol/hex.js";
 
-const STORE_NAME = "records";
+/** The one object store of every database this package opens. */
+export const STORE_NAME = "records";
 
 export function isLowerHex(value: unknown, bytes?: number): value is string {
   if (typeof value !== "string" || value.length === 0) return false;
@@ -26,7 +27,7 @@ export function hasOnlyKeys(value: object, keys: readonly string[]): boolean {
   return Object.keys(value).every((key) => keys.includes(key));
 }
 
-function openWalletDatabase(name: string): Promise<IDBDatabase> {
+export function openDatabase(name: string): Promise<IDBDatabase> {
   if (!globalThis.indexedDB) throw new TvcError("UnsupportedPlatform");
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(name, 1);
@@ -45,7 +46,7 @@ async function withDatabase<T>(
   name: string,
   run: (database: IDBDatabase) => Promise<T>,
 ): Promise<T> {
-  const database = await openWalletDatabase(name);
+  const database = await openDatabase(name);
   try {
     return await run(database);
   } finally {

@@ -4,9 +4,6 @@ import { TvcError, TvcHttpError } from "../protocol/error.js";
 
 const td = new TextDecoder("utf-8", { fatal: true });
 
-/** A Turnkey Boot Proof as a gateway returns it beside an enclave answer. */
-export const MAX_BOOT_PROOF_BYTES = 256n * 1024n;
-
 /** `endpoint` with `path` appended to its path, keeping its query, such as an API key. */
 export function gatewayUrl(endpoint: URL, path: string): URL {
   const url = new URL(endpoint);

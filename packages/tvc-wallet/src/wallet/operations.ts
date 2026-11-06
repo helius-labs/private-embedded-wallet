@@ -14,7 +14,7 @@ import type {
   TransactionKeysOperation,
 } from "../protocol/types.js";
 import { assertExactObjectKeys } from "../client/http.js";
-import { proverTarget, provingKeyName } from "./prover.js";
+import { isProveCircuit, MAX_PROVE_INPUTS, proverTarget, provingKeyName } from "./prover.js";
 import {
   executeOperationEnvelope,
   type OperationExecutionContext,
@@ -22,14 +22,12 @@ import {
 
 /** Mirrors `crates/protocol/src/constants.rs`; rejecting here saves a round trip. */
 export const MAX_ITEMS_PER_BATCH = 256;
-const MAX_PROVE_INPUTS = 52;
 
 const U32_MAX = 0xffff_ffffn;
 const U8_MAX = 0xffn;
 const SALT_BYTES = 16;
 /** A tagged X25519 viewing key, `0x04 || u`. */
 const VIEWING_PUBLIC_KEY_BYTES = 33;
-const PROVE_CIRCUITS = new Set(["transfer-confidential", "transfer-ring", "merge", "merge-ring"]);
 
 // A Record so the compiler still requires an entry per result variant; the
 // lookup uses Object.hasOwn because `result.type` is server-controlled and a
@@ -144,7 +142,7 @@ export function checkProve(operation: ProveOperation): ProveOperation {
   if (!isObject(sealing.attestation)) throw new TvcError("InvalidProverRequest");
   const body = operation.request;
   const circuit = body["circuitType"];
-  if (typeof circuit !== "string" || !PROVE_CIRCUITS.has(circuit)) {
+  if (!isProveCircuit(circuit)) {
     throw new TvcError("InvalidProverRequest");
   }
   const inputs = body["inputs"];

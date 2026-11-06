@@ -6,9 +6,9 @@ import { clientKeyIdFor } from "../protocol/digest.js";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import { authorizedRequestMessage, compactLowS } from "./authorizer.js";
+import { openDatabase, STORE_NAME } from "./persisted-state.js";
 
 const DATABASE_NAME = "zolana-tvc-privacy-wallet-authorizer-v1";
-const STORE_NAME = "records";
 const KEY_RECORD = "client-auth-p256";
 function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(bytes.byteLength);
@@ -46,21 +46,6 @@ export type PersistentBrowserTvcAuthorizerOptions = {
   /** Selects an isolated persistent-key namespace for a demo or tenant. */
   readonly databaseName?: string;
 };
-
-function openDatabase(name: string): Promise<IDBDatabase> {
-  if (!globalThis.indexedDB) throw new TvcError("UnsupportedPlatform");
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, 1);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-        request.result.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onblocked = () => reject(new TvcError("StorageUnavailable"));
-    request.onerror = () => reject(request.error ?? new TvcError("StorageUnavailable"));
-    request.onsuccess = () => resolve(request.result);
-  });
-}
 
 function readRecord(database: IDBDatabase): Promise<unknown> {
   return new Promise((resolve, reject) => {

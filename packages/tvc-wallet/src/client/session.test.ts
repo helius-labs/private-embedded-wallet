@@ -14,7 +14,7 @@ function runtime(label: string): ConnectedTvcRuntime {
     info: { version: 1, environment: "development", security_domain_id: "00".repeat(32), release_id: label,
       manifest_digest: "11".repeat(32), executable_digest: "22".repeat(32), quorum_public_key: "", quorum_key_id: "quorum", quorum_key_epoch: "1",
       ephemeral_public_key: "", supported_operations: [], max_encrypted_request_bytes: "262144", max_encrypted_response_bytes: "262144", proof_type: "", boot_proof_lookup_key: "" },
-    transport: { fetch: vi.fn() }, acceptedManifestDigests: ["11".repeat(32)], releasePolicyValidFromMs: 0n,
+    transport: { fetch: vi.fn() }, releasePolicyValidFromMs: 0n,
     releasePolicyExpiresAtMs: 999999n, nowMs: () => 1n,
     trustVerifier: { verifyOperationAppProof: vi.fn(), verifyCustodyProofs: vi.fn() },
   };
