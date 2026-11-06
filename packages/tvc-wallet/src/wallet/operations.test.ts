@@ -191,8 +191,14 @@ describe("result checks", () => {
   it("surfaces an enclave failure stage and refuses a result for another operation", async () => {
     answer({ type: "Failure", operation: "Prove", stage: "Prover" });
     await expect(executeOperation(context, prove, sealedSeed)).rejects.toMatchObject({
+      name: "TvcOperationError",
       code: "OperationFailed",
-      message: "OperationFailed: Prover",
+      operation: "Prove",
+      stage: "Prover",
+    });
+    answer({ type: "Failure", operation: "Prove", stage: "Elsewhere" } as unknown as OperationResult);
+    await expect(executeOperation(context, prove, sealedSeed)).rejects.toMatchObject({
+      code: "UnsupportedVersion",
     });
 
     answer({ type: "Derive", values: ["ab".repeat(32)] });

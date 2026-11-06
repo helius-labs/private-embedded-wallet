@@ -1,4 +1,5 @@
 import { fetchWithSignal, httpError, readBoundedText } from "../client/http.js";
+import { awaitWithSignal } from "../client/request.js";
 import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex } from "../protocol/hex.js";
@@ -32,21 +33,26 @@ export type HeldProverPolicy = Readonly<{
   fetchedAtMs: number;
 }>;
 
+/** One download of the file, shared by every caller waiting for it. */
+type Download = {
+  readonly controller: AbortController;
+  readonly promise: Promise<HeldProverPolicy>;
+  waiters: number;
+};
+
 /**
  * A network's signed prover policy file, which the client carries to the
  * enclave on every `Prove`. The enclave checks its signatures, network and
  * expiries; the client reads its payloads only to know when to download it
  * again: once it is `max_age_secs` old, and after the prover lost its key or
  * the enclave refused it. A failed download keeps a file until either part
- * expires, and a file older than the one held is refused: an older release,
- * another release under the same version, or an older freshness part of the
- * same release.
+ * expires.
  */
 export class TvcProverPolicy {
   readonly #url: URL;
   readonly #transport: TvcTransport | undefined;
   #held: HeldProverPolicy | undefined;
-  #download: Promise<HeldProverPolicy> | undefined;
+  #download: Download | undefined;
 
   constructor(url: string | URL, transport?: TvcTransport) {
     this.#url = new URL(url);
@@ -58,14 +64,26 @@ export class TvcProverPolicy {
     return new TvcProverPolicy(PROVER_POLICY_URLS[requireNetwork(network)], transport);
   }
 
-  /** The file in force, downloaded again once it is `max_age_secs` old. */
-  current(signal?: AbortSignal): Promise<HeldProverPolicy> {
+  /**
+   * The file in force, downloaded again once it is `max_age_secs` old.
+   * Concurrent callers share one download; `signal` ends this caller's wait,
+   * and the download stops once no caller waits for it.
+   */
+  async current(signal?: AbortSignal): Promise<HeldProverPolicy> {
+    signal?.throwIfAborted();
     const held = this.#held;
-    if (held !== undefined && fresh(held, Date.now())) return Promise.resolve(held);
-    this.#download ??= this.#refresh(signal).finally(() => {
-      this.#download = undefined;
-    });
-    return this.#download;
+    if (held !== undefined && fresh(held, Date.now())) return held;
+    const download = (this.#download ??= this.#start());
+    download.waiters += 1;
+    try {
+      return await awaitWithSignal(download.promise, signal);
+    } finally {
+      download.waiters -= 1;
+      if (download.waiters === 0 && this.#download === download) {
+        this.#download = undefined;
+        download.controller.abort(signal?.reason);
+      }
+    }
   }
 
   /** Downloads the file again at the next call. */
@@ -73,30 +91,34 @@ export class TvcProverPolicy {
     if (this.#held !== undefined) this.#held = { ...this.#held, fetchedAtMs: Number.NEGATIVE_INFINITY };
   }
 
-  async #refresh(signal?: AbortSignal): Promise<HeldProverPolicy> {
+  #start(): Download {
+    const controller = new AbortController();
+    const download: Download = {
+      controller,
+      waiters: 0,
+      promise: this.#refresh(controller.signal).finally(() => {
+        if (this.#download === download) this.#download = undefined;
+      }),
+    };
+    return download;
+  }
+
+  async #refresh(signal: AbortSignal): Promise<HeldProverPolicy> {
     const held = this.#held;
     let next: HeldProverPolicy;
     try {
       next = readPolicy(await this.#fetch(signal));
+      // A download every caller abandoned does not replace the held file.
+      signal.throwIfAborted();
     } catch (error) {
-      if (held === undefined || expired(held, Date.now())) throw error;
+      if (signal.aborted || held === undefined || expired(held, Date.now())) throw error;
       next = { ...held, fetchedAtMs: Date.now() };
-    }
-    if (held !== undefined) {
-      const same = next.file.release.payload === held.file.release.payload;
-      if (
-        next.version < held.version ||
-        (next.version === held.version && !same) ||
-        (same && next.issuedAt < held.issuedAt)
-      ) {
-        throw new TvcError("ProverPolicyRollback");
-      }
     }
     this.#held = Object.freeze(next);
     return this.#held;
   }
 
-  async #fetch(signal?: AbortSignal): Promise<unknown> {
+  async #fetch(signal: AbortSignal): Promise<unknown> {
     const transport = this.#transport ?? createDefaultTransport();
     const response = await fetchWithSignal(transport, this.#url, { method: "GET", redirect: "error" }, signal);
     if (!response.ok) throw httpError(response, "ProverPolicyUnavailable");

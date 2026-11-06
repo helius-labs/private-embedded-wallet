@@ -112,15 +112,18 @@ commitment matches the indexed output.
 
 A proof is at most three calls after the policy file. `TvcProverPolicy`
 downloads the network's signed policy file and holds it for its
-`max_age_secs`; the enclave, not the client, checks its signatures. `TvcKeys`
+`max_age_secs`; the enclave, not the client, checks its signatures and
+versions. Concurrent callers share one download, and each can abandon its own
+wait. `TvcKeys`
 fetches the prover's attestation for a fresh nonce (`GET <url>/attestation`)
 and reuses it for the same `max_age_secs`, asks the enclave to complete the
 request and seal it to the attested key under that file, and posts the sealed
 request to `<url path>/prove/<key>` with the URL's query, such as its API key.
 It opens the answer with the response key the enclave returned, which opens
-nothing else. When the enclave refuses the policy or attestation, or the
-prover answers `tee_decryption_failed`, the client downloads the policy again,
-attests again and seals once more. Neither the client nor any proxy in front of
+nothing else. When the enclave refuses the policy or attestation (a
+`TvcOperationError` with `stage: "Prover"`), or the prover answers
+`tee_decryption_failed`, the client downloads the policy again, attests again
+and seals once more. Neither the client nor any proxy in front of
 the prover holds the witness in plaintext.
 
 The enclave binds a sealed request to its route below the prover's URL,
@@ -150,8 +153,10 @@ cannot replace a newer verified connection.
 Boot Proof resolvers receive `signal` in their input; forward it to their fetch.
 Snapshot loading accepts the SDK's `RequestContext` and destroys temporary key
 material on success, failure, or cancellation. HTTP failures are `TvcHttpError`
-instances with `status` and the raw `retryAfter` header. The client does not retry
-a failed operation automatically.
+instances with `status` and the raw `retryAfter` header. An operation that ran and
+failed at a named stage is a `TvcOperationError` with its `operation` and `stage`
+(`Prover`, or `TurnkeySigning` when Turnkey declined the bootstrap signature).
+The client does not retry a failed operation automatically.
 
 ## Backends
 

@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { VerifiedConnection } from "../client/connection.js";
 import type { TvcTransport } from "../client/transport.js";
-import { TvcError } from "../protocol/error.js";
+import { TvcError, TvcOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type { ProverSealing, SealedProverRequest, SealedSeed } from "../protocol/types.js";
 import type { ShieldedIdentity, TvcClient } from "./client.js";
@@ -374,16 +374,22 @@ describe("TvcKeys", () => {
     });
     const inputs = { circuit: "merge" } as unknown as MergeInputs;
     await keys.proveMerge(inputs);
-    client.prove.mockRejectedValueOnce(new TvcError("OperationFailed", "Prover"));
+    client.prove.mockRejectedValueOnce(new TvcOperationError("Prove", "Prover"));
     await keys.proveMerge(inputs);
     expect(seen.filter(({ url }) => url.pathname.endsWith("/attestation"))).toHaveLength(2);
     expect(seen.filter(({ url }) => url.href === POLICY_URL)).toHaveLength(2);
     expect(client.prove).toHaveBeenCalledTimes(3);
 
+    // Only the structured stage counts, never an error's text.
+    const plain = fixture();
+    plain.client.prove.mockRejectedValueOnce(new TvcError("OperationFailed", "Prover"));
+    await expect(plain.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed" });
+    expect(plain.client.prove).toHaveBeenCalledOnce();
+
     // A fresh policy and attestation the enclave refuses are the caller's error.
     const refused = fixture();
-    refused.client.prove.mockRejectedValue(new TvcError("OperationFailed", "Prover"));
-    await expect(refused.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed" });
+    refused.client.prove.mockRejectedValue(new TvcOperationError("Prove", "Prover"));
+    await expect(refused.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed", stage: "Prover" });
     expect(refused.client.prove).toHaveBeenCalledTimes(2);
   });
 

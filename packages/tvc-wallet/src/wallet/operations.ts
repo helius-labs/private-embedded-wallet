@@ -1,12 +1,13 @@
 import { requestScope, type TvcRequestOptions } from "../client/request.js";
 import { decodeDecimalU64 } from "../protocol/decimal.js";
 import { sealedSeedDigest } from "../protocol/digest.js";
-import { TvcError } from "../protocol/error.js";
+import { TvcError, TvcOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex, requireHex } from "../protocol/hex.js";
 import { parseStrictJson } from "../protocol/json.js";
 import type {
   SealedSeed,
   DecryptOperation,
+  FailureStage,
   DeriveOperation,
   Operation,
   OperationResult,
@@ -171,6 +172,8 @@ function checkHexList(values: unknown, count: number, bytes?: number): asserts v
   for (const value of values) requireHex(value, bytes);
 }
 
+const FAILURE_STAGES: readonly string[] = ["Prover", "TurnkeySigning"] satisfies FailureStage[];
+
 function checkResult<TOperation extends Operation>(
   result: OperationResult,
   operation: TOperation,
@@ -186,7 +189,8 @@ function checkResult<TOperation extends Operation>(
         `failure names ${result.operation}, asked for ${operation.type}`,
       );
     }
-    throw new TvcError("OperationFailed", String(result.stage).slice(0, 200));
+    if (!FAILURE_STAGES.includes(result.stage)) throw new TvcError("UnsupportedVersion");
+    throw new TvcOperationError(result.operation, result.stage);
   }
   if (result.type !== operation.type) {
     throw new TvcError("ReleaseBindingMismatch", `result is ${result.type}, asked for ${operation.type}`);

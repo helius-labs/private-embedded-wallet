@@ -27,5 +27,5 @@ export { createTvcOperationAuthorizer, type TvcRequestSigner } from "./platform/
 export type { TvcTransport } from "./client/transport.js";
 export type { QosIdentityPcrs } from "./verify/index.js";
 export type { TvcRequestOptions } from "./client/request.js";
-export { TvcHttpError } from "./protocol/error.js";
+export { TvcHttpError, TvcOperationError } from "./protocol/error.js";
 export type { Network } from "./protocol/types.js";

@@ -20,7 +20,7 @@ import type { TransactionKeyRequest } from "@heliuslabs/spr/transaction";
 
 import type { VerifiedConnection } from "../client/connection.js";
 import { encodeDecimalU64 } from "../protocol/decimal.js";
-import { TvcError } from "../protocol/error.js";
+import { TvcError, TvcOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type {
   SealedSeed,
@@ -298,9 +298,5 @@ export class TvcKeys implements WalletKeys {
 
 /** The enclave refused the prover's policy or attestation. */
 function isProverStage(error: unknown): boolean {
-  return (
-    error instanceof TvcError &&
-    error.code === "OperationFailed" &&
-    error.message === "OperationFailed: Prover"
-  );
+  return error instanceof TvcOperationError && error.stage === "Prover";
 }
