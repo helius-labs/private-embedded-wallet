@@ -12,14 +12,12 @@ import {
   descriptorDigest,
   walletGrantDigest,
   requestDigest,
-  requestIdHash,
   resultDigest,
   sealedSeedDigest,
-  walletIdHash,
 } from "./digest.js";
 import { TvcError } from "./error.js";
 import type { HealthResponse, ServiceInfo } from "./types.js";
-import { HEALTH_KEYS, SERVICE_INFO_KEYS } from "./types.js";
+import { SERVICE_INFO_KEYS } from "./types.js";
 import {
   parseUncompressedSec1,
   verifyP256Prehash,
@@ -57,6 +55,24 @@ function readFixture(name: string): string {
 function readJson(name: string): Record<string, unknown> {
   return JSON.parse(readFixture(name)) as Record<string, unknown>;
 }
+
+const HEALTH_KEYS = ["status"] as const;
+
+/** SHA-256 of `domain || 0x00 || payload`, as every protocol digest is built. */
+function domainSeparatedHash(domain: string, payload: Uint8Array): Uint8Array {
+  const domainBytes = new TextEncoder().encode(domain);
+  const input = new Uint8Array(domainBytes.length + 1 + payload.length);
+  input.set(domainBytes, 0);
+  input.set(payload, domainBytes.length + 1);
+  return sha256(input);
+}
+
+// Only the enclave computes these (the wallet id hash is inside a sealed seed);
+// the Rust fixtures still pin their domains.
+const walletIdHash = (walletId: string) =>
+  domainSeparatedHash("ZOLANA_TVC_WALLET_ID_V1", new TextEncoder().encode(walletId));
+const requestIdHash = (requestId: Uint8Array) =>
+  domainSeparatedHash("ZOLANA_TVC_REQUEST_ID_V1", requestId);
 
 describe("content-addressed fixtures", () => {
   it("matches MANIFEST sha256 for every file", () => {

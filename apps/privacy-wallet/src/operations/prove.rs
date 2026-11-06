@@ -36,17 +36,45 @@ impl ProverTrust {
     /// The trust the enclave image carries: the production vendor roots, under
     /// the signers of the network the image was built for.
     pub(crate) fn image() -> Self {
-        let keys = POLICY_SIGNERS
-            .iter()
-            .map(|key| hex::decode(key).ok().and_then(|key| key.try_into().ok()))
-            .collect::<Option<Vec<[u8; 32]>>>()
-            .expect("policy signer keys are 32-byte hex");
         Self {
-            signers: PolicySigners::new(NETWORK, keys, POLICY_THRESHOLD)
+            signers: PolicySigners::new(NETWORK, POLICY_SIGNERS.to_vec(), POLICY_THRESHOLD)
                 .expect("policy signers are well formed"),
             anchors: Anchors::PRODUCTION,
         }
     }
+}
+
+/// A prover policy file as a network publishes it: `policy`, released by
+/// `signer` for `network` until `expires_at`, and a freshness part covering
+/// `fresh_from..expires_at`, signed by a key the release names.
+#[cfg(any(test, feature = "local-dev"))]
+pub(crate) fn sign_policy(
+    signer: &ed25519_dalek::SigningKey,
+    network: &str,
+    policy: spr_prover_tee::TeePolicy,
+    fresh_from: u64,
+    expires_at: u64,
+) -> SignedPolicyFile {
+    use spr_prover_tee::{FreshnessSigners, ReleasePayload};
+
+    // The freshness key, distinct from the release signer.
+    let mut seed = signer.to_bytes();
+    seed[0] ^= 0xff;
+    let freshness = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let release = ReleasePayload {
+        network: network.to_owned(),
+        version: 1,
+        expires_at,
+        freshness: FreshnessSigners::of(std::slice::from_ref(&freshness), expires_at - fresh_from),
+        policy,
+    };
+    SignedPolicyFile::sign(
+        &release,
+        std::slice::from_ref(signer),
+        (fresh_from, expires_at),
+        std::slice::from_ref(&freshness),
+    )
+    .expect("policy file")
 }
 
 /// Writes `secret` as the prover's field encoding: the big-endian integer in

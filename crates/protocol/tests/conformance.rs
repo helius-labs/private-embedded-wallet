@@ -15,15 +15,14 @@ use zolana_tvc_protocol::encoding::{
 use zolana_tvc_protocol::error::ErrorCode;
 mod fixtures;
 
-use fixtures::{reject_double_hashed_signature, verify_fixtures, write_fixtures};
-use zolana_tvc_protocol::http::handle_public_http;
-use zolana_tvc_protocol::release::{bind_discovery_to_policy, verify_signed_release_policy};
+use fixtures::{
+    bind_discovery_to_policy, reject_double_hashed_signature, verify_fixtures, write_fixtures,
+};
+use zolana_tvc_protocol::release::verify_signed_release_policy;
 use zolana_tvc_protocol::types::{
     DecryptLabel, DeriveItem, HealthResponse, Operation, OperationKind, ServiceInfo,
 };
-use zolana_tvc_protocol::{
-    PinnedReleaseAuthorities, PublicError, ReleasePolicy, SignedReleasePolicy,
-};
+use zolana_tvc_protocol::{PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures")
@@ -223,17 +222,6 @@ fn health_does_not_leak_deployment_details() {
     assert_eq!(value["health_status"], 200);
     let info: ServiceInfo = parse_strict_json(value["info_body"].as_str().unwrap()).unwrap();
     assert_eq!(info.version, 1);
-}
-
-#[test]
-fn oversized_public_request_is_rejected() {
-    verify_committed_fixtures();
-    let info_json = std::fs::read_to_string(fixtures_dir().join("http-skeleton.json")).unwrap();
-    let value: serde_json::Value = serde_json::from_str(&info_json).unwrap();
-    let info: ServiceInfo = parse_strict_json(value["info_body"].as_str().unwrap()).unwrap();
-    let body = vec![0u8; 262_145];
-    let response = handle_public_http("GET", "/health", &body, true, &info);
-    assert_eq!(response.status, PublicError::RequestTooLarge.status());
 }
 
 #[test]

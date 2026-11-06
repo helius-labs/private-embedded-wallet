@@ -4,12 +4,10 @@ import {
   PROVISIONING_AUTH_DOMAIN,
   RELEASE_POLICY_DOMAIN,
   REQUEST_DIGEST_DOMAIN,
-  REQUEST_ID_HASH_DOMAIN,
   RESULT_DIGEST_DOMAIN,
   SHA256_LEN,
   SEALED_SEED_DIGEST_DOMAIN,
   WALLET_GRANT_DOMAIN,
-  WALLET_ID_HASH_DOMAIN,
 } from "./constants.js";
 import { canonicalizeJsonValue } from "./jcs.js";
 import { encodeLowerHex } from "./hex.js";
@@ -63,14 +61,6 @@ export function clientAuthMessage(requestDigestBytes: Uint8Array): Uint8Array {
 
 export function resultDigest(encryptedResult: Uint8Array): Uint8Array {
   return domainSeparatedHash(RESULT_DIGEST_DOMAIN, encryptedResult);
-}
-
-export function walletIdHash(walletId: string): Uint8Array {
-  return domainSeparatedHash(WALLET_ID_HASH_DOMAIN, te.encode(walletId));
-}
-
-export function requestIdHash(requestId: Uint8Array): Uint8Array {
-  return domainSeparatedHash(REQUEST_ID_HASH_DOMAIN, requestId);
 }
 
 export function releasePolicyDigest(policyJcs: Uint8Array): Uint8Array {

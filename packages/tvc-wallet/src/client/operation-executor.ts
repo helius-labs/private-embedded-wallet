@@ -117,7 +117,6 @@ export type OperationExecutionContext = {
   readonly info: ServiceInfo;
   readonly transport: TvcTransport;
   readonly operations: OperationsConfig;
-  readonly acceptedManifestDigests: readonly string[];
   readonly releasePolicyValidFromMs: bigint;
   readonly releasePolicyExpiresAtMs: bigint;
   readonly nowMs: () => bigint;
@@ -201,10 +200,7 @@ async function prepareRequest(
   // does not grant it, is refused here rather than by a rejected request.
   signal?.throwIfAborted();
   const kind = operation.type;
-  if (
-    !context.info.supported_operations.includes(kind) ||
-    !context.acceptedManifestDigests.includes(context.info.manifest_digest)
-  ) {
+  if (!context.info.supported_operations.includes(kind)) {
     throw new TvcError("OperationNotAllowed");
   }
   const grant = matchingGrant(

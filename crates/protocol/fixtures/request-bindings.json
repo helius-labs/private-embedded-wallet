@@ -1,1 +1,0 @@
-{"empty_wallet_id":"InvalidWalletDescriptor","id":"request-bindings","ok":true,"wrong_epoch":"QuorumKeyEpochMismatch","wrong_executable":"ReleaseBindingMismatch","wrong_manifest":"ReleaseBindingMismatch","wrong_quorum_key":"ReleaseBindingMismatch","wrong_release":"ReleaseBindingMismatch"}

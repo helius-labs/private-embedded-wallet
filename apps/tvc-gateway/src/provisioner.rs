@@ -2,20 +2,16 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use p256::SecretKey;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
 use zeroize::Zeroizing;
 use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::crypto::{
-    parse_uncompressed_sec1, sign_p256_prehash, verify_p256_prehash,
-};
+use zolana_tvc_protocol::crypto::{sign_p256_prehash, verify_p256_prehash};
 use zolana_tvc_protocol::digest::descriptor_digest;
 use zolana_tvc_protocol::{
     ClientGrant, PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy, WalletDescriptor,
     verify_signed_release_policy,
 };
 
-use crate::config::ProvisioningConfig;
+use crate::config::{ProvisioningConfig, load_signing_key};
 use crate::enrollment::EnrollmentInput;
 use crate::error::ApiError;
 
@@ -29,12 +25,7 @@ pub struct Provisioner {
 
 impl Provisioner {
     pub fn new(config: &ProvisioningConfig) -> anyhow::Result<Self> {
-        let secret = decode_secret(&config.private_key)?;
-        let public_key = public_key_of(&secret)?;
-        anyhow::ensure!(
-            hex::encode(public_key) == config.expected_public_key,
-            "provisioning.private_key does not match provisioning.expected_public_key"
-        );
+        let (secret, public_key) = signing_key(config)?;
         let signed: SignedReleasePolicy = read_json(&config.release_policy_path)?;
         let authorities: PinnedReleaseAuthorities = read_json(&config.release_authorities_path)?;
         verify_signed_release_policy(&signed, &authorities, now_ms()?)
@@ -101,24 +92,13 @@ pub fn now_ms() -> anyhow::Result<u64> {
     Ok(u64::try_from(elapsed.as_millis())?)
 }
 
-fn decode_secret(value: &str) -> anyhow::Result<Zeroizing<[u8; 32]>> {
-    let trimmed = value.trim().trim_start_matches("0x");
-    let mut secret = Zeroizing::new([0u8; 32]);
-    hex::decode_to_slice(trimmed, secret.as_mut_slice())
-        .context("provisioning.private_key must be 32 bytes of hex")?;
-    Ok(secret)
-}
-
-fn public_key_of(secret: &[u8; 32]) -> anyhow::Result<[u8; 65]> {
-    let secret_key = SecretKey::from_slice(secret).context("invalid P-256 provisioning key")?;
-    let encoded = secret_key.public_key().to_encoded_point(false);
-    let public_key: [u8; 65] = encoded
-        .as_bytes()
-        .try_into()
-        .context("P-256 public key is not 65 bytes")?;
-    parse_uncompressed_sec1(&public_key)
-        .map_err(|error| anyhow::anyhow!("invalid provisioning public key: {error:?}"))?;
-    Ok(public_key)
+/// The provisioning key, which may also carry a `0x` prefix.
+fn signing_key(config: &ProvisioningConfig) -> anyhow::Result<(Zeroizing<[u8; 32]>, [u8; 65])> {
+    load_signing_key(
+        "provisioning",
+        config.private_key.trim().trim_start_matches("0x"),
+        &config.expected_public_key,
+    )
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> anyhow::Result<T> {
@@ -135,7 +115,7 @@ pub(crate) mod tests {
 
     pub fn provisioner() -> Provisioner {
         let secret = Zeroizing::new(TEST_SECRET);
-        let public_key = public_key_of(&secret).unwrap_or([0; 65]);
+        let public_key = crate::config::public_key_of(&secret).unwrap_or([0; 65]);
         Provisioner {
             secret,
             public_key,
@@ -190,9 +170,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn secret_decoding_accepts_prefixed_hex_and_rejects_short_keys() {
-        assert!(decode_secret(&format!("0x{}", "07".repeat(32))).is_ok());
-        assert!(decode_secret(&"07".repeat(31)).is_err());
+    fn the_provisioning_key_may_carry_a_0x_prefix() {
+        let config = |private_key: String| ProvisioningConfig {
+            private_key,
+            expected_public_key: hex::encode(
+                crate::config::public_key_of(&TEST_SECRET).expect("valid key"),
+            ),
+            release_policy_path: "unused".into(),
+            release_authorities_path: "unused".into(),
+        };
+        assert!(signing_key(&config(format!(" 0x{}\n", "07".repeat(32)))).is_ok());
+        assert!(signing_key(&config("07".repeat(31))).is_err());
     }
 }
 

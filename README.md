@@ -21,10 +21,9 @@ Helius API key.
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
 | [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet`: one-request sessions with Boot Proofs, enrollment, and wallet grants. |
-| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence, React bindings. |
+| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
-| [`crates/boot-proof`](crates/boot-proof) | Fetches a replica's public Boot Proof from Turnkey for a relying party that cannot. |
-| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles and a merge, through the hosted gateway, directly against an enclave, or against the local testkit. |
+| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: releases, wallet descriptors, the localnet for `just headless-e2e`. |
 
 ## Responsibility split
@@ -123,9 +122,7 @@ a local Zolana network built from a sibling `../zolana` checkout, which must be
 at the commit
 [`headless-local-e2e.yml`](.github/workflows/headless-local-e2e.yml) pins.
 
-`boot-proof` keeps its own lockfile so the Turnkey client graph stays out of
-the enclave build. Never commit Turnkey operator files, API keys, or
-`.env.local`.
+Never commit Turnkey operator files, API keys, or `.env.local`.
 
 ## Deployment
 
@@ -133,16 +130,15 @@ Each deployment has its own Turnkey TVC app, Quorum key, `linux/amd64` image
 pinned by `@sha256:`, signed release policy, and wallet descriptors. The
 constants of the current app are in
 [`apps/privacy-wallet/deploy/release.json`](apps/privacy-wallet/deploy/release.json);
-a release is one command, and a descriptor one more:
+a release is one command:
 
 ```sh
 just release private-wallet-devnet-<sha> --image <reference>
-just provision-descriptor --organization-id <org> --wallet-id <id> \
-  --address <address> --client-public-key <hex> --out descriptor.json
 ```
 
-[`scripts/README.md`](scripts/README.md) describes the release phases, the
-provisioning key, and the localnet.
+Wallet descriptors come from tvc-gateway, which signs one on each
+`POST /v1/private-wallet/enroll`. [`scripts/README.md`](scripts/README.md)
+describes the release phases and the localnet.
 
 ## License
 

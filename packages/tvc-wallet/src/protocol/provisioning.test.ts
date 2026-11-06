@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { verifyP256Prehash } from "../crypto/p256.js";
 import { descriptorDigest } from "./digest.js";
 import { decodeLowerHex, encodeLowerHex } from "./hex.js";
-import { provisioningSecret, signWalletDescriptor, verifyWalletDescriptor } from "./provisioning.js";
+import { provisioningSecret, signWalletDescriptor } from "./provisioning.js";
 
 const secret = new Uint8Array(32).fill(7);
 const publicKey = encodeLowerHex(p256.getPublicKey(secret, false));
@@ -73,16 +73,5 @@ describe("provisioningSecret", () => {
     expect(() => provisioningSecret(json)).toThrow(/WrongProvisioningKey/);
     expect(() => provisioningSecret("{}", publicKey)).toThrow(/InvalidProvisioningKey/);
     expect(() => provisioningSecret("nope", publicKey)).toThrow(/InvalidProvisioningKey/);
-  });
-});
-
-describe("verifyWalletDescriptor", () => {
-  it("accepts the provisioner's descriptor and refuses a changed one or another key", () => {
-    const descriptor = signWalletDescriptor(input, secret);
-    expect(() => verifyWalletDescriptor(descriptor, publicKey)).not.toThrow();
-    expect(() => verifyWalletDescriptor({ ...descriptor, turnkey_wallet_id: "wallet-2" }, publicKey)).toThrow(
-      /InvalidSignature/,
-    );
-    expect(() => verifyWalletDescriptor(descriptor)).toThrow(/InvalidSignature/);
   });
 });

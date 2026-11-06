@@ -7,7 +7,6 @@ enclave (`@heliuslabs/spr-embedded-wallet`), in the layout of
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw, with the enclave as the key holder
 - **[spl_deposit_transfer_withdraw](examples/spl_deposit_transfer_withdraw.ts)** - The same lifecycle for an SPL token registered with the pool
 - **[merge](examples/merge.ts)** - Merge the wallet's SOL notes into one
-- **[enroll](examples/enroll.ts)** - Prepare a wallet and client key for an operator-signed descriptor (direct mode)
 
 ## What a TVC wallet is
 
@@ -24,15 +23,15 @@ operations.
 
 ## How the example works
 
-1. `setup()` reaches the enclave through the Helius-hosted tvc-gateway, or
-   directly when `TVC_ENDPOINT` is set, verifies it against the client's release
-   policy and PCR pins, configures the Turnkey grant, and returns the client,
-   verified connection, and wallet signer.
+1. `setup()` reaches the enclave through the Helius-hosted tvc-gateway,
+   verifies it against the client's release policy and PCR pins, and returns
+   the client, verified connection, and wallet signer.
 2. `bootstrap` runs once per wallet. Its result, the public identity and the
    sealed seed, is stored in a file. Neither is a secret to the client. If the
    file is lost, `bootstrap` runs again and returns the same identity. Both
-   initial setup and recovery automatically approve the exact bootstrap request
-   through the configured owner session, within the same `bootstrap()` call.
+   initial setup and recovery first configure the Turnkey grant, then
+   automatically approve the exact bootstrap request through the configured
+   owner session, within the same `bootstrap()` call.
 3. `new TvcKeys({ client, connection, sealedSeed, identity })` is the SDK's
    `WalletKeys`, answered by the enclave.
 4. The SDK does the rest: `Wallet`, `syncWallet`, `buildDepositTransaction`,
@@ -53,35 +52,15 @@ client.proofService)` in place of `TvcKeys`. Nothing else changes.
   Solana wallet, and a root user's API key in it, as the key pair or a Turnkey
   API key file (`TURNKEY_API_KEY_PATH`). Helius creates these sub-organizations
   for an embedded-wallet project; the gateway refuses a wallet in any other
-  (`SubOrganizationNotOwned`). The example signs with the key, and `setup()`
-  uses it to enroll and to configure the enclave's grant. A browser integration
-  uses the authenticated owner session instead; never embed a root API key in
-  browser code.
+  (`SubOrganizationNotOwned`). The example signs with the key, enrolls with
+  it, and configures the enclave's grant with it before a bootstrap. A browser
+  integration uses the authenticated owner session instead; never embed a root
+  API key in browser code.
 
 The first run enrolls the client key: the wallet owner signs a Sign-In With
 Solana message for the gateway's host, and `POST /v1/private-wallet/enroll`
-answers a wallet descriptor, stored at `TVC_DESCRIPTOR_PATH`. The trust
-material is the package's `DEVNET_RELEASE` unless `TVC_TRUST_PATH` names
-another.
-
-### Direct to the enclave
-
-An operator running its own deployment sets `TVC_ENDPOINT` to the enclave and
-supplies what the gateway would:
-
-- The trust file (`TVC_TRUST_PATH`: `releasePolicy`, `releaseAuthorities`,
-  `qosIdentityPcrs`; `packages/tvc-wallet/src/devnet-release.json` is the
-  current one). Never copy these values from the service itself.
-- A Boot Proof source. Only a user of the TVC organization can read the
-  enclave's Boot Proof from Turnkey, so either a server the operator runs
-  returns it (`TVC_BOOT_PROOF_URL`; the wallet-kit demo serves
-  `POST /api/tvc/boot-proof`, and
-  [`zolana-tvc-boot-proof`](../../crates/boot-proof/README.md) is the same
-  fetch as a command), or your Turnkey API key is a user of that organization
-  and reads it directly (`TVC_ORGANIZATION_ID`).
-- A wallet descriptor for your client key, signed by the operator. See
-  [Operator provisioning](#operator-provisioning).
-- The operator's wallet-grant key (`TVC_WALLET_GRANT_KEY_PATH`).
+answers a wallet descriptor, stored at `TVC_DESCRIPTOR_PATH`. The client
+verifies the enclave against the package's `DEVNET_RELEASE`.
 
 ## Setup
 
@@ -145,9 +124,9 @@ The policy still requires **both** the owner and the service user. Automation
 runs in the owner client; it does not give the service the owner's credential.
 Turnkey [policy parameters](https://docs.turnkey.com/features/policies/language#activity-parameters)
 cannot inspect the payload, so that exact-message check remains essential.
-`setup()` reconciles the example's existing policies, including legacy grants
-that allowed the service to sign alone, before returning a usable client.
-Separately created signing grants must also be reviewed by the operator.
+Before each bootstrap the example sets its policy to name the enclave's current
+service user, so a Quorum key rotation needs no manual step. Separately created
+signing grants must be reviewed by the operator.
 
 The owner approval API can return the bootstrap signature. The adapter discards
 the result and does not log it; it must run in a trusted owner environment.
@@ -159,41 +138,6 @@ example and the merge example ran through the hosted gateway, with the indexer
 and the prover at gatekeeper's `/v1/spr`: enrollment, verification, bootstrap
 with automatic owner approval, deposit, private transfer, withdrawal and a
 two-note merge all finalized on devnet.
-
-## Operator provisioning
-
-Through the hosted gateway, enrollment issues the descriptor; this section is
-for direct mode. A signed wallet descriptor and pinned deployment trust
-material are application configuration. The operator signs the descriptor with
-its provisioning key;
-that key is not distributed to wallet clients. An application can deliver the
-descriptor during onboarding through its provisioning backend. This repository
-provides an offline operator tool, not a hosted provisioning API.
-
-If you are setting up a new development wallet, the optional helper prepares
-the client key and wallet and prints the descriptor request:
-
-```bash
-pnpm example examples/enroll.ts
-```
-
-Set `TURNKEY_ORGANIZATION_ID` and optionally `TURNKEY_WALLET_ADDRESS` for this
-helper; without an address it creates a wallet and prints the address to retain.
-The operator signs from the repository root:
-
-```bash
-node scripts/provision-descriptor.mjs --organization-id <org> --wallet-id <id> \
-  --address <address> --client-public-key <hex> --out descriptor.json
-```
-
-Save the public descriptor at `TVC_DESCRIPTOR_PATH`. With an existing descriptor,
-normal example runs configure permissions themselves; the helper is unnecessary.
-Client key files are preserved on parse or read errors.
-
-The enclave also refuses any operation without a current wallet grant. The
-example signs its own, for 15 minutes each, with the operator's wallet-grant key
-at `TVC_WALLET_GRANT_KEY_PATH` (`{"private_key": "<hex>"}`), whose public half is
-`GRANT_PUBLIC` in `apps/privacy-wallet/src/operations/mod.rs`.
 
 ## Run locally
 

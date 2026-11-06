@@ -75,7 +75,6 @@ export async function connectLocalUnattestedTvc(
     backend: config.backend,
     info,
     transport,
-    acceptedManifestDigests: [config.expectedManifestDigest],
     releasePolicyValidFromMs: 0n,
     releasePolicyExpiresAtMs: 0xffff_ffff_ffff_ffffn,
     nowMs,

@@ -4,9 +4,13 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use figment::Figment;
 use figment::providers::{Env, Format, Yaml};
+use p256::SecretKey;
+use p256::elliptic_curve::sec1::ToEncodedPoint;
 use serde::Deserialize;
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -121,6 +125,33 @@ pub struct WalletGrantConfig {
 
 pub const MIN_SECRET_LEN: usize = 32;
 
+/// The P-256 key `<name>.private_key` holds, as 32 bytes of hex, and its
+/// uncompressed SEC1 public key, which must be `<name>.expected_public_key`.
+pub fn load_signing_key(
+    name: &str,
+    private_key_hex: &str,
+    expected_public_key: &str,
+) -> anyhow::Result<(Zeroizing<[u8; 32]>, [u8; 65])> {
+    let mut secret = Zeroizing::new([0u8; 32]);
+    hex::decode_to_slice(private_key_hex, secret.as_mut_slice())
+        .with_context(|| format!("{name}.private_key must be 32 bytes of hex"))?;
+    let public_key =
+        public_key_of(&secret).with_context(|| format!("{name}.private_key is not a P-256 key"))?;
+    anyhow::ensure!(
+        hex::encode(public_key) == expected_public_key,
+        "{name}.private_key does not match {name}.expected_public_key"
+    );
+    Ok((secret, public_key))
+}
+
+/// The uncompressed SEC1 public key of a P-256 secret.
+pub fn public_key_of(secret: &[u8; 32]) -> anyhow::Result<[u8; 65]> {
+    let point = SecretKey::from_slice(secret)?
+        .public_key()
+        .to_encoded_point(false);
+    Ok(point.as_bytes().try_into()?)
+}
+
 pub fn load(path: &str) -> anyhow::Result<Config> {
     let config: Config = Figment::new()
         .merge(Yaml::file(path))
@@ -195,6 +226,29 @@ mod tests {
             config.enrollment.domains,
             ["devnet.helius-rpc.com", "beta-devnet.helius-rpc.com"]
         );
+    }
+
+    #[test]
+    fn a_signing_key_must_be_hex_and_match_its_public_key() {
+        let secret = "07".repeat(32);
+        let public = hex::encode(public_key_of(&[7; 32]).expect("valid key"));
+        let (loaded, loaded_public) =
+            load_signing_key("test", &secret, &public).expect("the key loads");
+        assert_eq!(
+            (*loaded, hex::encode(loaded_public)),
+            ([7; 32], public.clone())
+        );
+        for (secret, public) in [
+            (format!("0x{secret}"), public.as_str()),
+            ("07".repeat(31), public.as_str()),
+            ("00".repeat(32), public.as_str()),
+            (secret.clone(), "04"),
+        ] {
+            assert!(
+                load_signing_key("test", &secret, public).is_err(),
+                "{secret}"
+            );
+        }
     }
 
     #[test]

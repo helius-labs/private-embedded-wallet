@@ -73,6 +73,7 @@ export type OperationAnswer = {
 
 const MAX_DISCOVERY_RESPONSE_BYTES = 64n * 1024n;
 const MAX_PING_RESPONSE_BYTES = 64n * 1024n;
+/** A Turnkey Boot Proof as a gateway returns it beside an enclave answer. */
 const MAX_BOOT_PROOF_BYTES = 256n * 1024n;
 const MAX_SESSION_RESPONSE_BYTES =
   MAX_DISCOVERY_RESPONSE_BYTES + MAX_PING_RESPONSE_BYTES + MAX_BOOT_PROOF_BYTES;

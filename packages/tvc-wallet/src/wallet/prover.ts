@@ -19,13 +19,20 @@ const MAX_ATTESTATION_BYTES = 1n << 20n;
 const MAX_ANSWER_BYTES = 1n << 20n;
 const MAX_ERROR_BYTES = 4096n;
 const RESPONSE_NONCE_BYTES = 12;
-const MAX_PROVE_INPUTS = 52;
-const FAMILIES: Readonly<Record<string, string>> = {
+/** Mirrors `MAX_PROVE_INPUTS` in `crates/protocol/src/constants.rs`. */
+export const MAX_PROVE_INPUTS = 52;
+/** The SDK's circuit types and their proving-key families. */
+const FAMILIES = {
   "transfer-confidential": "transfer_confidential",
   "transfer-ring": "transfer_ring",
   merge: "merge",
   "merge-ring": "merge_ring",
-};
+} as const;
+
+/** Whether `value` is a circuit type the enclave proves. */
+export function isProveCircuit(value: unknown): value is keyof typeof FAMILIES {
+  return typeof value === "string" && Object.hasOwn(FAMILIES, value);
+}
 
 /**
  * Where the client proves and under which policy. `url` is the prover's base
@@ -55,11 +62,10 @@ function slotCount(value: unknown): number {
 /** The proving key file name, without `.key`; mirrors the enclave's `proving_key`. */
 export function provingKeyName(request: ProverRequest): string {
   const circuit = request["circuitType"];
-  const family = typeof circuit === "string" && Object.hasOwn(FAMILIES, circuit) ? FAMILIES[circuit] : undefined;
-  if (family === undefined || typeof circuit !== "string") throw new TvcError("InvalidProverRequest");
+  if (!isProveCircuit(circuit)) throw new TvcError("InvalidProverRequest");
   const inputs = slotCount(request["inputs"]);
   const outputs = circuit.startsWith("merge") ? 1 : slotCount(request["outputs"]);
-  return `${family}_${inputs}_${outputs}`;
+  return `${FAMILIES[circuit]}_${inputs}_${outputs}`;
 }
 
 /**

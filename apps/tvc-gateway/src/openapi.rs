@@ -13,9 +13,10 @@ use crate::error::{ApiError, Problem};
     info(
         title = "Helius Private Wallet API",
         version = "1",
-        description = "The backend of the Zolana private embedded wallet. Every enclave answer \
-                       carries the evidence the client verifies: the release policy, discovery, \
-                       the ping, and the Boot Proof of each replica that answers.",
+        description = "The backend of the Zolana private embedded wallet. Each successful enclave \
+                       answer carries the Boot Proof of the replica that gave it; a session also \
+                       carries discovery and the ping. The client verifies them against the \
+                       release it pins.",
     ),
     servers((url = "https://beta-devnet.helius-rpc.com", description = "Devnet")),
     paths(crate::app::session, crate::app::enroll, crate::app::operations),

@@ -169,24 +169,15 @@ Turnkey sub-organization must be named after the API key's Helius project. See
 
 ## Entry points
 
-- `@heliuslabs/spr-embedded-wallet`: client, `TvcKeys`, `snapshotCipher`, release-policy
-  verification, and `createTvcOperationAuthorizer` for a caller-held P-256
-  request key outside the browser.
+- `@heliuslabs/spr-embedded-wallet`: client, `TvcKeys`, `snapshotCipher`,
+  `DEVNET_RELEASE`, `TvcProverPolicy`, and `createTvcOperationAuthorizer` for a
+  caller-held P-256 request key outside the browser. The client verifies the
+  release policy itself.
 - `@heliuslabs/spr-embedded-wallet/protocol`: wire types, `TvcError`, hex codecs,
-  `clientKeyIdFor`, and the provisioner's side of a wallet descriptor:
-  `signWalletDescriptor` builds and signs the grant for one client key from the
-  release policy, `verifyWalletDescriptor` checks one, `provisioningSecret` reads the provisioning key and refuses
-  one the enclave was not built with. The wallet-grant issuer's side:
-  `walletGrantSecret` reads the grant key and refuses one the enclave was not
-  built with, `signWalletGrant`, and `verifyWalletGrantRenewal` for a
-  self-hosted issuer's renewal (`walletGrantRenewalMessage`).
-  `walletEnrollmentMessage` is the Sign-In With Solana message a wallet owner
-  signs to enroll with tvc-gateway.
-- `@heliuslabs/spr-embedded-wallet/browser`: non-exportable P-256 request signer, which
-  also signs grant renewals for its own descriptor (`signWalletGrantRenewal`),
+  `clientKeyIdFor`, and `walletEnrollmentMessage`, the Sign-In With Solana
+  message a wallet owner signs to enroll with tvc-gateway.
+- `@heliuslabs/spr-embedded-wallet/browser`: non-exportable P-256 request signer,
   the persisted enclave-state parser, and IndexedDB record helpers.
-- `@heliuslabs/spr-embedded-wallet/react`: `TvcWalletProvider` / `useTvcWallet` for the
-  connection lifecycle.
 - `@heliuslabs/spr-embedded-wallet/testing`: loopback-only unattested testkit client. The
   build fails if it becomes reachable from a production entry.
 

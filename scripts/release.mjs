@@ -6,8 +6,8 @@
 //   deploy  creates the TVC deployment, approves and provisions it for every
 //           operator, makes it live, and waits for /v1/info to serve it
 //   policy  assembles the release policy from /v1/info, signs it with a
-//           one-time authority key, and writes the trust material
-//   pins    copies the trust material into tvc-wallet and tvc-gateway
+//           one-time authority key, and pins the trust material in tvc-wallet
+//   pins    copies the signed policy and its authorities into tvc-gateway
 //
 //   node scripts/release.mjs <build|deploy|policy|pins|all> <release-id>
 //     [--image <reference>] [--unattended] [--prune-deployments]
@@ -41,7 +41,6 @@ const DEPLOYABLE_LIMIT = 3;
 
 const descriptorPath = (releaseId) => join(DEPLOY_DIR, `privacy-wallet-${releaseId}.deployment.json`);
 const recordPath = (releaseId) => join(DEPLOY_DIR, `privacy-wallet-${releaseId}.deploy.json`);
-const trustPath = (releaseId) => join(DEPLOY_DIR, `privacy-wallet-${releaseId}.trust.json`);
 
 function fail(message) {
   console.error(`error: ${message}`);
@@ -261,7 +260,7 @@ async function policy(releaseId, cfg) {
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
-  writeJson(trustPath(releaseId), {
+  writeJson(join(ROOT, PINS.trust), {
     releasePolicy: signed.releasePolicy,
     releaseAuthorities: signed.releaseAuthorities,
     qosIdentityPcrs: cfg.qosIdentityPcrs,
@@ -269,8 +268,9 @@ async function policy(releaseId, cfg) {
 }
 
 function pins(releaseId) {
-  const trust = readJson(trustPath(releaseId));
-  writeJson(join(ROOT, PINS.trust), trust);
+  const trust = readJson(join(ROOT, PINS.trust));
+  const pinned = trust.releasePolicy?.policy?.releaseId;
+  if (pinned !== releaseId) fail(`${PINS.trust} pins ${pinned}, not ${releaseId}; run the policy phase first`);
   writeJson(join(ROOT, PINS.releasePolicy), trust.releasePolicy);
   writeJson(join(ROOT, PINS.releaseAuthorities), trust.releaseAuthorities);
 }

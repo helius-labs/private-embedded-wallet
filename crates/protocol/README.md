@@ -3,8 +3,8 @@
 The wire protocol between a client and the privacy-wallet enclave, as Rust
 types and functions: strict JSON parsing, JCS canonicalization,
 domain-separated digests, P-256 client authorization, the QOS P-256 envelope,
-release-policy signing and threshold verification, the `/health` and
-`/v1/info` handlers, and named errors that carry no secret.
+release-policy signing and threshold verification, and named errors that
+carry no secret.
 [`packages/tvc-wallet/src/protocol`](../../packages/tvc-wallet/src/protocol)
 implements the same protocol in TypeScript; the [fixtures](#fixtures) keep the
 two in agreement. This document is the normative specification of v1.

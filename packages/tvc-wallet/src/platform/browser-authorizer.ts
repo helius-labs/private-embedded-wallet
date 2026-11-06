@@ -4,13 +4,11 @@ import type {
 } from "../client/operation-executor.js";
 import { clientKeyIdFor } from "../protocol/digest.js";
 import { TvcError } from "../protocol/error.js";
-import { walletGrantRenewalMessage, type WalletGrantRenewal } from "../protocol/grant.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
-import type { WalletDescriptor } from "../protocol/types.js";
 import { authorizedRequestMessage, compactLowS } from "./authorizer.js";
+import { openDatabase, STORE_NAME } from "./persisted-state.js";
 
 const DATABASE_NAME = "zolana-tvc-privacy-wallet-authorizer-v1";
-const STORE_NAME = "records";
 const KEY_RECORD = "client-auth-p256";
 function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(bytes.byteLength);
@@ -38,8 +36,6 @@ export type PersistentBrowserTvcAuthorizer = {
   readonly clientPublicKey: string;
   /** Closed-operation authorizer; it never exposes the private CryptoKey. */
   readonly authorizer: TvcOperationAuthorizer;
-  /** Signs a grant renewal for a descriptor whose only client is this key. */
-  signWalletGrantRenewal(descriptor: WalletDescriptor, issuedAtMs: bigint): Promise<WalletGrantRenewal>;
   /** Encrypts privacy material under a non-exportable, device-local AES key. */
   seal(plaintext: Uint8Array, additionalData: Uint8Array): Promise<PersistentBrowserTvcSealedValue>;
   /** Opens a value sealed by this browser profile. */
@@ -50,21 +46,6 @@ export type PersistentBrowserTvcAuthorizerOptions = {
   /** Selects an isolated persistent-key namespace for a demo or tenant. */
   readonly databaseName?: string;
 };
-
-function openDatabase(name: string): Promise<IDBDatabase> {
-  if (!globalThis.indexedDB) throw new TvcError("UnsupportedPlatform");
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, 1);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-        request.result.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onblocked = () => reject(new TvcError("StorageUnavailable"));
-    request.onerror = () => reject(request.error ?? new TvcError("StorageUnavailable"));
-    request.onsuccess = () => resolve(request.result);
-  });
-}
 
 function readRecord(database: IDBDatabase): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -242,20 +223,6 @@ export async function loadOrCreatePersistentBrowserTvcAuthorizer(
             ),
           );
         },
-      },
-      async signWalletGrantRenewal(descriptor, issuedAtMs) {
-        const [client, ...others] = descriptor.allowed_clients;
-        if (!client || others.length > 0 || client.client_public_key !== record.clientPublicKey) {
-          throw new TvcError("InvalidDescriptor", "the descriptor does not name this client key");
-        }
-        const signature = compactLowS(
-          await crypto.subtle.sign(
-            { name: "ECDSA", hash: "SHA-256" },
-            record.privateKey,
-            ownedBytes(walletGrantRenewalMessage(descriptor, issuedAtMs)),
-          ),
-        );
-        return Object.freeze({ descriptor, issuedAtMs: Number(issuedAtMs), signature: encodeLowerHex(signature) });
       },
       async seal(plaintext, additionalData) {
         if (plaintext.length === 0 || additionalData.length === 0) {

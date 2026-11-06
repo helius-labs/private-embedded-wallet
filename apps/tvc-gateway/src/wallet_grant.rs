@@ -5,20 +5,14 @@
 
 use std::collections::HashSet;
 
-use anyhow::Context;
-use p256::SecretKey;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
-use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 use zolana_tvc_protocol::constants::{API_VERSION, MAX_WALLET_GRANT_LIFETIME_MS};
 use zolana_tvc_protocol::digest::descriptor_digest;
-use zolana_tvc_protocol::{WalletDescriptor, WalletGrant, sign_wallet_grant};
+use zolana_tvc_protocol::{WalletDescriptor, WalletGrant, client_key_id, sign_wallet_grant};
 
-use crate::config::WalletGrantConfig;
+use crate::config::{WalletGrantConfig, load_signing_key};
 use crate::error::ApiError;
 use crate::project::ProjectId;
-
-const CLIENT_KEY_ID_PREFIX: &str = "tvc-browser-p256-";
 
 pub struct WalletGrants {
     secret: Zeroizing<[u8; 32]>,
@@ -28,17 +22,11 @@ pub struct WalletGrants {
 
 impl WalletGrants {
     pub fn new(config: &WalletGrantConfig) -> anyhow::Result<Self> {
-        let mut secret = Zeroizing::new([0u8; 32]);
-        hex::decode_to_slice(config.private_key.trim(), secret.as_mut_slice())
-            .context("wallet_grant.private_key must be 32 bytes of hex")?;
-        let public_key = SecretKey::from_slice(secret.as_slice())
-            .context("invalid P-256 wallet-grant key")?
-            .public_key()
-            .to_encoded_point(false);
-        anyhow::ensure!(
-            hex::encode(public_key.as_bytes()) == config.expected_public_key,
-            "wallet_grant.private_key does not match wallet_grant.expected_public_key"
-        );
+        let (secret, _) = load_signing_key(
+            "wallet_grant",
+            config.private_key.trim(),
+            &config.expected_public_key,
+        )?;
         let lifetime_ms = config.ttl_secs.saturating_mul(1_000);
         anyhow::ensure!(
             lifetime_ms > 0 && lifetime_ms <= MAX_WALLET_GRANT_LIFETIME_MS,
@@ -92,12 +80,6 @@ impl WalletGrants {
     }
 }
 
-/// The enclave's name for a client key.
-pub fn client_key_id(client_public_key: &[u8]) -> String {
-    let digest = Sha256::digest(client_public_key);
-    format!("{CLIENT_KEY_ID_PREFIX}{}", hex::encode(&digest[..16]))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use zolana_tvc_protocol::verify_wallet_grant;
@@ -109,14 +91,7 @@ pub(crate) mod tests {
     const NOW: u64 = 1_800_000_000_000;
 
     fn grant_public_key() -> [u8; 65] {
-        let point = SecretKey::from_slice(&[6; 32])
-            .expect("test grant key is invalid")
-            .public_key()
-            .to_encoded_point(false);
-        point
-            .as_bytes()
-            .try_into()
-            .expect("an uncompressed point is 65 bytes")
+        crate::config::public_key_of(&[6; 32]).expect("test grant key is invalid")
     }
 
     pub fn grants(revoked: Vec<String>) -> WalletGrants {
@@ -170,12 +145,5 @@ pub(crate) mod tests {
             revoked
         );
         assert_eq!(revoking.check_client_key(key).err(), revoked);
-    }
-
-    #[test]
-    fn client_key_id_matches_the_enclave_format() {
-        let id = client_key_id(&[4; 65]);
-        assert!(id.starts_with(CLIENT_KEY_ID_PREFIX));
-        assert_eq!(id.len(), CLIENT_KEY_ID_PREFIX.len() + 32);
     }
 }

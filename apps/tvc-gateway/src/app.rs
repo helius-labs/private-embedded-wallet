@@ -210,7 +210,7 @@ pub(crate) async fn enroll(
     Caller(project): Caller,
     ApiJson(request): ApiJson<EnrollmentRequest>,
 ) -> Result<Json<Enrolled>, ApiError> {
-    let (input, _) = state.enrollment.verify(&request, clock_ms()?)?;
+    let input = state.enrollment.verify(&request, clock_ms()?)?;
     state
         .wallet_grants
         .check_client_key(&input.client_public_key)?;
@@ -601,16 +601,10 @@ mod tests {
             .0,
             StatusCode::PAYLOAD_TOO_LARGE
         );
-        for (method, path) in [
-            ("GET", "/v1/private-wallet/info"),
-            ("POST", "/v1/private-wallet/ping"),
-            ("GET", "/v1/private-wallet/policy"),
-            ("POST", "/v1/private-wallet/wallet-grant"),
-            ("POST", "/v1/private-wallet/enrollment-challenge"),
-        ] {
+        for (method, path) in [("POST", "/v1/private-wallet/unknown"), ("GET", "/v1/other")] {
             assert_eq!(
-                call(&state, request(method, path, "{}")).await.0,
-                StatusCode::NOT_FOUND,
+                call(&state, request(method, path, "{}")).await,
+                (StatusCode::NOT_FOUND, "NotFound".to_owned()),
                 "{method} {path}"
             );
         }

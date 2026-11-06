@@ -76,7 +76,6 @@ export type ConnectedTvcRuntime = {
   readonly backend: TvcBackend;
   readonly info: ServiceInfo;
   readonly transport: TvcTransport;
-  readonly acceptedManifestDigests: readonly string[];
   readonly releasePolicyValidFromMs: bigint;
   readonly releasePolicyExpiresAtMs: bigint;
   readonly nowMs: () => bigint;
@@ -199,7 +198,6 @@ export async function connectAndVerifyTvc(
     backend,
     info,
     transport,
-    acceptedManifestDigests: releasePolicy.policy.acceptedManifestDigests,
     releasePolicyValidFromMs,
     releasePolicyExpiresAtMs,
     nowMs,

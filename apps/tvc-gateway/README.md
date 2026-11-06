@@ -176,9 +176,9 @@ files; publish a new image and redeploy.
 
 ## Development
 
-The crate is outside the root workspace, like `crates/boot-proof`, so the
-Turnkey client and server graph stay out of the enclave build. `just fmt`,
-`just lint` and `just test` cover it. Directly:
+The crate is outside the root workspace, so the Turnkey client and server
+graph stay out of the enclave build. `just fmt`, `just lint` and `just test`
+cover it. Directly:
 
 ```sh
 cargo clippy --manifest-path apps/tvc-gateway/Cargo.toml --all-targets --locked -- -D warnings
@@ -202,7 +202,7 @@ starts:
 
 - the local unattested testkit enclave (`zolana-tvc-privacy-wallet-local`), with fixed test keys and mock custody;
 - a mock Turnkey answering the ownership and Boot Proof queries (`e2e/mock-turnkey.ts`);
-- the gateway, with a release policy from `cargo run --example local_release_policy`.
+- the gateway, with a release policy from `cargo run -p zolana-tvc-protocol --example sign-release-policy -- --local-testkit <dir>`.
 
 The tests send the headers gatekeeper would add and drive a wallet through
 the testkit client in gateway mode: enrollment, one session, Bootstrap,

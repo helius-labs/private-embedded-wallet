@@ -4,14 +4,8 @@ FROM rust:1.98-alpine3.24@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700
 ARG SPR_NETWORK
 ENV SPR_NETWORK=${SPR_NETWORK}
 ENV RUSTFLAGS='-C target-feature=+crt-static'
-ENV OPENSSL_STATIC='1'
 ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --locked --release --package zolana-tvc-privacy-wallet --bin zolana-tvc-privacy-wallet'
 ENV RELEASE_DIR='/src/target/x86_64-unknown-linux-musl/release'
-
-RUN apk add --no-cache \
-    openssl-dev=3.5.9-r0 \
-    openssl-libs-static=3.5.9-r0 \
-    pkgconf=2.5.1-r0
 
 ADD . /src/
 WORKDIR /src/

@@ -73,9 +73,10 @@ export default async function setup({ provide }: GlobalSetupContext) {
     "--features", "local-dev", "--bin", "zolana-tvc-privacy-wallet-local",
   );
   cargoBuild(
-    "--manifest-path", join(GATEWAY_DIR, "Cargo.toml"),
-    "--bin", "tvc-gateway", "--example", "local_release_policy",
+    "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "zolana-tvc-protocol",
+    "--example", "sign-release-policy",
   );
+  cargoBuild("--manifest-path", join(GATEWAY_DIR, "Cargo.toml"), "--bin", "tvc-gateway");
 
   const logs = mkdtempSync(join(tmpdir(), "tvc-gateway-e2e-"));
   console.log(`tvc-gateway e2e logs: ${logs}`);
@@ -94,7 +95,7 @@ export default async function setup({ provide }: GlobalSetupContext) {
   ]);
 
   const policyDir = join(logs, "policy");
-  execFileSync(join(GATEWAY_DIR, "target/debug/examples/local_release_policy"), [policyDir]);
+  execFileSync(join(REPO_DIR, "target/debug/examples/sign-release-policy"), ["--local-testkit", policyDir]);
   const gatewayPort = await freePort();
   const originAuth = `Bearer local-e2e-${hex(randomBytes(16))}`;
   const turnkeyKey = hex(randomBytes(32));

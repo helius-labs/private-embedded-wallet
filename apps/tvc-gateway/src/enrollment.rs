@@ -55,13 +55,12 @@ impl Enrollment {
         }
     }
 
-    /// The enrollment the wallet address signed within the last five minutes,
-    /// and the message it signed.
+    /// The enrollment the wallet address signed within the last five minutes.
     pub fn verify(
         &self,
         request: &EnrollmentRequest,
         now_ms: u64,
-    ) -> Result<(EnrollmentInput, String), ApiError> {
+    ) -> Result<EnrollmentInput, ApiError> {
         let fresh = request.issued_at_ms <= now_ms.saturating_add(MAX_CLOCK_SKEW_MS)
             && now_ms.saturating_sub(request.issued_at_ms) <= MAX_ENROLLMENT_AGE_MS;
         if !fresh {
@@ -72,7 +71,7 @@ impl Enrollment {
         for domain in &self.domains {
             let message = message(domain, request).ok_or(ApiError::InvalidEnrollmentRequest)?;
             if verify_owner_signature(&input, &message, &request.owner_signature).is_ok() {
-                return Ok((input, message));
+                return Ok(input);
             }
         }
         Err(ApiError::InvalidOwnerEnrollmentSignature)
@@ -204,10 +203,9 @@ pub(crate) mod tests {
     }
 
     pub fn input() -> EnrollmentInput {
-        let (input, _) = Enrollment::new(&[DOMAIN.to_owned()])
+        Enrollment::new(&[DOMAIN.to_owned()])
             .verify(&signed_request(NOW), NOW)
-            .expect("test request is invalid");
-        input
+            .expect("test request is invalid")
     }
 
     #[test]
@@ -255,11 +253,7 @@ pub(crate) mod tests {
         for domain in ["devnet.helius-rpc.com", DOMAIN] {
             let mut request = signed_request(NOW);
             request.owner_signature = sign(&owner(), domain, &request);
-            let (_, signed) = enrollment.verify(&request, NOW).expect(domain);
-            assert!(
-                signed.starts_with(&format!("{domain} wants you")),
-                "{domain}"
-            );
+            assert!(enrollment.verify(&request, NOW).is_ok(), "{domain}");
         }
     }
 

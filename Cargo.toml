@@ -5,7 +5,6 @@ members = [
 ]
 exclude = [
     "apps/tvc-gateway",
-    "crates/boot-proof",
 ]
 resolver = "2"
 

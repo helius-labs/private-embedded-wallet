@@ -40,29 +40,9 @@ export {
   walletGrantDigest,
 } from "./protocol/digest.js";
 export {
-  DEVELOPMENT_WALLET_GRANT_PUBLIC_KEY,
-  MAX_WALLET_GRANT_LIFETIME_MS,
-  MAX_WALLET_GRANT_RENEWAL_SKEW_MS,
-  signWalletGrant,
-  signWalletGrantRenewal,
-  verifyWalletGrantRenewal,
-  WALLET_GRANT_RENEWAL_DOMAIN,
-  walletGrantRenewalMessage,
-  walletGrantSecret,
-  type WalletGrantInput,
-  type WalletGrantRenewal,
-} from "./protocol/grant.js";
-export {
   WALLET_ENROLLMENT_STATEMENT,
   walletEnrollmentMessage,
   type WalletEnrollment,
 } from "./protocol/enrollment.js";
 export { TvcError, TvcHttpError } from "./protocol/error.js";
 export { decodeLowerHex, encodeLowerHex } from "./protocol/hex.js";
-export {
-  DEVELOPMENT_PROVISIONING_PUBLIC_KEY,
-  provisioningSecret,
-  signWalletDescriptor,
-  verifyWalletDescriptor,
-  type WalletDescriptorInput,
-} from "./protocol/provisioning.js";

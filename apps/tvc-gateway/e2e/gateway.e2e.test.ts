@@ -4,7 +4,6 @@ import { getAddressDecoder } from "@solana/kit";
 import {
   identityOf,
   sealedSeedOf,
-  type BootstrapResult,
   type TvcClient,
   type TvcTransport,
   type VerifiedConnection,
@@ -13,6 +12,7 @@ import {
   decodeLowerHex,
   encodeLowerHex,
   walletEnrollmentMessage,
+  type BootstrapResult,
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import { createLocalTvcClient } from "@heliuslabs/spr-embedded-wallet/testing";
@@ -73,9 +73,7 @@ it("serves health without credentials", async () => {
 });
 
 it("serves only /session, /enroll and /operations", async () => {
-  for (const path of ["/info", "/ping", "/policy", "/wallet-grant", "/enrollment-challenge"]) {
-    expect(await post(path, {}), path).toMatchObject(problem(404, "NotFound"));
-  }
+  expect(await post("/unknown", {})).toMatchObject(problem(404, "NotFound"));
 });
 
 describe("enrollment", () => {
