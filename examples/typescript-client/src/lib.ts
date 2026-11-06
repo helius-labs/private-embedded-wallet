@@ -36,24 +36,23 @@ import {
   identityOf,
   sealedSeedOf,
   type BootProofResolver,
-  type SealedSeed,
   type QosIdentityPcrs,
   type ShieldedIdentity,
   type TvcClient,
   type TvcProverConfig,
   type TvcProverNetwork,
   TvcProverPolicy,
-  type WalletDescriptor,
   type VerifiedConnection,
 } from "@heliuslabs/spr-embedded-wallet";
+import { signWalletGrant, walletGrantSecret } from "@heliuslabs/spr-embedded-wallet/operator";
 import {
   clientKeyIdFor,
   encodeLowerHex,
-  signWalletGrant,
   walletEnrollmentMessage,
-  walletGrantSecret,
   type PinnedReleaseAuthorities,
+  type SealedSeed,
   type SignedReleasePolicy,
+  type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import { createLocalTvcClient, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
 import { bootstrapWithApproval } from "./bootstrap-approval.js";

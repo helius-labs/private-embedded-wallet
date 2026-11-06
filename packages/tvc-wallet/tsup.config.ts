@@ -11,9 +11,11 @@ function verifyProductionBoundary(): void {
     "dist/index.js",
     "dist/protocol.js",
     "dist/browser.js",
+    "dist/operator.js",
     "dist/index.cjs",
     "dist/protocol.cjs",
     "dist/browser.cjs",
+    "dist/operator.cjs",
   ];
   // Names that exist only in the testkit: its session factory and its pinned
   // key fixture.
@@ -42,6 +44,7 @@ export default defineConfig({
     index: "src/index.ts",
     protocol: "src/protocol.ts",
     browser: "src/browser.ts",
+    operator: "src/operator.ts",
     testing: "src/testing.ts",
   },
   format: ["esm", "cjs"],
@@ -49,7 +52,7 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   // Shared code is hoisted into chunks instead of being copied into each of the
-  // four entry points. Shared symbols are reachable from more than one entry,
+  // entry points. Shared symbols are reachable from more than one entry,
   // so without this an app importing from two of them ships the client core and
   // the crypto stack twice.
   splitting: true,

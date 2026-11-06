@@ -1,9 +1,9 @@
-import { signP256Prehash, verifyP256Prehash } from "../crypto/p256.js";
+import { signP256Prehash } from "../crypto/p256.js";
 import { SEC1_UNCOMPRESSED_LEN } from "./constants.js";
 import { descriptorDigest } from "./digest.js";
 import { TvcError } from "./error.js";
 import { p256SecretFromKeyFile } from "./key-file.js";
-import { decodeLowerHex, encodeLowerHex } from "./hex.js";
+import { encodeLowerHex } from "./hex.js";
 import type { ReleasePolicy, WalletDescriptor } from "./types.js";
 
 /**
@@ -100,19 +100,4 @@ export function signWalletDescriptor(
     ...descriptor,
     provisioning_signature: encodeLowerHex(signP256Prehash(secret, descriptorDigest(descriptor))),
   };
-}
-
-/**
- * Checks a descriptor's provisioning signature against the provisioner's
- * public key, as the enclave does before any operation.
- */
-export function verifyWalletDescriptor(
-  descriptor: WalletDescriptor,
-  expectedPublicKey: string = DEVELOPMENT_PROVISIONING_PUBLIC_KEY,
-): void {
-  verifyP256Prehash(
-    decodeLowerHex(expectedPublicKey),
-    descriptorDigest(descriptor),
-    decodeLowerHex(descriptor.provisioning_signature),
-  );
 }

@@ -11,7 +11,6 @@ export type { PersistentBrowserTvcWalletState } from "./platform/browser-state.j
 export {
   clearRecord,
   hasOnlyKeys,
-  isSolanaAddress,
   loadRecord,
   saveRecord,
 } from "./platform/persisted-state.js";

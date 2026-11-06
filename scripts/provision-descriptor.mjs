@@ -15,7 +15,7 @@
 //
 // A descriptor is not a secret: it names public keys and identifiers. Send it
 // to the client, which stores it at its TVC_DESCRIPTOR_PATH. It needs
-// `pnpm build:ts` for the protocol package it imports.
+// `pnpm build:ts` for the tvc-wallet entries it imports.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -37,9 +37,9 @@ function readText(path) {
   }
 }
 
-async function protocol() {
+async function entry(name) {
   try {
-    return await import(resolve(ROOT, "packages/tvc-wallet/dist/protocol.js"));
+    return await import(resolve(ROOT, `packages/tvc-wallet/dist/${name}.js`));
   } catch {
     fail("packages/tvc-wallet is not built: run `pnpm install && pnpm build:ts` first");
   }
@@ -67,7 +67,8 @@ if (!keyJson && !values["provisioning-key"]) {
 const trust = JSON.parse(readText(resolve(ROOT, values.trust)));
 if (!trust.releasePolicy?.policy) fail(`${values.trust} does not hold a release policy`);
 
-const { TvcError, provisioningSecret, signWalletDescriptor } = await protocol();
+const { TvcError } = await entry("protocol");
+const { provisioningSecret, signWalletDescriptor } = await entry("operator");
 let descriptor;
 try {
   const secret = provisioningSecret(keyJson ?? readText(values["provisioning-key"]));

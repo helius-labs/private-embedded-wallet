@@ -317,5 +317,3 @@ export const SERVICE_INFO_KEYS = [
   "proof_type",
   "boot_proof_lookup_key",
 ] as const;
-
-export const HEALTH_KEYS = ["status"] as const;
