@@ -1,0 +1,100 @@
+# Publishes @heliuslabs/spr-embedded-wallet when a
+# `spr-embedded-wallet-v<version>` tag is pushed. The tag must name the
+# version in packages/tvc-wallet/package.json, and the package's CHANGELOG.md
+# must have an entry for it. The TypeScript checks run first; the publish job
+# then waits for approval in the `npm-publish` environment. npm's trusted
+# publishing authenticates it over OIDC and adds provenance, so no npm token
+# is stored. Every release becomes `latest` on npm and a GitHub Release on the
+# tag.
+
+name: publish-spr-embedded-wallet
+
+on:
+  push:
+    tags: ["spr-embedded-wallet-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-spr-embedded-wallet
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: The tag names the package's version
+        id: version
+        run: |
+          version="$(node -p 'require("./packages/tvc-wallet/package.json").version')"
+          if [[ "$GITHUB_REF_NAME" != "spr-embedded-wallet-v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not name version $version"
+            exit 1
+          fi
+          if ! grep -qE "^## ${version//./\\.}( |$)" packages/tvc-wallet/CHANGELOG.md; then
+            echo "::error::packages/tvc-wallet/CHANGELOG.md has no entry for $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: npx --yes pnpm@9.15.0 install --frozen-lockfile
+      - run: npx --yes pnpm@9.15.0 ci:ts
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm-publish
+    permissions:
+      contents: write # the GitHub Release
+      id-token: write # npm trusted publishing and provenance
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      # The check job ran the dependencies' install scripts; this job holds the
+      # OIDC token, so it runs none. `npm publish` builds the package (prepack).
+      - run: npx --yes pnpm@9.15.0 install --frozen-lockfile --ignore-scripts
+      - name: Publish
+        working-directory: packages/tvc-wallet
+        run: npm publish --provenance --access public --tag latest
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes="$(node --input-type=module - "$VERSION" <<'NODE'
+          import { readFileSync } from "node:fs";
+          const version = process.argv[2];
+          const lines = readFileSync("packages/tvc-wallet/CHANGELOG.md", "utf8").split("\n");
+          const start = lines.findIndex((line) => line === `## ${version}` || line.startsWith(`## ${version} `));
+          const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+          const body = start < 0 ? "" : lines.slice(start + 1, end < 0 ? undefined : end).join("\n").trim();
+          const npm = `https://www.npmjs.com/package/@heliuslabs/spr-embedded-wallet/v/${version}`;
+          process.stdout.write(
+            body === ""
+              ? `Published to npm: ${npm}\n`
+              : `Published to npm: ${npm}\n\n${body}\n`,
+          );
+          NODE
+          )"
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "@heliuslabs/spr-embedded-wallet $VERSION" \
+            --notes "$notes" \
+            --latest
