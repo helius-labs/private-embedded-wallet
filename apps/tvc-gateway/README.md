@@ -176,9 +176,9 @@ files; publish a new image and redeploy.
 
 ## Development
 
-The crate is outside the root workspace, like `crates/boot-proof`, so the
-Turnkey client and server graph stay out of the enclave build. `just fmt`,
-`just lint` and `just test` cover it. Directly:
+The crate is outside the root workspace, so the Turnkey client and server
+graph stay out of the enclave build. `just fmt`, `just lint` and `just test`
+cover it. Directly:
 
 ```sh
 cargo clippy --manifest-path apps/tvc-gateway/Cargo.toml --all-targets --locked -- -D warnings

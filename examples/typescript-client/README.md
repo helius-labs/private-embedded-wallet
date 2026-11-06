@@ -75,9 +75,7 @@ supplies what the gateway would:
 - A Boot Proof source. Only a user of the TVC organization can read the
   enclave's Boot Proof from Turnkey, so either a server the operator runs
   returns it (`TVC_BOOT_PROOF_URL`; the wallet-kit demo serves
-  `POST /api/tvc/boot-proof`, and
-  [`zolana-tvc-boot-proof`](../../crates/boot-proof/README.md) is the same
-  fetch as a command), or your Turnkey API key is a user of that organization
+  `POST /api/tvc/boot-proof`), or your Turnkey API key is a user of that organization
   and reads it directly (`TVC_ORGANIZATION_ID`).
 - A wallet descriptor for your client key, signed by the operator. See
   [Operator provisioning](#operator-provisioning).
