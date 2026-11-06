@@ -8,7 +8,7 @@ import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import { compactLowS, signedRequestMessage } from "./signer.js";
 import { openDatabase, STORE_NAME } from "./persisted-state.js";
 
-const DATABASE_NAME = "zolana-tvc-privacy-wallet-authorizer-v1";
+const DATABASE_NAME = "spr-embedded-wallet-signer-v1";
 const KEY_RECORD = "client-auth-p256";
 function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(bytes.byteLength);
