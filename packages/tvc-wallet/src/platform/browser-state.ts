@@ -1,3 +1,4 @@
+import { API_VERSION } from "../protocol/constants.js";
 import { TvcError } from "../protocol/error.js";
 import type { SealedSeed, WalletDescriptor } from "../protocol/types.js";
 import type { ShieldedIdentity } from "../wallet/client.js";
@@ -6,7 +7,7 @@ import { hasOnlyKeys, isLowerHex, isSolanaAddress } from "./persisted-state.js";
 const DESCRIPTOR_KEYS = [
   "version",
   "security_domain_id",
-  "environment",
+  "network",
   "turnkey_organization_id",
   "turnkey_wallet_id",
   "address",
@@ -28,7 +29,7 @@ const STATE_KEYS = [
  * through `parsePersistentBrowserTvcWalletState`.
  */
 export type PersistentBrowserTvcWalletState = {
-  readonly version: 7;
+  readonly version: 1;
   readonly clientKeyId: string;
   readonly walletDescriptor: WalletDescriptor;
   readonly identity: ShieldedIdentity | null;
@@ -83,12 +84,13 @@ export function parsePersistentBrowserTvcWalletState(
   const clientKeyId = state.clientKeyId ?? "";
   if (
     !hasOnlyKeys(value, STATE_KEYS) ||
-    state.version !== 7 ||
+    state.version !== 1 ||
     !clientKeyId.startsWith("tvc-browser-p256-") ||
     !isLowerHex(clientKeyId.slice("tvc-browser-p256-".length), 16) ||
     !descriptor ||
     !hasOnlyKeys(descriptor, DESCRIPTOR_KEYS) ||
-    descriptor.version !== 1 ||
+    descriptor.version !== API_VERSION ||
+    (descriptor.network !== "devnet" && descriptor.network !== "mainnet") ||
     typeof descriptor.turnkey_wallet_id !== "string" ||
     !isLowerHex(descriptor.provisioning_signature) ||
     !isSolanaAddress(descriptor.address ?? "") ||

@@ -42,7 +42,7 @@ export function requestDigest(request: object): Uint8Array {
     throw new TvcError("InvalidCanonicalJson");
   }
   delete authorization.signature;
-  if (!("client_key_id" in authorization) || !("scheme" in authorization)) {
+  if (!("client_key_id" in authorization)) {
     throw new TvcError("InvalidCanonicalJson");
   }
   return domainSeparatedHash(REQUEST_DIGEST_DOMAIN, te.encode(canonicalizeJsonValue(cloned)));

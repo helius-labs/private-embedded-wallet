@@ -40,7 +40,7 @@ import {
   type ProverAttestation,
   type TvcProverConfig,
 } from "./prover.js";
-import { attestationReuseMs, type HeldProverPolicy } from "./prover-policy.js";
+import { TvcProverPolicy, attestationReuseMs, type HeldProverPolicy } from "./prover-policy.js";
 
 export type TvcKeysInput = {
   readonly client: TvcClient;
@@ -49,7 +49,10 @@ export type TvcKeysInput = {
   readonly sealedSeed: SealedSeed;
   /** The identity `bootstrap` returned; see `shieldedAddressOf`. */
   readonly identity: ShieldedIdentity;
-  /** The attested prover proofs are sealed to and posted at. */
+  /**
+   * The attested prover proofs are sealed to and posted at, under the signed
+   * policy of the client's network unless it names another.
+   */
   readonly prover: TvcProverConfig;
 };
 
@@ -86,6 +89,7 @@ export class TvcKeys implements WalletKeys {
   readonly #sealedSeed: SealedSeed;
   readonly #address: ShieldedAddress;
   readonly #prover: TvcProverConfig;
+  readonly #policy: TvcProverPolicy;
   #attested: ProverAttestation | undefined;
 
   constructor(input: TvcKeysInput) {
@@ -94,6 +98,7 @@ export class TvcKeys implements WalletKeys {
     this.#sealedSeed = input.sealedSeed;
     this.#address = shieldedAddressOf(input.identity);
     this.#prover = input.prover;
+    this.#policy = input.prover.policy ?? TvcProverPolicy.forNetwork(input.client.network);
   }
 
   address(): ShieldedAddress {
@@ -211,7 +216,7 @@ export class TvcKeys implements WalletKeys {
   async #sealAndProve(request: ProverRequest, options: OperationOptions): Promise<unknown> {
     let fresh = false;
     for (let attempt = 0; ; attempt += 1) {
-      const policy = await this.#prover.policy.current(options.signal);
+      const policy = await this.#policy.current(options.signal);
       const attested = await this.#attestation(policy, fresh, options.signal);
       let sealed;
       try {
@@ -257,7 +262,7 @@ export class TvcKeys implements WalletKeys {
   /** The prover likely changed release: attest again under a new policy download. */
   #forgetProver(): void {
     this.#attested = undefined;
-    this.#prover.policy.invalidate();
+    this.#policy.invalidate();
   }
 
   /** Respect both the item ceiling and the executor's serialized byte budget. */

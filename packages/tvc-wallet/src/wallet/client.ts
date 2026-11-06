@@ -1,13 +1,22 @@
+import { p256 } from "@noble/curves/p256";
+
+import type { TvcBackend } from "../client/backend.js";
+import type { OperationsConfig } from "../client/operation-executor.js";
 import type { TvcRequestOptions } from "../client/request.js";
 import type { VerifiedConnection } from "../client/connection.js";
-import { createTvcSession, type TvcSession, type TvcSessionConfig } from "../client/session.js";
+import { createTvcSession, type TvcSession } from "../client/session.js";
+import type { TvcTransport } from "../client/transport.js";
+import { parseQosP256Public } from "../crypto/qos.js";
 import { TvcError } from "../protocol/error.js";
-import { requireHex } from "../protocol/hex.js";
+import { decodeLowerHex, encodeLowerHex, requireHex } from "../protocol/hex.js";
+import { requireNetwork } from "../protocol/network.js";
+import { releaseFor, type ReleaseTrust } from "../protocol/releases.js";
 import type {
   BootstrapResult,
   SealedSeed,
   DecryptItem,
   DeriveItem,
+  Network,
   ProverRequest,
   ProverSealing,
   SealedProverRequest,
@@ -22,7 +31,33 @@ import {
   type OperationOptions,
 } from "./operations.js";
 
-export type TvcClientConfig = TvcSessionConfig;
+export type TvcClientConfig = {
+  /**
+   * The network the enclave serves. It picks the release this package pins
+   * for it, and with it the Turnkey service key; `TvcKeys` downloads its
+   * prover policy; enrollment signs for its chain.
+   */
+  readonly network: Network;
+  /** Where the client reaches the enclave. */
+  readonly backend: TvcBackend;
+  /** Descriptor-bound authority for the wallet operations; absent for a verify-only client. */
+  readonly operations?: OperationsConfig;
+  /**
+   * The release to verify the enclave against in place of the one this
+   * package pins for `network`, for a local or test deployment. Its policy
+   * must still name `network`.
+   */
+  readonly release?: ReleaseTrust;
+  /**
+   * Verifier clock. A function, not an instant: a fixed value would freeze
+   * request timestamps and certificate-chain validation for the client's
+   * whole life.
+   */
+  readonly nowMs?: () => bigint;
+  readonly transport?: TvcTransport;
+  /** Total deadline for each verification or operation, including proof lookup. Defaults to two minutes. */
+  readonly requestTimeoutMs?: number;
+};
 
 /**
  * The wallet's public shielded identity.
@@ -51,6 +86,14 @@ export type BootstrapOptions = OperationOptions & {
  * another descriptor or past a Quorum key rotation.
  */
 export type TvcClient = {
+  /** The network the enclave serves. */
+  readonly network: Network;
+  /**
+   * The Turnkey API key the enclave signs the bootstrap message with, as
+   * compressed P-256 hex: the signing half of the release's Quorum key. The
+   * wallet's bootstrap policy names the user that holds it.
+   */
+  readonly servicePublicKey: string;
   connectAndVerify(options?: TvcRequestOptions): Promise<VerifiedConnection>;
   /** Derives the shielded identity and returns it sealed. Also the recovery path. */
   bootstrap(connection: VerifiedConnection, options?: BootstrapOptions): Promise<BootstrapResult>;
@@ -111,8 +154,25 @@ function sameIdentity(a: ShieldedIdentity, b: ShieldedIdentity): boolean {
   );
 }
 
-export function clientFromSession(session: TvcSession): TvcClient {
+/** The compressed signing half of a QOS public key, which Turnkey names an API key by. */
+export function turnkeyServicePublicKey(quorumPublicKey: string): string {
+  let signing: Uint8Array;
+  try {
+    signing = parseQosP256Public(decodeLowerHex(quorumPublicKey)).signing;
+  } catch {
+    throw new TvcError("ReleasePolicyInvalid", "the Quorum public key is not two P-256 points");
+  }
+  return encodeLowerHex(p256.ProjectivePoint.fromHex(signing).toRawBytes(true));
+}
+
+export function clientFromSession(
+  session: TvcSession,
+  network: Network,
+  servicePublicKey: string,
+): TvcClient {
   return {
+    network,
+    servicePublicKey,
     connectAndVerify: (options) => session.connectAndVerify(options),
 
     async bootstrap(connection, options) {
@@ -169,6 +229,17 @@ export function clientFromSession(session: TvcSession): TvcClient {
   };
 }
 
+/**
+ * A client for the enclave of `config.network`, verified against the release
+ * this package pins for it or `config.release`. A network without a pinned
+ * release needs `config.release`.
+ */
 export function createTvcClient(config: TvcClientConfig): TvcClient {
-  return clientFromSession(createTvcSession(config));
+  const network = requireNetwork(config.network);
+  const release = config.release ?? releaseFor(network);
+  return clientFromSession(
+    createTvcSession({ ...config, network, release }),
+    network,
+    turnkeyServicePublicKey(release.releasePolicy.policy.quorumPublicKey),
+  );
 }

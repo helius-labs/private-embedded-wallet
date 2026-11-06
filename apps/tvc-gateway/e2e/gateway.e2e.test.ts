@@ -13,6 +13,7 @@ import {
   encodeLowerHex,
   walletEnrollmentMessage,
   type BootstrapResult,
+  type Network,
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import { createLocalTvcClient } from "@heliuslabs/spr-embedded-wallet/testing";
@@ -55,8 +56,13 @@ function problem(status: number, code: string) {
   return { status, body: expect.objectContaining({ status, code }) };
 }
 
-/** A `POST /enroll` body the owner signed for the gateway at `domain`. */
-function enrollment({ issuedAtMs = Date.now(), signer = ownerSeed, domain = new URL(gatewayUrl).host } = {}) {
+/** A `POST /enroll` body the owner signed for the gateway at `domain`, which serves `network`. */
+function enrollment({
+  issuedAtMs = Date.now(),
+  signer = ownerSeed,
+  domain = new URL(gatewayUrl).host,
+  network = "devnet" as Network,
+} = {}) {
   const fields = {
     organizationId: ORGANIZATION_ID,
     turnkeyWalletId: TURNKEY_WALLET_ID,
@@ -64,7 +70,7 @@ function enrollment({ issuedAtMs = Date.now(), signer = ownerSeed, domain = new 
     clientPublicKey,
     issuedAtMs,
   };
-  const message = new TextEncoder().encode(walletEnrollmentMessage({ domain, ...fields }));
+  const message = new TextEncoder().encode(walletEnrollmentMessage({ domain, network, ...fields }));
   return { ...fields, ownerSignature: encodeLowerHex(ed25519.sign(message, signer)) };
 }
 
@@ -87,7 +93,7 @@ describe("enrollment", () => {
     expect(await response.json()).toEqual({
       title: "Bad Request",
       status: 400,
-      detail: "the enrollment is more than five minutes old or more than 30 seconds ahead",
+      detail: "the enrollment is more than five minutes old or more than a minute ahead",
       code: "StaleEnrollment",
     });
   });
@@ -111,6 +117,12 @@ describe("enrollment", () => {
     );
   });
 
+  it("refuses an enrollment signed for another network", async () => {
+    expect(await post("/enroll", enrollment({ network: "mainnet" }))).toMatchObject(
+      problem(400, "InvalidOwnerEnrollmentSignature"),
+    );
+  });
+
   it("refuses an enrollment for another project's sub-organization", async () => {
     expect(await post("/enroll", enrollment(), "other-project")).toMatchObject(
       problem(403, "SubOrganizationNotOwned"),
@@ -122,6 +134,7 @@ describe("enrollment", () => {
     const first = await post("/enroll", signed);
     expect(first.status).toBe(200);
     expect(first.body.descriptor).toMatchObject({
+      network: "devnet",
       address: ownerAddress,
       allowed_clients: [{ client_public_key: clientPublicKey }],
     });
@@ -153,6 +166,7 @@ describe("a wallet enrolled through the gateway", () => {
   beforeAll(async () => {
     descriptor = (await post("/enroll", enrollment())).body.descriptor;
     tvc = createLocalTvcClient({
+      network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(privateWallet) },
       solanaAddress: ownerAddress,
       walletDescriptor: descriptor,
@@ -188,9 +202,9 @@ describe("a wallet enrolled through the gateway", () => {
     expect(resent.body).toEqual(JSON.parse(firstSent().answer));
   });
 
-  it("refuses another project's resend of an answered operation", async () => {
+  it("treats another project's resend as its own request, which the ownership check refuses", async () => {
     expect(await post("/operations", firstOperation(), "other-project")).toMatchObject(
-      problem(409, "ReplayedRequest"),
+      problem(403, "SubOrganizationNotOwned"),
     );
   });
 
@@ -238,6 +252,7 @@ describe("a direct caller with a Helius API key", () => {
   it("connects and bootstraps with the key in the endpoint's query", async () => {
     const { descriptor } = (await postDirect("/enroll", enrollment(), { "x-api-key": apiKey })).body;
     const tvc = createLocalTvcClient({
+      network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(`${privateWallet}?api-key=${apiKey}`) },
       solanaAddress: ownerAddress,
       walletDescriptor: descriptor,
@@ -246,3 +261,4 @@ describe("a direct caller with a Helius API key", () => {
     expect(identityOf(await tvc.bootstrap(connection)).solanaAddress).toBe(ownerAddress);
   });
 });
+

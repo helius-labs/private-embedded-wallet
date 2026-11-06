@@ -6,9 +6,9 @@ import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
 
 const CLIENT_KEY_ID = "tvc-browser-p256-" + "11".repeat(16);
 const WALLET_DESCRIPTOR = {
-  version: 1,
+  version: 2,
   security_domain_id: "44".repeat(32),
-  environment: "development",
+  network: "devnet",
   turnkey_organization_id: "00000000-0000-0000-0000-00000000000b",
   turnkey_wallet_id: "wallet-1",
   address: "4".repeat(44),
@@ -23,7 +23,7 @@ const WALLET_DESCRIPTOR = {
 
 function request(): OperationRequest {
   return {
-    version: 1,
+    version: 2,
     request_id: "aa".repeat(32),
     issued_at_ms: "1750000000000",
     expires_at_ms: "1750000300000",
@@ -36,7 +36,7 @@ function request(): OperationRequest {
     sealed_seed: null,
     client_response_public_key: `04${"77".repeat(64)}`,
     operation: { type: "Bootstrap" },
-    authorization: { client_key_id: CLIENT_KEY_ID, scheme: "p256-sha256", signature: "" },
+    authorization: { client_key_id: CLIENT_KEY_ID, signature: "" },
   };
 }
 

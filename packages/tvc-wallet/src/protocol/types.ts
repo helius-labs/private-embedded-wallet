@@ -1,4 +1,10 @@
-export type Environment = "development" | "production";
+import type { API_VERSION } from "./constants.js";
+
+/**
+ * The Solana network a release, a descriptor and a running enclave serve.
+ * Every check is equality with the network the checker expects.
+ */
+export type Network = "devnet" | "mainnet";
 
 export type OperationKind = "Bootstrap" | "Decrypt" | "Derive" | "TransactionKeys" | "Prove";
 
@@ -8,7 +14,7 @@ export type HealthResponse = {
 
 export type ServiceInfo = {
   version: number;
-  environment: Environment;
+  network: Network;
   security_domain_id: string;
   release_id: string;
   manifest_digest: string;
@@ -22,13 +28,12 @@ export type ServiceInfo = {
   max_encrypted_request_bytes: string;
   max_encrypted_response_bytes: string;
   proof_type: string;
-  boot_proof_lookup_key: string;
 };
 
 export type ReleasePolicy = {
-  version: 1;
+  version: typeof API_VERSION;
   releaseId: string;
-  environment: Environment;
+  network: Network;
   tvcApplicationId: string;
   securityDomainId: string;
   acceptedManifestDigests: readonly string[];
@@ -47,9 +52,9 @@ export type ReleasePolicy = {
   revocationEpoch: string;
 };
 
+/** A release authority's 64-byte raw low-S P-256 signature, hex. */
 export type ReleaseAuthoritySignature = {
   keyId: string;
-  scheme: "p256-sha256";
   signature: string;
 };
 
@@ -72,8 +77,6 @@ export type PinnedReleaseAuthorities = {
   minimumRevocationEpoch: string;
 };
 
-type ClientAuthorizationScheme = "p256-sha256";
-
 export type ClientGrant = {
   client_public_key: string;
   allowed_operations: OperationKind[];
@@ -88,7 +91,7 @@ export type ClientGrant = {
  * one descriptor and client key may operate. It travels beside the ciphertext.
  */
 export type WalletGrant = {
-  version: 1;
+  version: typeof API_VERSION;
   descriptor_digest: string;
   client_key_id: string;
   project_id: string;
@@ -98,9 +101,9 @@ export type WalletGrant = {
 };
 
 export type WalletDescriptor = {
-  version: 1;
+  version: typeof API_VERSION;
   security_domain_id: string;
-  environment: "development";
+  network: Network;
   turnkey_organization_id: string;
   turnkey_wallet_id: string;
   address: string;
@@ -197,14 +200,14 @@ export type Operation =
   | TransactionKeysOperation
   | ProveOperation;
 
+/** The client key's 64-byte raw low-S P-256 signature over the request, hex. */
 export type ClientAuthorization = {
   client_key_id: string;
-  scheme: ClientAuthorizationScheme;
   signature: string;
 };
 
 export type OperationRequest = {
-  version: 1;
+  version: typeof API_VERSION;
   request_id: string;
   issued_at_ms: string;
   expires_at_ms: string;
@@ -218,13 +221,6 @@ export type OperationRequest = {
   client_response_public_key: string;
   operation: Operation;
   authorization: ClientAuthorization;
-};
-
-export type TurnkeyAppProof = {
-  scheme: string;
-  public_key: string;
-  proof_payload: string;
-  signature: string;
 };
 
 /**
@@ -244,8 +240,8 @@ export type BootstrapResult = {
   shielded_viewing_public_key: string;
   /** The seed sealed to the Quorum key. No secret appears elsewhere. */
   sealed_seed: string;
+  /** The Turnkey activity that signed the derivation message. */
   turnkey_activity_id: string;
-  turnkey_app_proofs: TurnkeyAppProof[];
 };
 
 /** One plaintext per item, in request order. */
@@ -302,7 +298,7 @@ export type OperationResult =
 
 export const SERVICE_INFO_KEYS = [
   "version",
-  "environment",
+  "network",
   "security_domain_id",
   "release_id",
   "manifest_digest",
@@ -315,5 +311,4 @@ export const SERVICE_INFO_KEYS = [
   "max_encrypted_request_bytes",
   "max_encrypted_response_bytes",
   "proof_type",
-  "boot_proof_lookup_key",
 ] as const;

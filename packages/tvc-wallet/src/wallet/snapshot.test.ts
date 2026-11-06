@@ -9,7 +9,6 @@ import {
   type ShieldedAddress,
 } from "@heliuslabs/spr";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { TvcProverPolicy } from "./prover-policy.js";
 
 import type { VerifiedConnection } from "../client/connection.js";
 import { encodeLowerHex } from "../protocol/hex.js";
@@ -33,6 +32,8 @@ function identityOf(address: ShieldedAddress): ShieldedIdentity {
 /** An enclave whose every per-transaction key is `secret`. */
 function enclave(secret: Uint8Array) {
   return {
+    network: "devnet",
+    servicePublicKey: "",
     connectAndVerify: vi.fn(),
     bootstrap: vi.fn(),
     decrypt: vi.fn(),
@@ -50,7 +51,7 @@ function keysFor(address: ShieldedAddress, client: TvcClient): TvcKeys {
     connection,
     sealedSeed,
     identity: identityOf(address),
-    prover: { url: "http://prover.invalid", policy: TvcProverPolicy.forNetwork("devnet") },
+    prover: { url: "http://prover.invalid" },
   });
 }
 

@@ -18,9 +18,11 @@ import {
   descriptorDigest,
 } from "./protocol/digest.js";
 import { signWalletGrant } from "./protocol/grant.js";
+import { API_VERSION } from "./protocol/constants.js";
 import { decodeLowerHex, encodeLowerHex } from "./protocol/hex.js";
-import type { OperationKind, WalletDescriptor } from "./protocol/types.js";
-import { clientFromSession, type TvcClient } from "./wallet/client.js";
+import { requireNetwork } from "./protocol/network.js";
+import type { Network, OperationKind, WalletDescriptor } from "./protocol/types.js";
+import { clientFromSession, turnkeyServicePublicKey, type TvcClient } from "./wallet/client.js";
 import type { TvcProverConfig } from "./wallet/prover.js";
 import { TvcProverPolicy } from "./wallet/prover-policy.js";
 
@@ -34,6 +36,8 @@ const digestLabel = (label: string) => encodeLowerHex(sha256(te.encode(label)));
 const LOCAL_OPERATIONS = localTestkit.operations as readonly OperationKind[];
 
 export type LocalTvcClientConfig = {
+  /** The network the testkit was built for (`SPR_NETWORK`, devnet by default). */
+  readonly network: Network;
   /**
    * The testkit enclave, or a tvc-gateway in front of it, over loopback HTTP.
    * Without a `walletGrant`, the testkit signs one for each request it sends
@@ -51,12 +55,12 @@ export type LocalTvcClientConfig = {
   readonly walletDescriptor?: WalletDescriptor;
 };
 
-function localDescriptor(solanaAddress: string): WalletDescriptor {
+function localDescriptor(network: Network, solanaAddress: string): WalletDescriptor {
   const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
   const unsigned = {
-    version: 1,
+    version: API_VERSION,
     security_domain_id: digestLabel(localTestkit.securityDomainLabel),
-    environment: "development",
+    network,
     turnkey_organization_id: localTestkit.organizationId,
     turnkey_wallet_id: localTestkit.walletId,
     address: solanaAddress,
@@ -80,7 +84,8 @@ function localDescriptor(solanaAddress: string): WalletDescriptor {
 }
 
 export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
-  const descriptor = config.walletDescriptor ?? localDescriptor(config.solanaAddress);
+  const network = requireNetwork(config.network);
+  const descriptor = config.walletDescriptor ?? localDescriptor(network, config.solanaAddress);
   const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
   const authorizer = createTvcOperationAuthorizer({
     clientKeyId: clientKeyIdFor(clientPublic),
@@ -106,6 +111,7 @@ export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
       : config.backend;
   return clientFromSession(
     createLocalTvcSession({
+      network,
       backend,
       expectedReleaseId: localTestkit.releaseId,
       expectedSecurityDomainId: digestLabel(localTestkit.securityDomainLabel),
@@ -119,6 +125,8 @@ export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
       ...(config.transport === undefined ? {} : { transport: config.transport }),
       operations: { walletDescriptor: descriptor, authorizer },
     }),
+    network,
+    turnkeyServicePublicKey(localTestkit.quorumPublicKey),
   );
 }
 

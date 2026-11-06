@@ -6,9 +6,9 @@ const sealedSeed = {
   sealedSeed: "11".repeat(64),
 };
 const descriptor = {
-  version: 1,
+  version: 2,
   security_domain_id: "aa".repeat(32),
-  environment: "development",
+  network: "devnet",
   turnkey_organization_id: "00000000-0000-0000-0000-00000000000b",
   turnkey_wallet_id: "wallet-1",
   address,
@@ -18,7 +18,7 @@ const descriptor = {
 
 function baseState() {
   return {
-    version: 7,
+    version: 1,
     clientKeyId: `tvc-browser-p256-${"ab".repeat(16)}`,
     walletDescriptor: descriptor,
     identity: null,
@@ -49,10 +49,20 @@ describe("browser wallet state", () => {
     );
   });
 
-  it("rejects the previous protocol state", () => {
-    expect(() =>
-      parsePersistentBrowserTvcWalletState({ ...baseState(), version: 6 }),
-    ).toThrowError("StorageCorrupted");
+  it("rejects another state format or a descriptor of another protocol or network", () => {
+    for (const state of [
+      { ...baseState(), version: 2 },
+      { ...baseState(), walletDescriptor: { ...descriptor, version: 1 } },
+      { ...baseState(), walletDescriptor: { ...descriptor, network: "testnet" } },
+    ]) {
+      expect(() => parsePersistentBrowserTvcWalletState(state)).toThrowError("StorageCorrupted");
+    }
+    expect(
+      parsePersistentBrowserTvcWalletState({
+        ...baseState(),
+        walletDescriptor: { ...descriptor, network: "mainnet" },
+      })?.walletDescriptor.network,
+    ).toBe("mainnet");
   });
 
   it("rejects a half-written identity sealedSeed", () => {

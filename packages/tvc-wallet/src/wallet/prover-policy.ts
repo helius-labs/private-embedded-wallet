@@ -2,19 +2,18 @@ import { fetchWithSignal, httpError, readBoundedText } from "../client/http.js";
 import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex } from "../protocol/hex.js";
-import type { SignedProverPolicyFile, SignedProverPolicyPart } from "../protocol/types.js";
+import { requireNetwork } from "../protocol/network.js";
+import type { Network, SignedProverPolicyFile, SignedProverPolicyPart } from "../protocol/types.js";
 
 /**
  * Where each network publishes its signed prover policy, as the Zolana SDK
  * pins it (`SignedTeePolicy.forNetwork`). The enclave image accepts the file
  * of the one network it was built for.
  */
-export const PROVER_POLICY_URLS = Object.freeze({
+export const PROVER_POLICY_URLS: Readonly<Record<Network, string>> = Object.freeze({
   mainnet: "https://d3gbdb0egjwcw9.cloudfront.net/tee-policy/mainnet.json",
   devnet: "https://d3gbdb0egjwcw9.cloudfront.net/tee-policy/devnet.json",
 });
-
-export type TvcProverNetwork = keyof typeof PROVER_POLICY_URLS;
 
 /** zolana-prover-tee's `MAX_SIGNED_POLICY_BYTES`. */
 const MAX_POLICY_BYTES = 64n << 10n;
@@ -55,9 +54,8 @@ export class TvcProverPolicy {
   }
 
   /** The policy file `network` publishes. */
-  static forNetwork(network: TvcProverNetwork, transport?: TvcTransport): TvcProverPolicy {
-    if (!Object.hasOwn(PROVER_POLICY_URLS, network)) throw new TvcError("UnknownProverNetwork");
-    return new TvcProverPolicy(PROVER_POLICY_URLS[network], transport);
+  static forNetwork(network: Network, transport?: TvcTransport): TvcProverPolicy {
+    return new TvcProverPolicy(PROVER_POLICY_URLS[requireNetwork(network)], transport);
   }
 
   /** The file in force, downloaded again once it is `max_age_secs` old. */

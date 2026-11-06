@@ -20,12 +20,12 @@ function fixture() {
     "../../../../crates/protocol/fixtures/wallet-grant-digest.json", import.meta.url,
   ), "utf8")) as { grant: WalletGrant };
   const info = {
-    version: 1, environment: "development", security_domain_id: "00".repeat(32),
+    version: 2, network: "devnet", security_domain_id: "00".repeat(32),
     release_id: "test-é", manifest_digest: "11".repeat(32), executable_digest: "22".repeat(32),
     quorum_public_key: encodeLowerHex(publicKey) + encodeLowerHex(publicKey),
     quorum_key_id: "quorum-é", quorum_key_epoch: "1", ephemeral_public_key: "",
     supported_operations: ["Decrypt"], max_encrypted_request_bytes: "262144",
-    max_encrypted_response_bytes: "262144", proof_type: "", boot_proof_lookup_key: "",
+    max_encrypted_response_bytes: "262144", proof_type: "",
   } satisfies ServiceInfo;
   const sign = vi.fn(async ({ clientAuthDigest }: { clientAuthDigest: Uint8Array }) => signP256Prehash(secret, clientAuthDigest));
   const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response("", { status: 503 }));
@@ -38,7 +38,7 @@ function fixture() {
     },
     releasePolicyValidFromMs: 0n,
     releasePolicyExpiresAtMs: 9999999n, nowMs: () => 1000n,
-    trustVerifier: { verifyOperationAppProof: async () => {}, verifyCustodyProofs: () => {} },
+    trustVerifier: { verifyOperationAppProof: async () => {} },
   };
   const item = {
     ciphertext: "ab".repeat(128), viewing_public_key: "04" + "11".repeat(32),
@@ -69,6 +69,21 @@ describe("wallet grant", () => {
     await expect(executeOperationEnvelope(renewing, operation, { sealedSeed: "aa".repeat(8) })).rejects.toThrow();
     expect(walletGrant).toHaveBeenCalledTimes(2);
   });
+});
+
+it("refuses a descriptor for another network before signing", async () => {
+  const { context, item, sign, fetch } = fixture();
+  const mainnet: OperationExecutionContext = {
+    ...context,
+    operations: {
+      ...context.operations,
+      walletDescriptor: { ...context.operations.walletDescriptor, network: "mainnet" },
+    },
+  };
+  await expect(executeOperationEnvelope(mainnet, { type: "Decrypt", items: [item] }))
+    .rejects.toMatchObject({ code: "NetworkMismatch" });
+  expect(sign).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
 });
 
 describe("through a gateway", () => {

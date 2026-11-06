@@ -81,9 +81,9 @@ function connectFixture() {
   const executableDigest = "22".repeat(32);
 
   const policy: ReleasePolicy = {
-    version: 1,
+    version: 2,
     releaseId: "connect-poc",
-    environment: "development",
+    network: "devnet",
     tvcApplicationId: "wallet-dev",
     securityDomainId: "33".repeat(32),
     acceptedManifestDigests: [manifestDigest],
@@ -106,7 +106,6 @@ function connectFixture() {
     signatures: [
       {
         keyId: "connect-authority",
-        scheme: "p256-sha256",
         signature: encodeLowerHex(
           signP256Prehash(authoritySecret, policySigningDigest(policy))
         ),
@@ -125,8 +124,8 @@ function connectFixture() {
     ],
   };
   const info: ServiceInfo = {
-    version: 1,
-    environment: "development",
+    version: 2,
+    network: "devnet",
     security_domain_id: policy.securityDomainId,
     release_id: policy.releaseId,
     manifest_digest: manifestDigest,
@@ -140,7 +139,6 @@ function connectFixture() {
     max_encrypted_request_bytes: "262144",
     max_encrypted_response_bytes: "262144",
     proof_type: "zolana.tvc.wallet_operation.v1",
-    boot_proof_lookup_key: discoveryEphemeralPublicKey,
   };
   const expectedPcrs = {
     0: "44".repeat(48),
@@ -165,7 +163,7 @@ function connectFixture() {
       qosDecrypt(quorumEncryptionSecret, decodeLowerHex(encryptedChallenge))
     );
     return canonicalizeJsonValue({
-      version: 1,
+      version: 2,
       tvc_app_proof: {
         scheme: "SIGNATURE_SCHEME_EPHEMERAL_KEY_P256",
         public_key: ephemeralPublicKey,
@@ -191,7 +189,7 @@ function connectFixture() {
   };
 }
 
-describe("connectAndVerify development PoC", () => {
+describe("connectAndVerify", () => {
   beforeEach(() =>
     verifyBootProofMock.mockReset().mockResolvedValue(undefined)
   );
@@ -214,9 +212,8 @@ describe("connectAndVerify development PoC", () => {
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
         resolveBootProof,
       },
-      releasePolicy: signedPolicy,
-      releaseAuthorities: authorities,
-      qosIdentityPcrs: expectedPcrs,
+      network: "devnet",
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
       nowMs: () => 1_750_000_000_000n,
       transport: {
         fetch: async (url, init) => {
@@ -237,7 +234,7 @@ describe("connectAndVerify development PoC", () => {
 
     await expect(client.connectAndVerify()).resolves.toMatchObject({
       releaseId: "connect-poc",
-      environment: "development",
+      network: "devnet",
     });
     expect(resolveBootProof).toHaveBeenCalledWith(
       expect.objectContaining({ bootProofLookupKey: ephemeralPublicKey })
@@ -274,9 +271,8 @@ describe("connectAndVerify development PoC", () => {
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
         resolveBootProof,
       },
-      releasePolicy: signedPolicy,
-      releaseAuthorities: authorities,
-      qosIdentityPcrs: expectedPcrs,
+      network: "devnet",
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
       nowMs: () => 1_750_000_000_000n,
       transport: { fetch: async () => oversizedResponse(() => (discoveryPulls += 1)) },
     });
@@ -292,9 +288,8 @@ describe("connectAndVerify development PoC", () => {
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
         resolveBootProof,
       },
-      releasePolicy: signedPolicy,
-      releaseAuthorities: authorities,
-      qosIdentityPcrs: expectedPcrs,
+      network: "devnet",
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
       nowMs: () => 1_750_000_000_000n,
       transport: {
         fetch: async (url) =>
@@ -327,9 +322,8 @@ describe("connectAndVerify development PoC", () => {
           kind: "gateway",
           endpoint: new URL("https://gateway.example.invalid/v1/private-wallet?api-key=key"),
         },
-        releasePolicy: signedPolicy,
-        releaseAuthorities: authorities,
-        qosIdentityPcrs: expectedPcrs,
+        network: "devnet",
+        release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
         nowMs: () => 1_750_000_000_000n,
         transport: {
           fetch: async (url, init) => {
@@ -392,14 +386,71 @@ describe("connectAndVerify development PoC", () => {
     ) as Record<string, unknown>;
 
     const client = createTvcClient({
+      network: "devnet",
       backend: { kind: "enclave", endpoint: new URL("https://tvc.example.invalid") },
-      releasePolicy: policyFixture.signed as SignedReleasePolicy,
-      releaseAuthorities: policyFixture.authorities as PinnedReleaseAuthorities,
+      release: {
+        releasePolicy: policyFixture.signed as SignedReleasePolicy,
+        releaseAuthorities: policyFixture.authorities as PinnedReleaseAuthorities,
+        qosIdentityPcrs: { 0: "00", 1: "00", 2: "00", 3: "00" },
+      },
       nowMs: clock,
       transport: { fetch: async () => new Response("{}", { status: 500 }) },
     });
 
     await expect(client.connectAndVerify()).rejects.toThrow();
     expect(seen.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the client's network", () => {
+  it("refuses a release for another network before it fetches anything", async () => {
+    const { signedPolicy, authorities, expectedPcrs } = connectFixture();
+    const fetch = vi.fn();
+    const client = createTvcClient({
+      network: "mainnet",
+      backend: { kind: "gateway", endpoint: new URL("https://gateway.example.invalid/v1/private-wallet") },
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
+      nowMs: () => 1_750_000_000_000n,
+      transport: { fetch },
+    });
+    await expect(client.connectAndVerify()).rejects.toMatchObject({ code: "NetworkMismatch" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses discovery for another network than the release's", async () => {
+    const { signedPolicy, authorities, info, expectedPcrs, bootProof, pingAnswer } = connectFixture();
+    const client = createTvcClient({
+      network: "devnet",
+      backend: { kind: "gateway", endpoint: new URL("https://gateway.example.invalid/v1/private-wallet") },
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
+      nowMs: () => 1_750_000_000_000n,
+      transport: {
+        fetch: async (_url, init) => {
+          const { encrypted_challenge } = JSON.parse(String(init?.body)) as { encrypted_challenge: string };
+          return Response.json({
+            info: { ...info, network: "mainnet" },
+            ping: JSON.parse(pingAnswer(encrypted_challenge)),
+            bootProof,
+          });
+        },
+      },
+    });
+    await expect(client.connectAndVerify()).rejects.toMatchObject({ code: "NetworkMismatch" });
+  });
+
+  it("pins the package's release of its network and names the release's Turnkey service key", () => {
+    const { signedPolicy, authorities, expectedPcrs } = connectFixture();
+    const backend = { kind: "enclave", endpoint: new URL("https://tvc.example.invalid") } as const;
+    expect(() => createTvcClient({ network: "mainnet", backend })).toThrowError(/ReleaseNotPinned/);
+    expect(() => createTvcClient({ network: "testnet" as "devnet", backend })).toThrowError(/UnknownNetwork/);
+    expect(createTvcClient({ network: "devnet", backend }).network).toBe("devnet");
+
+    const client = createTvcClient({
+      network: "devnet",
+      backend,
+      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
+    });
+    const signing = p256.getPublicKey(secret("connect-quorum-signing"), true);
+    expect(client.servicePublicKey).toBe(encodeLowerHex(signing));
   });
 });

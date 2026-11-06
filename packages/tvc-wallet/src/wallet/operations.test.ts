@@ -23,7 +23,7 @@ vi.mock("../client/operation-executor.js", () => ({ executeOperationEnvelope: en
 const sealedSeed: SealedSeed = { sealedSeed: "11".repeat(64) };
 const sealedSeedDigestHex = encodeLowerHex(sealedSeedDigest(new Uint8Array(64).fill(0x11)));
 const context = {
-  trustVerifier: { verifyCustodyProofs: vi.fn(), verifyOperationAppProof: vi.fn() },
+  trustVerifier: { verifyOperationAppProof: vi.fn() },
 } as unknown as OperationExecutionContext;
 const VIEWING = `04${"cd".repeat(32)}`;
 const HASH = "22".repeat(32);

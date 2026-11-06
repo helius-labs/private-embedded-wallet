@@ -12,14 +12,10 @@ import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import { canonicalizeJsonValue } from "../protocol/jcs.js";
 import { parseStrictJson } from "../protocol/json.js";
-import {
-  SERVICE_INFO_KEYS,
-  type PinnedReleaseAuthorities,
-  type ServiceInfo,
-  type SignedReleasePolicy,
-} from "../protocol/types.js";
+import type { ReleaseTrust } from "../protocol/releases.js";
+import { SERVICE_INFO_KEYS, type Network, type ServiceInfo } from "../protocol/types.js";
 import { createDefaultTransport, type TvcTransport } from "./transport.js";
-import { verifyBootProof, type QosIdentityPcrs } from "../verify/index.js";
+import { verifyBootProof } from "../verify/index.js";
 import type {
   TurnkeyAppProofWire,
   TurnkeyBootProofWire,
@@ -28,10 +24,7 @@ import { bindDiscoveryToPolicy, verifySignedReleasePolicy } from "../verify/rele
 import { fetchSession, lookupBootProof, type TvcBackend } from "./backend.js";
 import { assertExactObjectKeys } from "./http.js";
 import { requireCurrentReleasePolicy } from "./operation-executor.js";
-import {
-  type TvcTrustVerifier,
-  verifyTurnkeyCustodyProofs,
-} from "./trust.js";
+import type { TvcTrustVerifier } from "./trust.js";
 
 const PING_RESPONSE_KEYS = ["version", "tvc_app_proof"] as const;
 
@@ -46,12 +39,12 @@ type QosPingResponse = {
 };
 
 export type TvcConnectionConfig = {
+  /** The network the enclave serves; the release policy must name it. */
+  network: Network;
   /** Where the client reaches the enclave. */
   backend: TvcBackend;
-  releasePolicy: SignedReleasePolicy;
-  releaseAuthorities: PinnedReleaseAuthorities;
-  /** Independently pinned PCR0-3 values. Never copy them from discovery or a Boot Proof. */
-  qosIdentityPcrs?: QosIdentityPcrs;
+  /** The release the enclave is verified against. */
+  release: ReleaseTrust;
   /**
    * Verifier clock. A function, not an instant: a fixed value would freeze
    * request timestamps and certificate-chain validation for the client's
@@ -68,7 +61,7 @@ const verifiedConnectionBrand: unique symbol = Symbol("VerifiedConnection");
 export type VerifiedConnection = {
   readonly [verifiedConnectionBrand]: true;
   readonly releaseId: string;
-  readonly environment: "development";
+  readonly network: Network;
 };
 
 export type ConnectedTvcRuntime = {
@@ -83,11 +76,11 @@ export type ConnectedTvcRuntime = {
   readonly requestTimeoutMs?: number;
 };
 
-export function createVerifiedConnection(releaseId: string): VerifiedConnection {
+export function createVerifiedConnection(releaseId: string, network: Network): VerifiedConnection {
   return Object.freeze({
     [verifiedConnectionBrand]: true as const,
     releaseId,
-    environment: "development" as const,
+    network,
   });
 }
 
@@ -132,8 +125,7 @@ export function verifyQosPingAnswer(text: string, challenge: QosPingChallenge): 
   // verifyBootProof ties it to a pinned-PCR Nitro attestation. Discovery's
   // own `ephemeral_public_key` is never used as a verification input: /v1/info
   // and /v1/ping may be served by different healthy replicas, so it is an
-  // advertisement, and comparing it against `boot_proof_lookup_key` from the
-  // same untrusted document would prove nothing.
+  // advertisement.
   verifyP256Message(
     parseQosP256Public(requireQosPublicKey(proof.public_key)).signing,
     new TextEncoder().encode(proof.proof_payload),
@@ -153,9 +145,9 @@ export async function connectAndVerifyTvc(
 ): Promise<ConnectedTvcRuntime> {
   signal?.throwIfAborted();
   const nowMs = config.nowMs ?? (() => BigInt(Date.now()));
-  verifySignedReleasePolicy(config.releasePolicy, config.releaseAuthorities, nowMs());
-  const { backend, qosIdentityPcrs, releasePolicy } = config;
-  if (!qosIdentityPcrs) throw new TvcError("BootProofUnverified");
+  const { backend, network, release } = config;
+  const { releasePolicy, qosIdentityPcrs } = release;
+  verifySignedReleasePolicy(releasePolicy, release.releaseAuthorities, network, nowMs());
   const transport = config.transport ?? createDefaultTransport();
 
   const verifyReplica = async (
@@ -190,11 +182,10 @@ export async function connectAndVerifyTvc(
       );
       await verifyReplica(operationAppProof, operationBootProof, verificationNow, operationSignal);
     },
-    verifyCustodyProofs: verifyTurnkeyCustodyProofs,
   });
 
   return {
-    connection: createVerifiedConnection(info.release_id),
+    connection: createVerifiedConnection(info.release_id, network),
     backend,
     info,
     transport,

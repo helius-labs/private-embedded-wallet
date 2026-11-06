@@ -203,6 +203,10 @@ async function prepareRequest(
   if (!context.info.supported_operations.includes(kind)) {
     throw new TvcError("OperationNotAllowed");
   }
+  // The enclave refuses a descriptor for another network; say so before signing.
+  if (context.operations.walletDescriptor.network !== context.info.network) {
+    throw new TvcError("NetworkMismatch", "the wallet descriptor is for another network");
+  }
   const grant = matchingGrant(
     context.operations.walletDescriptor,
     context.operations.authorizer.clientKeyId,
@@ -230,7 +234,6 @@ async function prepareRequest(
       operation,
       authorization: {
         client_key_id: context.operations.authorizer.clientKeyId,
-        scheme: "p256-sha256",
         signature: "",
       },
     };

@@ -89,6 +89,8 @@ function fixture(answers: readonly Response[] = []) {
     shieldedViewingPublicKey: encodeLowerHex(address.viewingPublicKey.toBytes()),
   };
   const client = {
+    network: "devnet" as const,
+    servicePublicKey: "",
     connectAndVerify: vi.fn(),
     bootstrap: vi.fn(),
     decrypt: vi.fn(async (_c: unknown, _k: unknown, items: readonly unknown[]) =>
@@ -140,6 +142,23 @@ describe("TvcKeys", () => {
           prover: { url: PROVER_URL, policy: new TvcProverPolicy(POLICY_URL) },
         }),
     ).toThrowError(/ShieldedIdentityChanged/);
+  });
+
+  it("proves under the policy of the client's network unless told otherwise", () => {
+    const forNetwork = vi.spyOn(TvcProverPolicy, "forNetwork");
+    try {
+      const { identity, client } = fixture();
+      new TvcKeys({
+        client: { ...client, network: "mainnet" },
+        connection,
+        sealedSeed,
+        identity,
+        prover: { url: PROVER_URL },
+      });
+      expect(forNetwork).toHaveBeenCalledWith("mainnet");
+    } finally {
+      forNetwork.mockRestore();
+    }
   });
 
   it("puts every SDK request on the wire in the enclave's terms", async () => {

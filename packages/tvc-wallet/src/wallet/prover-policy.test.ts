@@ -31,7 +31,7 @@ describe("TvcProverPolicy", () => {
       await TvcProverPolicy.forNetwork(network, transport).current();
     }
     expect(urls.map(String)).toEqual([PROVER_POLICY_URLS.devnet, PROVER_POLICY_URLS.mainnet]);
-    expect(() => TvcProverPolicy.forNetwork("testnet" as "devnet")).toThrowError("UnknownProverNetwork");
+    expect(() => TvcProverPolicy.forNetwork("testnet" as "devnet")).toThrowError(/UnknownNetwork/);
   });
 
   it("holds the file for its max age and downloads it again after", async () => {

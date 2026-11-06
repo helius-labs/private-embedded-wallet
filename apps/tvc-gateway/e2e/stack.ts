@@ -8,7 +8,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/p256";
 import { getAddressDecoder } from "@solana/kit";
 import type { GlobalSetupContext } from "vitest/node";
-import { PARENT_ORGANIZATION_ID, PROJECT_ID, testkit } from "./fixtures.js";
+import { PROJECT_ID, testkit } from "./fixtures.js";
 import { startMockDevApi } from "./mock-dev-api.js";
 import { startMockTurnkey } from "./mock-turnkey.js";
 
@@ -94,26 +94,25 @@ export default async function setup({ provide }: GlobalSetupContext) {
     "--port", String(enclavePort), "--wallet-keypair", walletKeypair,
   ]);
 
-  const policyDir = join(logs, "policy");
-  execFileSync(join(REPO_DIR, "target/debug/examples/sign-release-policy"), ["--local-testkit", policyDir]);
+  // The testkit's devnet release, as clients pin one: `<dir>/release.json`.
+  const releaseDir = join(logs, "release");
+  execFileSync(join(REPO_DIR, "target/debug/examples/sign-release-policy"), ["--local-testkit", releaseDir]);
   const gatewayPort = await freePort();
   const originAuth = `Bearer local-e2e-${hex(randomBytes(16))}`;
   const turnkeyKey = hex(randomBytes(32));
-  const gateway = start(logs, "gateway", join(GATEWAY_DIR, "target/debug/tvc-gateway"), ["configs/config.yaml"], {
+  const gateway = start(logs, "gateway", join(GATEWAY_DIR, "target/debug/tvc-gateway"), ["--config", "configs/devnet.yaml"], {
     TVC_GATEWAY_LISTEN: `127.0.0.1:${gatewayPort}`,
     TVC_GATEWAY_ORIGIN_AUTH_HEADER: originAuth,
     TVC_GATEWAY_DEV_API__BASE_URL: devApi.url,
     TVC_GATEWAY_ENCLAVE__BASE_URL: `http://127.0.0.1:${enclavePort}`,
     TVC_GATEWAY_TURNKEY__API_BASE_URL: turnkey.url,
-    TVC_GATEWAY_TURNKEY__WAAS_PARENT_ORGANIZATION_ID: PARENT_ORGANIZATION_ID,
     TVC_GATEWAY_TURNKEY__BOOT_PROOF_API_KEY__PRIVATE_KEY: turnkeyKey,
     TVC_GATEWAY_TURNKEY__BOOT_PROOF_API_KEY__PUBLIC_KEY: p256Public(turnkeyKey, true),
     TVC_GATEWAY_TURNKEY__WAAS_API_KEY__PRIVATE_KEY: turnkeyKey,
     TVC_GATEWAY_TURNKEY__WAAS_API_KEY__PUBLIC_KEY: p256Public(turnkeyKey, true),
     TVC_GATEWAY_PROVISIONING__PRIVATE_KEY: testkit.provisioningPrivateKeyHex,
     TVC_GATEWAY_PROVISIONING__EXPECTED_PUBLIC_KEY: p256Public(testkit.provisioningPrivateKeyHex, false),
-    TVC_GATEWAY_PROVISIONING__RELEASE_POLICY_PATH: join(policyDir, "release-policy.json"),
-    TVC_GATEWAY_PROVISIONING__RELEASE_AUTHORITIES_PATH: join(policyDir, "release-authorities.json"),
+    TVC_GATEWAY_PROVISIONING__RELEASE_PATH: join(releaseDir, "release.json"),
     TVC_GATEWAY_WALLET_GRANT__PRIVATE_KEY: testkit.grantPrivateKeyHex,
     TVC_GATEWAY_WALLET_GRANT__EXPECTED_PUBLIC_KEY: p256Public(testkit.grantPrivateKeyHex, false),
     TVC_GATEWAY_ENROLLMENT__DOMAINS: JSON.stringify([`127.0.0.1:${gatewayPort}`]),

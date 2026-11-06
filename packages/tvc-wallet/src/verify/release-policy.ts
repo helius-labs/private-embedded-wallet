@@ -8,6 +8,7 @@ import { releasePolicyDigest } from "../protocol/digest.js";
 import { decodeLowerHex } from "../protocol/hex.js";
 import { TvcError } from "../protocol/error.js";
 import type {
+  Network,
   PinnedReleaseAuthorities,
   ServiceInfo,
   SignedReleasePolicy,
@@ -18,16 +19,22 @@ export function policySigningDigest(policy: unknown): Uint8Array {
   return releasePolicyDigest(new TextEncoder().encode(canonicalizeJsonValue(policy)));
 }
 
+/**
+ * Accepts `signed` only for `network`, at a threshold of `authorities`, while
+ * `nowMs` is inside its validity window. Mirrors `verify_signed_release_policy`
+ * in `crates/protocol`, check for check.
+ */
 export function verifySignedReleasePolicy(
   signed: SignedReleasePolicy,
   authorities: PinnedReleaseAuthorities,
+  network: Network,
   nowMs: bigint,
 ): void {
   if (signed.policy.version !== API_VERSION) {
     throw new TvcError("UnsupportedVersion");
   }
-  if (signed.policy.environment === "production") {
-    throw new TvcError("ProductionClaimRejected");
+  if (signed.policy.network !== network) {
+    throw new TvcError("NetworkMismatch");
   }
   if (authorities.threshold < 1 || authorities.keys.length === 0) {
     throw new TvcError("ReleasePolicyInvalid");
@@ -74,9 +81,6 @@ export function verifySignedReleasePolicy(
     if (duplicates.has(signature.keyId)) continue;
     const publicKey = byId.get(signature.keyId);
     if (!publicKey) continue;
-    if (signature.scheme !== "p256-sha256") {
-      throw new TvcError("InvalidSignature");
-    }
     verifyP256Prehash(publicKey, digest, decodeLowerHex(signature.signature));
     accepted += 1;
   }
@@ -85,13 +89,17 @@ export function verifySignedReleasePolicy(
   }
 }
 
+/**
+ * Binds every security field of `/v1/info` to a policy that has already
+ * verified for the client's network, so discovery must name that network too.
+ */
 export function bindDiscoveryToPolicy(
   info: ServiceInfo,
   signed: SignedReleasePolicy,
 ): void {
   const policy = signed.policy;
-  if (info.environment === "production" || policy.environment === "production") {
-    throw new TvcError("ProductionClaimRejected");
+  if (info.network !== policy.network) {
+    throw new TvcError("NetworkMismatch");
   }
   if (info.version !== API_VERSION) {
     throw new TvcError("UnsupportedVersion");

@@ -4,19 +4,19 @@ import { sessionFromConnector } from "./session.js";
 import type { OperationsConfig } from "./operation-executor.js";
 
 const operations: OperationsConfig = {
-  walletDescriptor: { version: 1, environment: "development", security_domain_id: "00".repeat(32),
+  walletDescriptor: { version: 2, network: "devnet", security_domain_id: "00".repeat(32),
     turnkey_organization_id: "org", turnkey_wallet_id: "wallet", address: "11111111111111111111111111111111", allowed_clients: [], provisioning_signature: "" },
   authorizer: { clientKeyId: "client", authorizeTvcRequest: async () => new Uint8Array() },
 };
 function runtime(label: string): ConnectedTvcRuntime {
   return {
-    connection: createVerifiedConnection(label), backend: { kind: "enclave", endpoint: new URL("https://tvc.example") },
-    info: { version: 1, environment: "development", security_domain_id: "00".repeat(32), release_id: label,
+    connection: createVerifiedConnection(label, "devnet"), backend: { kind: "enclave", endpoint: new URL("https://tvc.example") },
+    info: { version: 2, network: "devnet", security_domain_id: "00".repeat(32), release_id: label,
       manifest_digest: "11".repeat(32), executable_digest: "22".repeat(32), quorum_public_key: "", quorum_key_id: "quorum", quorum_key_epoch: "1",
-      ephemeral_public_key: "", supported_operations: [], max_encrypted_request_bytes: "262144", max_encrypted_response_bytes: "262144", proof_type: "", boot_proof_lookup_key: "" },
+      ephemeral_public_key: "", supported_operations: [], max_encrypted_request_bytes: "262144", max_encrypted_response_bytes: "262144", proof_type: "" },
     transport: { fetch: vi.fn() }, releasePolicyValidFromMs: 0n,
     releasePolicyExpiresAtMs: 999999n, nowMs: () => 1n,
-    trustVerifier: { verifyOperationAppProof: vi.fn(), verifyCustodyProofs: vi.fn() },
+    trustVerifier: { verifyOperationAppProof: vi.fn() },
   };
 }
 function deferred<T>() {

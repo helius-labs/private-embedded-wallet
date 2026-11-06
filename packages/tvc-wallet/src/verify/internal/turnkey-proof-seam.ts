@@ -35,9 +35,6 @@
 // The AWS Nitro root below is pinned here rather than imported from
 // @turnkey/crypto: a trust root is something you pin yourself, out of band.
 // It has been verified byte-identical to `constants.AWS_ROOT_CERT_PEM`.
-//
-// This is still not a production verifier: production release-policy
-// distribution and Turnkey `decisionContextDigest` binding are unavailable.
 
 import * as turnkeyCrypto from "@turnkey/crypto";
 import type { v1AppProof, v1BootProof } from "@turnkey/sdk-types";
@@ -59,15 +56,6 @@ MQCjfy+Rocm9Xue4YnwWmNJVA44fA0P5W2OpYow9OYCVRaEevL8uO1XYru5xtMPW
 rfMCMQCi85sWBbJwKKXdS6BptQFuZbT73o/gBh1qUxl/nNr12UO8Yfwr6wPLb+6N
 IwLz3/Y=
 -----END CERTIFICATE-----`;
-
-export const TURNKEY_TS_PROOF_PROFILE = {
-  crypto: "2.11.3",
-  sdkTypes: "1.5.1",
-  productionVerifier: false,
-  referenceBootProofVerifier: true,
-  reason:
-    "development composite verifier; production release-policy distribution and decisionContextDigest binding remain unavailable",
-} as const;
 
 export type CoseSign1 = {
   readonly protectedHeaders: Uint8Array;
@@ -126,10 +114,4 @@ function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.length);
   copy.set(bytes);
   return copy.buffer;
-}
-
-export function assertNotProductionVerifier(): void {
-  if (TURNKEY_TS_PROOF_PROFILE.productionVerifier) {
-    throw new Error("production verifier flag must remain false");
-  }
 }
