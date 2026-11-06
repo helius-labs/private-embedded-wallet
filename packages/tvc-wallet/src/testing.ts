@@ -14,6 +14,7 @@ import localTestkit from "./local-testkit.json";
 
 import { createLocalTvcSession } from "./client/local-session.js";
 import type { TvcBackend } from "./client/backend.js";
+import type { TvcRequestSigner } from "./client/operation-executor.js";
 import type { TvcTransport } from "./client/transport.js";
 import { createTvcRequestSigner } from "./platform/signer.js";
 import {
@@ -27,14 +28,17 @@ import { requireNetwork } from "./protocol/network.js";
 import type { Network, OperationKind, WalletDescriptor } from "./protocol/types.js";
 import {
   clientFromSession,
+  clientKeysOf,
   createClient,
   proverFor,
   turnkeyServicePublicKey,
   type TestTvcClientConfig,
   type TvcClient,
 } from "./wallet/client.js";
+import type { TvcClientKeys } from "./wallet/client-keys.js";
 import type { TvcProverConfig } from "./wallet/prover.js";
 import { TvcProverPolicy } from "./wallet/prover-policy.js";
+import type { TvcTurnkey, TvcTurnkeyWalletAccount } from "./wallet/turnkey.js";
 
 export type {
   BootProofResolver,
@@ -43,9 +47,11 @@ export type {
   ResolveBootProofInput,
   TvcBackend,
 } from "./client/backend.js";
+export type { SignTvcRequestInput, TvcRequestSigner } from "./client/operation-executor.js";
+export { createTvcRequestSigner, type TvcRequestKey } from "./platform/signer.js";
 export type { ReleaseTrust } from "./protocol/releases.js";
 export type { QosIdentityPcrs } from "./verify/index.js";
-export type { TestTvcClientConfig } from "./wallet/client.js";
+export type { TestTvcClientConfig, TestTvcClientKey } from "./wallet/client.js";
 export type { TvcProverConfig } from "./wallet/prover.js";
 
 const te = new TextEncoder();
@@ -57,7 +63,7 @@ const LOCAL_GRANT_LIFETIME_MS = 900_000n;
 const digestLabel = (label: string) => encodeLowerHex(sha256(te.encode(label)));
 const LOCAL_OPERATIONS = localTestkit.operations as readonly OperationKind[];
 
-export type LocalTvcClientConfig = {
+export type LocalTvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = {
   /** The network the testkit was built for (`SPR_NETWORK`, devnet by default). */
   readonly network: Network;
   /**
@@ -66,13 +72,6 @@ export type LocalTvcClientConfig = {
    * the enclave.
    */
   readonly backend: TvcBackend;
-  readonly solanaAddress: string;
-  /**
-   * A descriptor issued elsewhere, such as by a tvc-gateway holding the
-   * testkit's provisioning key. It must grant the testkit client key and name
-   * `solanaAddress`. Absent, the testkit signs its own.
-   */
-  readonly descriptor?: WalletDescriptor;
   /**
    * The testkit's stand-in prover (`localProverConfig`), or with
    * `--live-prover` a TEE prover of the network under its policy. Defaults to
@@ -81,7 +80,26 @@ export type LocalTvcClientConfig = {
   readonly prover?: TvcProverConfig;
   readonly nowMs?: () => bigint;
   readonly transport?: TvcTransport;
-};
+} & (
+  | {
+      /** The wallet the testkit holds; the testkit client key signs. */
+      readonly solanaAddress: string;
+      /**
+       * A descriptor issued elsewhere, such as by a tvc-gateway holding the
+       * testkit's provisioning key. It must grant the testkit client key and
+       * name `solanaAddress`. Absent, the testkit signs its own.
+       */
+      readonly descriptor?: WalletDescriptor;
+    }
+  | {
+      /**
+       * A Turnkey session in place of the testkit client key, enrolled through
+       * the tvc-gateway `backend` names, as `createTvcClient` does.
+       */
+      readonly turnkey: TvcTurnkey<Account>;
+      readonly solanaAddress?: string;
+    }
+);
 
 function localDescriptor(network: Network, solanaAddress: string): WalletDescriptor {
   const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
@@ -116,36 +134,37 @@ function localDescriptor(network: Network, solanaAddress: string): WalletDescrip
  * package's pin for `config.network`, with every check `createTvcClient`
  * makes: for a test deployment, or to reach an enclave without a gateway.
  */
-export function createTestTvcClient(config: TestTvcClientConfig): TvcClient {
+export function createTestTvcClient<Account extends TvcTurnkeyWalletAccount>(
+  config: TestTvcClientConfig<Account>,
+): TvcClient {
   return createClient(config);
 }
 
 /** The unattested testkit's client, for the network the testkit was built for. */
-export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
+export function createLocalTvcClient<Account extends TvcTurnkeyWalletAccount>(
+  config: LocalTvcClientConfig<Account>,
+): TvcClient {
   const network = requireNetwork(config.network);
-  const descriptor = config.descriptor ?? localDescriptor(network, config.solanaAddress);
-  const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
-  const signer = createTvcRequestSigner({
-    clientKeyId: clientKeyIdFor(clientPublic),
-    async sign(message: Uint8Array) {
-      return p256
-        .sign(sha256(message), LOCAL_CLIENT_SECRET, { lowS: true, prehash: false })
-        .toCompactRawBytes();
-    },
-  });
-  const localGrant = () => {
-    const nowMs = config.nowMs?.() ?? BigInt(Date.now());
-    return Promise.resolve(signWalletGrant({
-      descriptor,
-      clientKeyId: clientKeyIdFor(clientPublic),
-      projectId: "local-testkit",
-      issuedAtMs: nowMs,
-      lifetimeMs: LOCAL_GRANT_LIFETIME_MS,
-    }, LOCAL_GRANT_SECRET));
-  };
+  let fixed: { readonly descriptor: WalletDescriptor; readonly signer: TvcRequestSigner } | undefined;
+  let keys: TvcClientKeys;
+  if ("turnkey" in config) {
+    keys = clientKeysOf(config, { network, backend: config.backend, transport: config.transport, nowMs: config.nowMs });
+  } else {
+    fixed = { descriptor: config.descriptor ?? localDescriptor(network, config.solanaAddress), signer: localSigner() };
+    keys = clientKeysOf(fixed, { network, backend: config.backend });
+  }
   const backend: TvcBackend =
-    config.backend.kind === "enclave" && !config.backend.walletGrant
-      ? { ...config.backend, walletGrant: localGrant }
+    config.backend.kind === "enclave" && !config.backend.walletGrant && fixed
+      ? {
+          ...config.backend,
+          walletGrant: () => Promise.resolve(signWalletGrant({
+            descriptor: fixed.descriptor,
+            clientKeyId: fixed.signer.clientKeyId,
+            projectId: "local-testkit",
+            issuedAtMs: config.nowMs?.() ?? BigInt(Date.now()),
+            lifetimeMs: LOCAL_GRANT_LIFETIME_MS,
+          }, LOCAL_GRANT_SECRET)),
+        }
       : config.backend;
   return clientFromSession(
     createLocalTvcSession({
@@ -161,15 +180,27 @@ export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
       expectedOperations: LOCAL_OPERATIONS,
       ...(config.nowMs === undefined ? {} : { nowMs: config.nowMs }),
       ...(config.transport === undefined ? {} : { transport: config.transport }),
-      operations: { descriptor, signer },
     }),
     {
       network,
       servicePublicKey: turnkeyServicePublicKey(localTestkit.quorumPublicKey),
-      descriptor,
+      keys,
       prover: proverFor(network, backend.endpoint, config.prover, config.transport),
     },
   );
+}
+
+/** The testkit client key's signer. */
+function localSigner() {
+  const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
+  return createTvcRequestSigner({
+    clientKeyId: clientKeyIdFor(clientPublic),
+    async sign(message: string) {
+      return p256
+        .sign(sha256(te.encode(message)), LOCAL_CLIENT_SECRET, { lowS: true, prehash: false })
+        .toCompactRawBytes();
+    },
+  });
 }
 
 /**

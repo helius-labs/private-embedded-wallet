@@ -46,7 +46,7 @@ import { attestationReuseMs, type HeldProverPolicy } from "./prover-policy.js";
 /**
  * The wallet's four key operations over the client's verified connection, on
  * the wire's terms. Each presents the sealed seed; the enclave cannot use it
- * under another descriptor or past a Quorum key rotation.
+ * for another wallet or past a Quorum key rotation.
  */
 export type TvcEnclave = {
   /** Opens each ciphertext with the wallet's viewing key; one plaintext per item. */

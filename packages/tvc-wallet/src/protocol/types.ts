@@ -83,10 +83,6 @@ export type ClientGrant = {
 };
 
 /**
- * Provisioned out of band. This package never manufactures or silently rotates
- * descriptor authority.
- */
-/**
  * A short-lived grant, signed by the grant key the enclave is built with, that
  * one descriptor and client key may operate. It travels beside the ciphertext.
  */
@@ -100,6 +96,10 @@ export type WalletGrant = {
   signature: string;
 };
 
+/**
+ * The gateway's grant that one client key may drive one Turnkey wallet's
+ * operations, signed with the provisioning key the enclave is built with.
+ */
 export type WalletDescriptor = {
   version: typeof API_VERSION;
   security_domain_id: string;

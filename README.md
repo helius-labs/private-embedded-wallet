@@ -21,9 +21,9 @@ Helius API key.
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
 | [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet`: one-request sessions with Boot Proofs, enrollment, and wallet grants. |
-| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence. |
+| [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the Turnkey session key as the client key, the five operations, `TvcKeys` for the Zolana SDK. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
-| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
+| [`examples/typescript-client`](examples/typescript-client) | The client on a Turnkey API key, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: per-network releases, service keys, the localnet for `just headless-e2e`. |
 
 ## Responsibility split
@@ -78,7 +78,9 @@ policy, binds `GET /v1/info` to it, completes the Quorum-encrypted
 accepted manifest digests; it verifies again once the policy's window no
 longer holds or the backend refuses a call. HTTPS alone establishes nothing. A wallet descriptor, signed by the operator with the
 provisioning key whose public half is compiled into the image, grants a client
-key the operations of one Turnkey wallet. Each operation also carries a wallet
+key the operations of one Turnkey wallet. The client key is the user's Turnkey
+session key, which the client enrolls with tvc-gateway itself; the sealed seed
+is bound to the wallet, not to the key, so a new login keeps it. Each operation also carries a wallet
 grant, signed with the grant key, that is at most an hour old; a client key
 whose grants stop being issued stops within the hour.
 

@@ -2,10 +2,11 @@ import { initializePoseidon } from "@heliuslabs/spr";
 import { p256 } from "@noble/curves/p256";
 
 import type { TvcBackend } from "../client/backend.js";
-import type { TvcRequestSigner } from "../client/operation-executor.js";
-import type { TvcRequestOptions } from "../client/request.js";
+import type { ConnectedTvcRuntime } from "../client/connection.js";
+import type { OperationExecutionContext, TvcRequestSigner } from "../client/operation-executor.js";
+import { requestScope, type TvcRequestOptions } from "../client/request.js";
 import { createTvcSession, type TvcSession } from "../client/session.js";
-import type { TvcTransport } from "../client/transport.js";
+import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
 import { parseQosP256Public } from "../crypto/qos.js";
 import { TvcError, TvcHttpError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex, requireHex } from "../protocol/hex.js";
@@ -18,6 +19,7 @@ import type {
   SealedSeed,
   WalletDescriptor,
 } from "../protocol/types.js";
+import { fixedClientKeys, type TvcClientKeys } from "./client-keys.js";
 import { EnclaveKeys, type TvcEnclave, type TvcKeys } from "./keys.js";
 import {
   checkDecrypt,
@@ -29,8 +31,9 @@ import {
 } from "./operations.js";
 import type { TvcProver, TvcProverConfig } from "./prover.js";
 import { TvcProverPolicy } from "./prover-policy.js";
+import { turnkeyClientKeys, type TvcTurnkey, type TvcTurnkeyWalletAccount } from "./turnkey.js";
 
-export type TvcClientConfig = {
+export type TvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = {
   /**
    * The network the enclave serves. It picks the release this package pins
    * for it, and with it the Turnkey service key, and the prover policy.
@@ -41,10 +44,18 @@ export type TvcClientConfig = {
    * or an application's proxy of it. Its query travels on every route.
    */
   readonly endpoint: URL;
-  /** The wallet descriptor enrollment answered for the signer's client key. */
-  readonly descriptor: WalletDescriptor;
-  /** Signs each request with the client key `descriptor` lists. */
-  readonly signer: TvcRequestSigner;
+  /**
+   * The application's Turnkey client, logged in: `@turnkey/core`'s
+   * `TurnkeyClient` or `useTurnkey()` as they are. Its session key signs every
+   * request; the client enrolls each session key with the gateway on first
+   * use, the wallet owner signing the enrollment.
+   */
+  readonly turnkey: TvcTurnkey<Account>;
+  /**
+   * The wallet's Solana address, to name one when the session's organization
+   * holds more than one Solana account. Defaults to its only one.
+   */
+  readonly solanaAddress?: string;
   /**
    * The attested prover the enclave seals proofs to and the client posts them
    * to. Defaults to `/v1/spr` on the endpoint's origin with the endpoint's
@@ -103,8 +114,9 @@ export type TvcOpenOptions = TvcRequestOptions & {
 };
 
 /**
- * The enclave of one network, for the wallet of one descriptor. It verifies
- * the enclave on first use and holds that verification while it holds.
+ * The enclave of one network, for one Turnkey wallet. It verifies the enclave
+ * on first use and holds that verification while it holds; it verifies again
+ * when the session key changes.
  */
 export type TvcClient = {
   /** The network the enclave serves. */
@@ -117,15 +129,30 @@ export type TvcClient = {
   readonly servicePublicKey: string;
   /**
    * The wallet's keys, the SDK's `WalletKeys`. A `stored` wallet with its
-   * sealed seed opens without a call; otherwise the enclave bootstraps it,
-   * and refuses an identity other than `stored.identity`. Persist
-   * `keys.stored` after a bootstrap.
+   * sealed seed opens without a call, and serves under any session key of
+   * the wallet; otherwise the enclave bootstraps it, and refuses an identity
+   * other than `stored.identity`. Persist `keys.stored` after a bootstrap.
    */
   open(stored?: StoredWallet, options?: TvcOpenOptions): Promise<TvcKeys>;
 };
 
+/**
+ * The request key of a test client: the Turnkey session, through a gateway, as
+ * `createTvcClient` has it, or a descriptor and the signer of the key it lists.
+ */
+export type TestTvcClientKey<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> =
+  | Pick<TvcClientConfig<Account>, "turnkey" | "solanaAddress">
+  | {
+      /** A wallet descriptor that lists `signer`'s key. */
+      readonly descriptor: WalletDescriptor;
+      readonly signer: TvcRequestSigner;
+    };
+
 /** `createTvcClient`'s configuration with the backend, release and prover spelled out, for tests. */
-export type TestTvcClientConfig = Omit<TvcClientConfig, "endpoint" | "prover"> & {
+export type TestTvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = Pick<
+  TvcClientConfig<Account>,
+  "network" | "nowMs" | "transport" | "requestTimeoutMs"
+> & {
   /** Where the client reaches the enclave: a tvc-gateway, or the enclave itself. */
   readonly backend: TvcBackend;
   /**
@@ -135,7 +162,7 @@ export type TestTvcClientConfig = Omit<TvcClientConfig, "endpoint" | "prover"> &
   readonly release?: ReleaseTrust;
   /** Defaults to `/v1/spr` beside the backend's endpoint, under the network's policy. */
   readonly prover?: TvcProverConfig;
-};
+} & TestTvcClientKey<Account>;
 
 function identityOf(result: BootstrapResult): ShieldedIdentity {
   return Object.freeze({
@@ -193,56 +220,123 @@ function signalOf(...signals: (AbortSignal | undefined)[]): AbortSignal | undefi
   return present.length > 1 ? AbortSignal.any(present) : present[0];
 }
 
+/** Where a client's request key comes from: the Turnkey session, enrolled through a gateway, or a fixed key. */
+export function clientKeysOf<Account extends TvcTurnkeyWalletAccount>(
+  key: TestTvcClientKey<Account>,
+  setup: {
+    readonly network: Network;
+    readonly backend: TvcBackend;
+    readonly transport?: TvcTransport | undefined;
+    readonly nowMs?: (() => bigint) | undefined;
+  },
+): TvcClientKeys {
+  if (!("turnkey" in key)) return fixedClientKeys({ descriptor: key.descriptor, signer: key.signer });
+  if (setup.backend.kind !== "gateway") {
+    throw new TvcError("GatewayRequired", "a Turnkey session key enrolls through a tvc-gateway");
+  }
+  return turnkeyClientKeys({
+    turnkey: key.turnkey,
+    network: setup.network,
+    endpoint: setup.backend.endpoint,
+    ...(key.solanaAddress === undefined ? {} : { solanaAddress: key.solanaAddress }),
+    transport: setup.transport ?? createDefaultTransport(),
+    nowMs: setup.nowMs ?? (() => BigInt(Date.now())),
+  });
+}
+
 export function clientFromSession(
   session: TvcSession,
   setup: {
     readonly network: Network;
     readonly servicePublicKey: string;
-    readonly descriptor: WalletDescriptor;
+    readonly keys: TvcClientKeys;
     readonly prover: TvcProver;
+    readonly requestTimeoutMs?: number | undefined;
   },
 ): TvcClient {
-  const { descriptor, prover } = setup;
+  const { keys, prover } = setup;
+  /** The key the current verification was made for. */
+  let verifiedFor: string | undefined;
+
+  /**
+   * The verified connection and the current request key, enrolled. A key
+   * other than the last one's, after a new login, verifies the enclave again.
+   * A release that fails verification enrolls nothing.
+   */
+  async function prepare(
+    options: OperationOptions = {},
+  ): Promise<{ runtime: ConnectedTvcRuntime; context: OperationExecutionContext }> {
+    const scope = requestScope(options, setup.requestTimeoutMs);
+    try {
+      const key = await keys.current(scope.signal);
+      if (verifiedFor !== key.id) {
+        if (verifiedFor !== undefined) session.reset();
+        verifiedFor = key.id;
+      }
+      const runtime = await session.context({ ...options, signal: scope.signal });
+      const operations = await key.operations(scope.signal);
+      return { runtime, context: { ...runtime, operations } };
+    } finally {
+      scope.dispose();
+    }
+  }
 
   /**
    * One operation over the verified connection. A refused or failed exchange
    * may mean the release moved on, such as to a new Quorum key epoch, so the
    * next call verifies again; a rate limit says nothing about the release.
    */
-  async function run<TOperation extends Operation>(
+  async function execute<TOperation extends Operation>(
+    prepared: { runtime: ConnectedTvcRuntime; context: OperationExecutionContext },
     operation: TOperation,
     sealedSeed: SealedSeed | undefined,
     options?: OperationOptions,
   ) {
-    const context = await session.context(options);
     try {
-      return await executeOperation(context, operation, sealedSeed, options);
+      return await executeOperation(prepared.context, operation, sealedSeed, options);
     } catch (error) {
-      if (error instanceof TvcHttpError && error.status !== 429) session.forget(context);
+      if (error instanceof TvcHttpError && error.status !== 429) session.forget(prepared.runtime);
       throw error;
     }
   }
 
-  const enclave: TvcEnclave = {
-    async decrypt(sealedSeed, items, options) {
-      return (await run(checkDecrypt({ type: "Decrypt", items }), sealedSeed, options)).plaintexts;
-    },
-    async derive(sealedSeed, items, options) {
-      return (await run(checkDerive({ type: "Derive", items }), sealedSeed, options)).values;
-    },
-    async transactionKeys(sealedSeed, items, options) {
-      return (
-        await run(checkTransactionKeys({ type: "TransactionKeys", items }), sealedSeed, options)
-      ).secrets;
-    },
-    async prove(sealedSeed, request, sealing, options) {
-      return (await run(checkProve({ type: "Prove", request, prover: sealing }), sealedSeed, options)).sealed;
-    },
-  };
+  /** The key operations of the wallet at `solanaAddress`, which the current key's descriptor must name. */
+  function enclaveFor(solanaAddress: string): TvcEnclave {
+    async function run<TOperation extends Operation>(
+      operation: TOperation,
+      sealedSeed: SealedSeed,
+      options?: OperationOptions,
+    ) {
+      const prepared = await prepare(options);
+      if (prepared.context.operations.descriptor.address !== solanaAddress) {
+        throw new TvcError("ShieldedIdentityChanged", "the stored identity is another wallet's");
+      }
+      return execute(prepared, operation, sealedSeed, options);
+    }
+    return {
+      async decrypt(sealedSeed, items, options) {
+        return (await run(checkDecrypt({ type: "Decrypt", items }), sealedSeed, options)).plaintexts;
+      },
+      async derive(sealedSeed, items, options) {
+        return (await run(checkDerive({ type: "Derive", items }), sealedSeed, options)).values;
+      },
+      async transactionKeys(sealedSeed, items, options) {
+        return (
+          await run(checkTransactionKeys({ type: "TransactionKeys", items }), sealedSeed, options)
+        ).secrets;
+      },
+      async prove(sealedSeed, request, sealing, options) {
+        return (await run(checkProve({ type: "Prove", request, prover: sealing }), sealedSeed, options)).sealed;
+      },
+    };
+  }
 
   async function bootstrap(options: OperationOptions): Promise<BootstrapResult> {
-    const result = await run({ type: "Bootstrap" }, undefined, options);
-    if (result.solana_address !== descriptor.address) throw new TvcError("ReleaseBindingMismatch");
+    const prepared = await prepare(options);
+    const result = await execute(prepared, { type: "Bootstrap" }, undefined, options);
+    if (result.solana_address !== prepared.context.operations.descriptor.address) {
+      throw new TvcError("ReleaseBindingMismatch");
+    }
     return result;
   }
 
@@ -250,7 +344,7 @@ export function clientFromSession(
     const { approve, ...request } = options;
     if (!approve) return bootstrap(request);
     // A release that fails verification never reaches the owner's approver.
-    await session.context(request);
+    await prepare(request);
     let result: BootstrapResult | undefined;
     await approve(async (signal) => {
       const combined = signalOf(request.signal, signal);
@@ -280,47 +374,52 @@ export function clientFromSession(
         requireHex(result.sealed_seed);
         sealedSeed = Object.freeze({ sealedSeed: result.sealed_seed });
       }
-      if (identity.solanaAddress !== descriptor.address) {
+      if (keys.solanaAddress !== undefined && identity.solanaAddress !== keys.solanaAddress) {
         throw new TvcError("ShieldedIdentityChanged", "the stored identity is another wallet's");
       }
       await initializePoseidon();
-      return new EnclaveKeys({ enclave, identity, sealedSeed, prover });
+      return new EnclaveKeys({ enclave: enclaveFor(identity.solanaAddress), identity, sealedSeed, prover });
     },
   };
 }
 
 /** `createTestTvcClient` in `./testing`; `createTvcClient` is this with a gateway and the pinned release. */
-export function createClient(config: TestTvcClientConfig): TvcClient {
+export function createClient<Account extends TvcTurnkeyWalletAccount>(
+  config: TestTvcClientConfig<Account>,
+): TvcClient {
   const network = requireNetwork(config.network);
   const release = config.release ?? releaseFor(network);
-  const { descriptor, signer, backend, transport } = config;
+  const { backend, transport, nowMs, requestTimeoutMs } = config;
   return clientFromSession(
     createTvcSession({
       network,
       backend,
       release,
-      operations: { descriptor, signer },
-      ...(config.nowMs === undefined ? {} : { nowMs: config.nowMs }),
+      ...(nowMs === undefined ? {} : { nowMs }),
       ...(transport === undefined ? {} : { transport }),
-      ...(config.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: config.requestTimeoutMs }),
+      ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
     }),
     {
       network,
       servicePublicKey: turnkeyServicePublicKey(release.releasePolicy.policy.quorumPublicKey),
-      descriptor,
+      keys: clientKeysOf(config, { network, backend, transport, nowMs }),
       prover: proverFor(network, backend.endpoint, config.prover, transport),
+      requestTimeoutMs,
     },
   );
 }
 
 /**
- * A client for the wallet `config.descriptor` names, through the tvc-gateway
- * at `config.endpoint`, verified against the release this package pins for
- * `config.network`. A network without a pinned release is `ReleaseNotPinned`.
+ * A client for the wallet of the logged-in Turnkey session, through the
+ * tvc-gateway at `config.endpoint`, verified against the release this package
+ * pins for `config.network`. A network without a pinned release is
+ * `ReleaseNotPinned`.
  */
-export function createTvcClient(config: TvcClientConfig): TvcClient {
+export function createTvcClient<Account extends TvcTurnkeyWalletAccount>(
+  config: TvcClientConfig<Account>,
+): TvcClient {
   const { endpoint, prover, ...rest } = config;
-  return createClient({
+  return createClient<Account>({
     ...rest,
     backend: { kind: "gateway", endpoint },
     ...(prover === undefined ? {} : { prover: { url: prover.href } }),

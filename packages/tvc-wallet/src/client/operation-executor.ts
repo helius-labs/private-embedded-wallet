@@ -36,7 +36,6 @@ import type {
   WalletDescriptor,
   WalletGrant,
 } from "../protocol/types.js";
-import type { TvcTransport } from "./transport.js";
 import type {
   TurnkeyAppProofWire,
   TurnkeyBootProofWire,
@@ -46,10 +45,9 @@ import {
   requestGrant,
   sendOperation,
   type EncryptedRequestWire,
-  type TvcBackend,
 } from "./backend.js";
 import { assertExactObjectKeys } from "./http.js";
-import type { TvcTrustVerifier } from "./trust.js";
+import type { ConnectedTvcRuntime } from "./connection.js";
 
 const te = new TextEncoder();
 const td = new TextDecoder("utf-8", { fatal: true });
@@ -94,19 +92,21 @@ type OperationProofPayload = {
   sealed_seed_digest: string;
 };
 
-/** One request the client built, shown to the signer in full with the bytes it must sign. */
+/** One request the client built, shown to the signer in full with the text it must sign. */
 export type SignTvcRequestInput = {
   readonly operation: Operation;
   readonly request: Readonly<OperationRequest>;
+  /** SHA-256 of `clientAuthMessage`. */
   readonly clientAuthDigest: Uint8Array;
-  readonly clientAuthMessage: Uint8Array;
+  /** `spr-tvc-client-auth-v1:<request digest hex>`. */
+  readonly clientAuthMessage: string;
   readonly signal?: AbortSignal;
 };
 
 /**
  * Signs the client's requests with the P-256 client key a wallet descriptor
- * lists: `createTvcRequestSigner` for a key the caller holds, or the browser's
- * non-exportable key from `loadOrCreatePersistentBrowserTvcSigner`.
+ * lists: the Turnkey session key, or in tests a key `createTvcRequestSigner`
+ * wraps.
  */
 export type TvcRequestSigner = {
   /** `clientKeyIdFor` of the uncompressed P-256 public key the descriptor lists. */
@@ -121,16 +121,9 @@ export type OperationsConfig = {
   readonly signer: TvcRequestSigner;
 };
 
-export type OperationExecutionContext = {
-  readonly backend: TvcBackend;
-  readonly info: ServiceInfo;
-  readonly transport: TvcTransport;
+/** A verified connection and the wallet and key one operation runs with. */
+export type OperationExecutionContext = ConnectedTvcRuntime & {
   readonly operations: OperationsConfig;
-  readonly releasePolicyValidFromMs: bigint;
-  readonly releasePolicyExpiresAtMs: bigint;
-  readonly nowMs: () => bigint;
-  readonly trustVerifier: TvcTrustVerifier;
-  readonly requestTimeoutMs?: number;
 };
 
 export function requireCurrentReleasePolicy(

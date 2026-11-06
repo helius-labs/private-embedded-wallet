@@ -26,11 +26,12 @@ operations.
 `setup()` in [`src/lib.ts`](src/lib.ts) does the whole integration:
 
 ```ts
+const turnkey = apiKeyTurnkey(owner, organizationId, apiKey); // the owner's API key as the Turnkey session
 const tvc = createTvcClient({
   network, // SPR_NETWORK: the pinned release, the prover policy, the enrollment chain
   endpoint, // the network's /v1/private-wallet on its Helius host
-  descriptor, // enrolled once, then read from TVC_DESCRIPTOR_PATH
-  signer: requestSigner(key), // the client key the descriptor lists
+  turnkey, // signs every request, and is enrolled with the gateway on first use
+  solanaAddress, // TURNKEY_WALLET_ADDRESS, or the organization's Solana account
 });
 const stored = await loadWallet(walletPath); // TVC_WALLET_PATH, absent before the first run
 const keys = await tvc.open(stored, { approve });
@@ -40,6 +41,10 @@ if (!stored) await writeFile(walletPath, JSON.stringify(keys.stored));
 1. `createTvcClient` names the enclave of the network `SPR_NETWORK` names,
    behind that network's Helius-hosted tvc-gateway. The client verifies it
    against the release the package pins for the network on its first call.
+   A browser passes its logged-in Turnkey client as `turnkey`; here
+   `apiKeyTurnkey` gives the owner's API key the same shape: the API key is
+   the session key, `signWithApiKey` signs with its private half, and the
+   wallet signs the enrollment through `signRawPayload`.
 2. `open` bootstraps the wallet once and the example stores `keys.stored`,
    the public identity and the sealed seed, in a file. Neither is a secret to
    the client. Later runs reopen the stored wallet without a call. If the file
@@ -66,19 +71,18 @@ client.proofService)` in place of `keys`. Nothing else changes.
   Solana wallet, and a root user's API key in it, as the key pair or a Turnkey
   API key file (`TURNKEY_API_KEY_PATH`). Helius creates these sub-organizations
   for an embedded-wallet project; the gateway refuses a wallet in any other
-  (`SubOrganizationNotOwned`). The example signs with the key, enrolls with
-  it, and configures the enclave's grant with it before a bootstrap. A browser
-  integration uses the authenticated owner session instead; never embed a root
-  API key in browser code.
+  (`SubOrganizationNotOwned`). The key signs the enclave requests and the
+  transactions, enrolls itself, and configures the enclave's grant before a
+  bootstrap. A browser integration passes its logged-in Turnkey client
+  instead; never embed a root API key in browser code.
 
-The first run enrolls the client key: the wallet owner signs a Sign-In With
-Solana message for the gateway's host and network, and
-`POST /v1/private-wallet/enroll` answers a wallet descriptor for that network,
-stored at `TVC_DESCRIPTOR_PATH`. The client verifies the enclave against the
-package's release for the network, `RELEASES[network]`; a network without one
-(mainnet until its first release) fails with `ReleaseNotPinned`. A stored
-descriptor for another network is refused; keep one descriptor file per
-network.
+Each run enrolls the API key with the gateway before its first request: the
+wallet signs a Sign-In With Solana message for the gateway's host and network,
+and `POST /v1/private-wallet/enroll` answers a wallet descriptor for that key,
+which the client keeps in memory. Nothing but the stored wallet is written.
+The client verifies the enclave against the package's release for the
+network; a network without one (mainnet until its first release) fails with
+`ReleaseNotPinned`.
 
 ## Setup
 
@@ -226,7 +230,7 @@ IndexedDB.
   attested prover at `TVC_PROVER_URL` (default `/v1/spr` beside the gateway);
   the client-side prover at `ZOLANA_PROVER_URL` never sees an enclave witness. `ZOLANA_ENDPOINT`, `ZOLANA_INDEXER_URL`,
   `ZOLANA_PROVER_URL` and `TVC_GATEWAY_URL` override the Helius routes.
-- Never commit `.env`, the client key, the descriptor, or the stored wallet.
+- Never commit `.env`, the API key file, or the stored wallet.
 
 ## Documentation
 

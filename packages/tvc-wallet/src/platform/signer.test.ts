@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { signedRequestMessage } from "./signer.js";
+import { compactLowS, signedRequestMessage } from "./signer.js";
 import { clientAuthMessage, requestDigest } from "../protocol/digest.js";
 import type { SignTvcRequestInput } from "../client/operation-executor.js";
 import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
@@ -59,18 +59,20 @@ describe("request signer guard", () => {
     );
   });
 
-  it("refuses to sign bytes that are not this request's authorization message", () => {
+  it("returns the client-auth text: the domain and the request digest in hex", () => {
+    const value = input();
+    expect(signedRequestMessage(value, CLIENT_KEY_ID)).toMatch(/^spr-tvc-client-auth-v1:[0-9a-f]{64}$/);
+  });
+
+  it("refuses to sign text that is not this request's authorization message", () => {
     // A signing oracle would sign whatever the caller handed it; the signer
     // must reject anything it cannot rederive from the disclosed request.
-    expect(() =>
-      signedRequestMessage(
-        input({ clientAuthMessage: new Uint8Array(64).fill(9) }),
-        CLIENT_KEY_ID,
-      ),
-    ).toThrowError(/OperationNotAllowed/);
-    expect(() =>
-      signedRequestMessage(input({ clientAuthMessage: new Uint8Array(0) }), CLIENT_KEY_ID),
-    ).toThrowError(/OperationNotAllowed/);
+    const message = clientAuthMessage(requestDigest(request()));
+    for (const other of ["", "anything", message.toUpperCase(), `${message}\n`, message.replace(":", "\u0000")]) {
+      expect(() => signedRequestMessage(input({ clientAuthMessage: other }), CLIENT_KEY_ID)).toThrowError(
+        /OperationNotAllowed/,
+      );
+    }
   });
 
   it("refuses a message that belongs to a different request", () => {
@@ -88,5 +90,18 @@ describe("request signer guard", () => {
     expect(() => signedRequestMessage(input(), "tvc-browser-p256-" + "22".repeat(16))).toThrowError(
       /OperationNotAllowed/,
     );
+  });
+});
+
+describe("compactLowS", () => {
+  it("keeps a low-S signature and flips a high-S one", () => {
+    const order = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+    const r = new Uint8Array(32).fill(1);
+    const low = Uint8Array.from([...r, ...new Uint8Array(31), 5]);
+    expect(compactLowS(low)).toEqual(low);
+    const highS = (order - 5n).toString(16).padStart(64, "0");
+    const high = Uint8Array.from([...r, ...highS.match(/../g)!.map((byte) => Number.parseInt(byte, 16))]);
+    expect(compactLowS(high)).toEqual(low);
+    expect(() => compactLowS(new Uint8Array(70))).toThrowError(/InvalidSignatureEncoding/);
   });
 });

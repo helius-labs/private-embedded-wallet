@@ -1,33 +1,59 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { generateKeyPairSync, verify } from "node:crypto";
 import { test } from "node:test";
-import { clientKey, grantEnclaveBootstrap, heliusUrl } from "./lib.js";
+import { apiKeyTurnkey, grantEnclaveBootstrap, heliusUrl } from "./lib.js";
 
-test("client keys are created only for missing files and survive reload", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "tvc-client-key-"));
-  try {
-    const path = join(dir, "key.json");
-    const created = await clientKey(path);
-    const stored = await readFile(path, "utf8");
-    assert.equal((await stat(path)).mode & 0o777, 0o600);
-    assert.deepEqual((await clientKey(path)).publicKey, created.publicKey);
-    assert.equal(await readFile(path, "utf8"), stored);
+test("the owner's API key is the Turnkey session the client signs and enrolls with", async () => {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const jwk = privateKey.export({ format: "jwk" });
+  const key = {
+    privateKey: Buffer.from(jwk.d!, "base64url").toString("hex"),
+    publicKey: Buffer.from(
+      publicKey.export({ format: "der", type: "spki" }).subarray(-65),
+    ).toString("hex"),
+  };
+  // Turnkey names API keys by their compressed public key.
+  const point = Buffer.from(key.publicKey, "hex");
+  key.publicKey = Buffer.from([2 + (point[64]! & 1), ...point.subarray(1, 33)]).toString("hex");
+  const signed: unknown[] = [];
+  type Api = Parameters<typeof apiKeyTurnkey>[0];
+  const api: Api = {
+    getWallets: async () => ({ wallets: [{ walletId: "w1" }] }) as Awaited<ReturnType<Api["getWallets"]>>,
+    getWalletAccounts: async ({ walletId }) => ({
+      accounts: [{ walletId, address: "owner", addressFormat: "ADDRESS_FORMAT_SOLANA" }],
+    }) as Awaited<ReturnType<Api["getWalletAccounts"]>>,
+    signRawPayload: async (input) => {
+      signed.push(input);
+      return { r: "01", s: "02", v: "00" } as Awaited<ReturnType<Api["signRawPayload"]>>;
+    },
+  };
+  const turnkey = apiKeyTurnkey(api, "org", key);
 
-    await writeFile(path, "{recoverable but broken JSON");
-    await assert.rejects(clientKey(path), SyntaxError);
-    assert.equal(await readFile(path, "utf8"), "{recoverable but broken JSON");
+  assert.deepEqual(await turnkey.getSession(), { publicKey: key.publicKey, organizationId: "org" });
+  const message = "spr-tvc-client-auth-v1:" + "ab".repeat(32);
+  const signature = Buffer.from(await turnkey.signWithApiKey({ message, publicKey: key.publicKey }), "hex");
+  assert.equal(signature.length, 64);
+  assert.equal(verify("sha256", Buffer.from(message), { key: publicKey, dsaEncoding: "ieee-p1363" }, signature), true);
+  await assert.rejects(turnkey.signWithApiKey({ message, publicKey: "02" + "11".repeat(32) }), /no Turnkey API key/);
 
-    await writeFile(path, '{"kty":"invalid"}');
-    await assert.rejects(clientKey(path));
-    assert.equal(await readFile(path, "utf8"), '{"kty":"invalid"}');
+  const [wallet] = await turnkey.fetchWallets();
+  assert.equal(wallet?.walletId, "w1");
+  assert.equal(wallet?.accounts[0]?.address, "owner");
+  await turnkey.signMessage({
+    message: "enroll",
+    walletAccount: wallet!.accounts[0]!,
+    encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
+    hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",
+  });
+  assert.deepEqual(signed, [{
+    organizationId: "org",
+    signWith: "owner",
+    payload: "enroll",
+    encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
+    hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",
+  }]);
 
-    await assert.rejects(clientKey(dir), { code: "EISDIR" });
-    assert.equal((await stat(dir)).isDirectory(), true);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  assert.throws(() => apiKeyTurnkey(api, "org", { ...key, publicKey: "02" + "11".repeat(32) }), /does not match/);
 });
 
 test("enrollment reconciles every existing grant after quorum rotation", async () => {

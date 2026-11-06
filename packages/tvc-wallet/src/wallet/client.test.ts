@@ -2,7 +2,7 @@ import { ShieldedKeypair, initializePoseidon } from "@heliuslabs/spr";
 import { p256 } from "@noble/curves/p256";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { OperationExecutionContext } from "../client/operation-executor.js";
+import type { ConnectedTvcRuntime } from "../client/connection.js";
 import type { TvcSession } from "../client/session.js";
 import { TvcError, TvcHttpError } from "../protocol/error.js";
 import { encodeLowerHex } from "../protocol/hex.js";
@@ -15,7 +15,9 @@ import {
   proverFor,
   type ShieldedIdentity,
 } from "./client.js";
+import { fixedClientKeys, type TvcClientKey, type TvcClientKeys } from "./client-keys.js";
 import { TvcProverPolicy } from "./prover-policy.js";
+import type { TvcTurnkey } from "./turnkey.js";
 
 const execute = vi.hoisted(() => vi.fn());
 vi.mock("./operations.js", async (importOriginal) => ({
@@ -47,22 +49,35 @@ function wallet() {
   return { address, identity, bootstrap, descriptor };
 }
 
+const prover = { url: "https://prover.invalid/v1/spr", policy: new TvcProverPolicy("https://prover.invalid/policy") };
+
+/** A session whose verification always holds until it is reset. */
+function verifiedSession() {
+  let current = { verified: 1 } as unknown as ConnectedTvcRuntime;
+  const session = {
+    context: vi.fn(async () => current),
+    forget: vi.fn(),
+    reset: vi.fn(() => {
+      current = { verified: (current as unknown as { verified: number }).verified + 1 } as unknown as ConnectedTvcRuntime;
+    }),
+  } satisfies TvcSession;
+  return session;
+}
+
 /** A client over a session whose verification always holds, and whose operations `execute` answers. */
 function fixture() {
   const { address, identity, bootstrap, descriptor } = wallet();
-  const context = { verified: true } as unknown as OperationExecutionContext;
-  const session = {
-    context: vi.fn(async () => context),
-    forget: vi.fn(),
-  } satisfies TvcSession;
+  const session = verifiedSession();
+  const operations = { descriptor, signer };
   const client = clientFromSession(session, {
     network: "devnet",
     servicePublicKey: "02".padEnd(66, "1"),
-    descriptor,
-    prover: { url: "https://prover.invalid/v1/spr", policy: new TvcProverPolicy("https://prover.invalid/policy") },
+    keys: fixedClientKeys(operations),
+    prover,
   });
   execute.mockReset();
-  return { address, identity, bootstrap, client, session, context };
+  const context = expect.objectContaining({ verified: 1, operations });
+  return { address, identity, bootstrap, client, session, context, operations };
 }
 
 describe("open", () => {
@@ -130,7 +145,7 @@ describe("open", () => {
   });
 
   it("verifies again after the backend refuses or fails an operation, but not after a rate limit", async () => {
-    const { identity, client, session, context } = fixture();
+    const { identity, client, session } = fixture();
     const keys = await client.open({ identity, sealedSeed: { sealedSeed: "cd".repeat(16) } });
     const [viewingPublicKey] = keys.viewingPublicKeys();
     const request = [{ viewingPublicKey: viewingPublicKey!, firstNullifier: new Uint8Array(32) as never }];
@@ -143,23 +158,94 @@ describe("open", () => {
       session.forget.mockClear();
       execute.mockRejectedValueOnce(error);
       await expect(keys.transactionKeys(request)).rejects.toBe(error);
-      if (forgets) expect(session.forget).toHaveBeenCalledWith(context);
+      if (forgets) expect(session.forget).toHaveBeenCalledWith({ verified: 1 });
       else expect(session.forget).not.toHaveBeenCalled();
     }
   });
 });
 
+describe("a client key that changes", () => {
+  beforeAll(() => initializePoseidon());
+
+  /** Keys whose current key the test switches, each with its own descriptor of the same wallet. */
+  function switchingKeys(address: string) {
+    const enrolled: string[] = [];
+    const descriptorOf = (id: string) =>
+      ({ address, network: "devnet", allowed_clients: [{ client_public_key: id }] }) as unknown as WalletDescriptor;
+    const key = (id: string): TvcClientKey => ({
+      id,
+      operations: vi.fn(async () => {
+        enrolled.push(id);
+        return { descriptor: descriptorOf(id), signer: { ...signer, clientKeyId: id } };
+      }),
+    });
+    const available = { a: key("a"), b: key("b") };
+    let current: TvcClientKey = available.a;
+    const keys: TvcClientKeys = { current: vi.fn(async () => current) };
+    return { keys, enrolled, use: (id: "a" | "b") => { current = available[id]; } };
+  }
+
+  it("verifies again for the new key, and opens a stored seed with any key of the wallet", async () => {
+    const { identity, bootstrap } = wallet();
+    const session = verifiedSession();
+    const { keys, enrolled, use } = switchingKeys(identity.solanaAddress);
+    const client = clientFromSession(session, { network: "devnet", servicePublicKey: "02".padEnd(66, "1"), keys, prover });
+    execute.mockReset();
+    execute.mockResolvedValue(bootstrap);
+    const opened = await client.open();
+    expect(execute.mock.lastCall?.[0]).toMatchObject({ verified: 1, operations: { signer: { clientKeyId: "a" } } });
+    expect(session.reset).not.toHaveBeenCalled();
+
+    // A new login: the stored seed opens without a call, and the next
+    // operation verifies again and signs with the new key.
+    use("b");
+    const reopened = await client.open(opened.stored);
+    expect(session.context).toHaveBeenCalledOnce();
+    const [viewingPublicKey] = reopened.viewingPublicKeys();
+    const request = [{ viewingPublicKey: viewingPublicKey!, firstNullifier: new Uint8Array(32) as never }];
+    execute.mockResolvedValue({ type: "TransactionKeys", secrets: ["00".repeat(32)] });
+    await reopened.transactionKeys(request);
+    expect(session.reset).toHaveBeenCalledOnce();
+    expect(execute.mock.lastCall?.[0]).toMatchObject({ verified: 2, operations: { signer: { clientKeyId: "b" } } });
+    expect(execute.mock.lastCall?.[2]).toEqual(opened.stored.sealedSeed);
+
+    // The same key again keeps the verification.
+    await reopened.transactionKeys(request);
+    expect(session.reset).toHaveBeenCalledOnce();
+    expect(enrolled).toEqual(["a", "b", "b"]);
+  });
+
+  it("refuses to send a stored wallet's seed under another wallet's descriptor", async () => {
+    const { identity } = wallet();
+    const { keys } = switchingKeys(wallet().identity.solanaAddress);
+    const client = clientFromSession(verifiedSession(), { network: "devnet", servicePublicKey: "02".padEnd(66, "1"), keys, prover });
+    execute.mockReset();
+    const opened = await client.open({ identity, sealedSeed: { sealedSeed: "cd".repeat(16) } });
+    const [viewingPublicKey] = opened.viewingPublicKeys();
+    await expect(
+      opened.transactionKeys([{ viewingPublicKey: viewingPublicKey!, firstNullifier: new Uint8Array(32) as never }]),
+    ).rejects.toMatchObject({ code: "ShieldedIdentityChanged" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+});
+
 describe("createTvcClient", () => {
   const descriptor = { address: "11111111111111111111111111111111", network: "devnet" } as WalletDescriptor;
+  const turnkey: TvcTurnkey = {
+    getSession: () => Promise.resolve(undefined),
+    signWithApiKey: () => Promise.reject(new Error("unused")),
+    fetchWallets: () => Promise.reject(new Error("unused")),
+    signMessage: () => Promise.reject(new Error("unused")),
+  };
 
   it("pins the package's release of its network and names its Turnkey service key", () => {
-    expect(() => createTvcClient({ network: "mainnet", endpoint, descriptor, signer })).toThrowError(
+    expect(() => createTvcClient({ network: "mainnet", endpoint, turnkey })).toThrowError(
       /ReleaseNotPinned/,
     );
     expect(() =>
-      createTvcClient({ network: "testnet" as "devnet", endpoint, descriptor, signer }),
+      createTvcClient({ network: "testnet" as "devnet", endpoint, turnkey }),
     ).toThrowError(/UnknownNetwork/);
-    const client = createTvcClient({ network: "devnet", endpoint, descriptor, signer });
+    const client = createTvcClient({ network: "devnet", endpoint, turnkey });
     expect(client.network).toBe("devnet");
     expect(client.servicePublicKey).toMatch(/^0[23][0-9a-f]{64}$/);
 
@@ -178,6 +264,20 @@ describe("createTvcClient", () => {
       release: { releasePolicy: { policy: { quorumPublicKey } } } as unknown as ReleaseTrust,
     });
     expect(test.servicePublicKey).toBe(encodeLowerHex(p256.getPublicKey(quorumSigning, true)));
+    expect(() =>
+      createClient({
+        network: "devnet",
+        backend: { kind: "enclave", endpoint },
+        turnkey,
+      }),
+    ).toThrowError(/GatewayRequired/);
+  });
+
+  it("says so when no Turnkey session is active, before it verifies", async () => {
+    const fetch = vi.fn();
+    const client = createTvcClient({ network: "devnet", endpoint, turnkey, transport: { fetch } });
+    await expect(client.open()).rejects.toMatchObject({ code: "TurnkeySessionRequired" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("proves beside the gateway under the network's policy unless told otherwise", () => {

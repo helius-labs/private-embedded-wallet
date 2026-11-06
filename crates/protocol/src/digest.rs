@@ -4,12 +4,12 @@ use sha2::{Digest, Sha256};
 
 use crate::constants::{
     CLIENT_AUTH_DOMAIN, PROVISIONING_AUTH_DOMAIN, RELEASE_POLICY_DOMAIN, REQUEST_DIGEST_DOMAIN,
-    REQUEST_ID_HASH_DOMAIN, RESULT_DIGEST_DOMAIN, SEALED_SEED_DIGEST_DOMAIN, WALLET_GRANT_DOMAIN,
-    WALLET_ID_HASH_DOMAIN,
+    REQUEST_ID_HASH_DOMAIN, RESULT_DIGEST_DOMAIN, SEALED_SEED_DIGEST_DOMAIN, WALLET_BINDING_DOMAIN,
+    WALLET_GRANT_DOMAIN, WALLET_ID_HASH_DOMAIN,
 };
-use crate::encoding::{self, canonicalize_json_value};
+use crate::encoding::{self, canonicalize_json_value, encode_lower_hex};
 use crate::error::{ErrorCode, TvcError};
-use crate::types::OperationRequest;
+use crate::types::{OperationRequest, WalletDescriptor};
 
 pub fn domain_separated_hash(domain: &[u8], payload: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -43,14 +43,22 @@ pub fn request_digest(request: &OperationRequest) -> Result<[u8; 32], TvcError> 
     ))
 }
 
+/// The text a client key signs for a request:
+/// `spr-tvc-client-auth-v1:<request digest in lowercase hex>`.
+pub fn client_auth_message(request_digest_bytes: &[u8; 32]) -> String {
+    format!(
+        "{CLIENT_AUTH_DOMAIN}:{}",
+        encode_lower_hex(request_digest_bytes)
+    )
+}
+
+/// SHA-256 of the UTF-8 [`client_auth_message`]: the digest ECDSA signs.
 pub fn client_auth_digest(request_digest_bytes: &[u8; 32]) -> [u8; 32] {
-    domain_separated_hash(CLIENT_AUTH_DOMAIN, request_digest_bytes)
+    sha256(client_auth_message(request_digest_bytes).as_bytes())
 }
 
 /// The provisioner signs the descriptor without its own signature field.
-pub fn descriptor_digest(
-    descriptor: &crate::types::WalletDescriptor,
-) -> Result<[u8; 32], TvcError> {
+pub fn descriptor_digest(descriptor: &WalletDescriptor) -> Result<[u8; 32], TvcError> {
     let mut value = encoding::to_canonical_value(descriptor)?;
     let object = value
         .as_object_mut()
@@ -59,6 +67,25 @@ pub fn descriptor_digest(
     let canonical = canonicalize_json_value(&value)?;
     Ok(domain_separated_hash(
         PROVISIONING_AUTH_DOMAIN,
+        canonical.as_bytes(),
+    ))
+}
+
+/// Names the wallet a descriptor is for, and nothing about its clients: the
+/// network, security domain, Turnkey organization and wallet, and address. A
+/// sealed seed carries it, so any descriptor of the wallet opens the seed,
+/// whichever client key it lists.
+pub fn wallet_binding_digest(descriptor: &WalletDescriptor) -> Result<[u8; 32], TvcError> {
+    let wallet = serde_json::json!({
+        "network": descriptor.network,
+        "security_domain_id": encode_lower_hex(&descriptor.security_domain_id),
+        "turnkey_organization_id": descriptor.turnkey_organization_id,
+        "turnkey_wallet_id": descriptor.turnkey_wallet_id,
+        "address": descriptor.address,
+    });
+    let canonical = canonicalize_json_value(&wallet)?;
+    Ok(domain_separated_hash(
+        WALLET_BINDING_DOMAIN,
         canonical.as_bytes(),
     ))
 }
@@ -96,4 +123,67 @@ pub fn request_id_hash(request_id: &[u8; 32]) -> [u8; 32] {
 
 pub fn release_policy_digest(policy_jcs: &[u8]) -> [u8; 32] {
     domain_separated_hash(RELEASE_POLICY_DOMAIN, policy_jcs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{ClientGrant, Network, OperationKind};
+
+    #[test]
+    fn the_client_auth_message_is_the_domain_and_the_hex_request_digest() {
+        let digest = [0xab; 32];
+        let message = client_auth_message(&digest);
+        assert_eq!(
+            message,
+            format!("spr-tvc-client-auth-v1:{}", "ab".repeat(32))
+        );
+        assert_eq!(client_auth_digest(&digest), sha256(message.as_bytes()));
+    }
+
+    fn descriptor() -> WalletDescriptor {
+        WalletDescriptor {
+            version: crate::constants::API_VERSION,
+            security_domain_id: [0x11; 32],
+            network: Network::Devnet,
+            turnkey_organization_id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            turnkey_wallet_id: "00000000-0000-4000-8000-000000000002".to_owned(),
+            address: "4E2agEUkMiuP3ABYbYTYXuU7bYyqPb3uGsLqs7RDd1U5".to_owned(),
+            allowed_clients: vec![ClientGrant {
+                client_public_key: vec![0x04; 65],
+                allowed_operations: vec![OperationKind::Decrypt],
+            }],
+            provisioning_signature: vec![0; 64],
+        }
+    }
+
+    #[test]
+    fn the_wallet_binding_names_the_wallet_and_not_its_clients() {
+        let digest = wallet_binding_digest(&descriptor()).expect("digest");
+
+        let mut other_client = descriptor();
+        other_client.allowed_clients[0].client_public_key = vec![0x05; 65];
+        other_client.allowed_clients[0].allowed_operations = vec![OperationKind::Derive];
+        other_client.provisioning_signature = vec![1; 64];
+        assert_eq!(
+            wallet_binding_digest(&other_client).expect("digest"),
+            digest
+        );
+
+        let others: [fn(&mut WalletDescriptor); 5] = [
+            |d| d.network = Network::Mainnet,
+            |d| d.security_domain_id = [0x12; 32],
+            |d| d.turnkey_organization_id = "00000000-0000-4000-8000-000000000003".to_owned(),
+            |d| d.turnkey_wallet_id = "00000000-0000-4000-8000-000000000004".to_owned(),
+            |d| d.address = "11111111111111111111111111111111".to_owned(),
+        ];
+        for change in others {
+            let mut other_wallet = descriptor();
+            change(&mut other_wallet);
+            assert_ne!(
+                wallet_binding_digest(&other_wallet).expect("digest"),
+                digest
+            );
+        }
+    }
 }

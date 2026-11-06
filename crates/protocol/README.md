@@ -26,10 +26,10 @@ transaction signatures are base58. A network is `devnet` or `mainnet`.
 | Domain | Payload | Use |
 | --- | --- | --- |
 | `ZOLANA_TVC_REQUEST_V1` | `JCS(request)` without `authorization.signature` | `request_digest`; `client_key_id` stays in |
-| `ZOLANA_TVC_CLIENT_AUTH_V1` | `request_digest` | What the client key signs, through a prehash API |
 | `ZOLANA_TVC_RESULT_V1` | The encrypted result bytes | `result_digest`, bound by the App Proof |
 | `ZOLANA_TVC_SEALED_SEED_DIGEST_V1` | The sealed seed wire bytes | Names the seed a response used |
 | `ZOLANA_TVC_WALLET_ID_V1` | The wallet id | Binds a sealed seed to its wallet |
+| `ZOLANA_TVC_WALLET_BINDING_V1` | `JCS({network, security_domain_id, turnkey_organization_id, turnkey_wallet_id, address})` of a descriptor | What a sealed seed's contents name the wallet by |
 | `ZOLANA_TVC_PROVISIONING_AUTH_V1` | `JCS(descriptor)` without `provisioning_signature` | What the provisioning key signs |
 | `ZOLANA_TVC_RELEASE_POLICY_V1` | `JCS(policy)` | What a release authority signs |
 | `ZOLANA_TVC_WALLET_GRANT_V1` | `JCS(grant)` without `signature` | What the grant key signs |
@@ -51,7 +51,10 @@ release pins (`target_release_id`, `target_manifest_digest`,
 `target_executable_digest`, Quorum key id and epoch), the wallet descriptor,
 the sealed seed (absent on `Bootstrap`), a one-time response public key, the
 operation, and a `ClientAuthorization`: the client key id and the client
-key's P-256 signature over `H(client-auth, request_digest)`.
+key's signature over the client-auth message, the UTF-8 text
+`spr-tvc-client-auth-v1:<request_digest in lowercase hex>`. The signature is
+ECDSA P-256 over SHA-256 of that text, as Turnkey's `signWithApiKey` signs
+with a session key, sent as 64-byte low-S `r || s`.
 
 An `EncryptedResponse` echoes the request id and carries the result
 encrypted to the response key, plus an App Proof: a P-256/SHA-256 signature by
@@ -134,11 +137,14 @@ descriptor names public keys and identifiers only; it is not a secret.
 
 The sealed seed is the derivation seed encrypted to the Quorum key. Its
 envelope names the Quorum key id and epoch and the wallet id hash; its
-contents repeat the Quorum key id and epoch and add the descriptor digest,
-which pins the wallet and its address, the derivation suite
-(`spr-ed25519-role-expansion-v1`), and the seed. `Bootstrap` returns it; every other operation presents it, and the
-enclave accepts it only under the descriptor and Quorum key epoch it was
-issued for. It contains nothing the Turnkey wallet cannot reproduce, so
+contents repeat the Quorum key id and epoch and add the wallet binding digest
+(the network, security domain, Turnkey organization and wallet, and address
+of the descriptor), the derivation suite (`spr-ed25519-role-expansion-v1`),
+and the seed. `Bootstrap` returns it; every other operation presents it, and
+the enclave accepts it under any descriptor of the same wallet, whichever
+client key that descriptor lists, and only under the Quorum key epoch it was
+issued for. A client that signs in again with a new key opens the seed it
+already holds. It contains nothing the Turnkey wallet cannot reproduce, so
 losing it costs one more `Bootstrap`.
 
 ## Wallet grant

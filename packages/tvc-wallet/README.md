@@ -14,40 +14,35 @@ the enclave checks.
 
 ```ts
 import { Wallet, createSprClient, syncWallet } from "@heliuslabs/spr";
-import { createTvcClient, createTvcRequestSigner } from "@heliuslabs/spr-embedded-wallet";
-import { walletEnrollmentMessage } from "@heliuslabs/spr-embedded-wallet/protocol";
+import { createTvcClient } from "@heliuslabs/spr-embedded-wallet";
 
+// 1. The app logs the user in with Turnkey; `turnkey` is @turnkey/core's client, or useTurnkey().
 const endpoint = new URL(`https://devnet.helius-rpc.com/v1/private-wallet?api-key=${apiKey}`);
-const signer = createTvcRequestSigner({ clientKeyId, sign }); // the device's P-256 request key
+const tvc = createTvcClient({ network: "devnet", endpoint, turnkey });
 
-// 1. Enroll the device key once: the wallet owner signs, the gateway answers a descriptor.
-const enrollment = { organizationId, turnkeyWalletId, solanaAddress, clientPublicKey, issuedAtMs: Date.now() };
-const ownerSignature = await signWithWallet(walletEnrollmentMessage({ domain: endpoint.host, network: "devnet", ...enrollment }));
-const { descriptor } = await enroll(endpoint, { ...enrollment, ownerSignature }); // POST <endpoint>/enroll
-
-// 2. The client: the network's pinned release, the gateway, the wallet and its request key.
-const tvc = createTvcClient({ network: "devnet", endpoint, descriptor, signer });
-
-// 3. The wallet's keys: reopened from what was stored, or bootstrapped once with the owner's approval.
+// 2. The wallet's keys: reopened from the last `keys.stored`, or bootstrapped once with the owner's approval.
 const keys = await tvc.open(stored, { approve });
 await save(keys.stored);
 
-// 4. The SDK, with the enclave's keys in place of `LocalKeys`.
+// 3. The SDK, with the enclave's keys in place of `LocalKeys`.
 const zolana = await createSprClient({ solanaRpcUrl, indexerUrl, proverUrl, proverTee, proofDataSource: "client" });
 const wallet = new Wallet({ identity: keys.address() });
 await syncWallet({ client: zolana, wallet, keys });
 ```
 
-`createTvcClient({ network, endpoint, descriptor, signer, prover?, nowMs?, transport?, requestTimeoutMs? })`:
+`createTvcClient({ network, endpoint, turnkey, solanaAddress?, prover?, nowMs?, transport?, requestTimeoutMs? })`:
 
 - `endpoint` is the network's tvc-gateway, Helius's
   `https://<network>.helius-rpc.com/v1/private-wallet?api-key=…` or an
   application's proxy of it. Its query travels on every route.
-- `descriptor` is the wallet descriptor enrollment answered, and `signer`
-  signs each request with the client key it lists:
-  `createTvcRequestSigner({ clientKeyId, sign })` for a key the caller holds,
-  or the browser's non-exportable key from
-  `loadOrCreatePersistentBrowserTvcSigner()` in `./browser`.
+- `turnkey` is the application's Turnkey client with a logged-in session:
+  `@turnkey/core`'s `TurnkeyClient`, or what `useTurnkey()` returns in
+  `@turnkey/react-wallet-kit`, as it is. The client uses four of its methods,
+  typed as `TvcTurnkey`: `getSession`, `signWithApiKey`, `fetchWallets` and
+  `signMessage`. A server implements them over a Turnkey API key; see
+  [the example](../../examples/typescript-client/src/lib.ts).
+- `solanaAddress` names the wallet when the session's organization holds more
+  than one embedded Solana account; by default the client takes the only one.
 - `prover` is the attested prover the enclave seals proofs to and the client
   posts them to. It defaults to `/v1/spr` on the endpoint's origin with the
   endpoint's query, where Helius serves the network's TEE prover.
@@ -58,7 +53,9 @@ await syncWallet({ client: zolana, wallet, keys });
 SDK's `WalletKeys`, with `keys.stored` to persist. Neither part of it is a
 secret to the client:
 
-- `stored` with its `sealedSeed` reopens the wallet without a call.
+- `stored` with its `sealedSeed` reopens the wallet without a call, under
+  any session key of the wallet: a new login needs no bootstrap.
+  `parseStoredWallet` reads a stored value back and refuses anything else.
 - Without `stored`, the enclave bootstraps the wallet: it derives the
   shielded identity from a Turnkey signature over a fixed message and returns
   the seed sealed to the release's Quorum key. A wallet whose Turnkey policy
@@ -86,7 +83,8 @@ verifies the Boot Proof of whichever replica answered it. The client verifies
 again before the next call when the policy's window no longer holds, and after
 the backend refuses or fails an operation (any HTTP error but a 429): a new
 deployment or a rotated Quorum key epoch refuses requests bound to the old
-discovery. It does not repeat the failed operation.
+discovery. It does not repeat the failed operation. It also verifies again
+when the Turnkey session key changes.
 
 The enclave's five operations, specified in
 [`crates/protocol`](../../crates/protocol/README.md), stay behind `TvcKeys`
@@ -165,34 +163,50 @@ failed at a named stage is a `TvcOperationError` with its `operation` and `stage
 (`Prover`, or `TurnkeySigning` when Turnkey declined the bootstrap signature).
 The client does not retry a failed operation automatically.
 
-## Enrollment
+## The session key
 
-A descriptor comes from `POST <endpoint>/enroll` with
-`{organizationId, turnkeyWalletId, solanaAddress, clientPublicKey, issuedAtMs, ownerSignature}`:
-the wallet owner signs `walletEnrollmentMessage(enrollment)`, a Sign-In With
-Solana message whose `domain` is the endpoint's host and whose chain is the
-gateway's `network`, with the wallet's Solana key, and the gateway answers
-`{descriptor}` for the enrollment's client key. The wallet's Turnkey
+The client key is the Turnkey session key. Turnkey's client holds a
+non-exportable P-256 key for each login session. The client signs every
+request with it through `signWithApiKey`, over the client-auth text
+`spr-tvc-client-auth-v1:<request digest, lowercase hex>` (ECDSA P-256 over
+SHA-256), normalizes the signature to low S, and checks it against the key
+before it sends.
+
+On first use the client enrolls the key with the gateway. It finds the
+wallet's Solana account (`fetchWallets`; connected wallets are skipped), has
+the wallet sign `walletEnrollmentMessage` with Ed25519 (`signMessage`, a text
+payload, unhashed), a Sign-In With Solana message for the endpoint's host
+whose chain is the network, and posts
+`{organizationId, turnkeyWalletId, solanaAddress, clientPublicKey, issuedAtMs, ownerSignature}`
+to `<endpoint>/enroll`. The gateway answers a descriptor for the key, which
+the client checks and keeps in memory for that key. A new login, or
+`refreshSession` without the current public key, brings a new session key:
+the client enrolls it before the next request and verifies the enclave again.
+The sealed seed is bound to the wallet (network, security domain, Turnkey
+organization and wallet, address), not to the key, so a stored wallet opens
+under every session key of its owner.
+
+Errors: `TurnkeySessionRequired` without a logged-in session,
+`WalletAccountNotFound` or `WalletAccountAmbiguous` when the account cannot be
+told, and `EnrollmentRejected` with the gateway's status. The wallet's Turnkey
 sub-organization must be named after the API key's Helius project. See
 [`apps/tvc-gateway`](../../apps/tvc-gateway/README.md#enrollment).
 
 ## Entry points
 
-- `@heliuslabs/spr-embedded-wallet`: `createTvcClient`, `TvcKeys`,
-  `snapshotCipher`, and `createTvcRequestSigner` for a caller-held P-256
-  request key outside the browser.
+- `@heliuslabs/spr-embedded-wallet`: `createTvcClient`, `TvcTurnkey`,
+  `TvcKeys`, `parseStoredWallet` and `snapshotCipher`.
 - `@heliuslabs/spr-embedded-wallet/protocol`: wire types, `TvcError`, hex codecs,
   `clientKeyIdFor`, and `walletEnrollmentMessage`, the Sign-In With Solana
-  message a wallet owner signs to enroll with tvc-gateway.
-- `@heliuslabs/spr-embedded-wallet/browser`: the non-exportable P-256 request
-  signer, the persisted enclave-state parser, and IndexedDB record helpers.
+  message the wallet signs to enroll a key with tvc-gateway.
 - `@heliuslabs/spr-embedded-wallet/testing`: `createTestTvcClient`, which
   verifies an enclave as `createTvcClient` does against a release and backend
   the caller names (a gateway, or the enclave itself with
-  `{ kind: "enclave", endpoint, resolveBootProof, walletGrant }`), and
-  `createLocalTvcClient`, the loopback-only unattested testkit client for the
-  network the testkit was built for. The build fails if testkit code becomes
-  reachable from a production entry.
+  `{ kind: "enclave", endpoint, resolveBootProof, walletGrant }`), with the
+  Turnkey session or a descriptor and the signer of its key
+  (`createTvcRequestSigner`), and `createLocalTvcClient`, the loopback-only
+  unattested testkit client for the network the testkit was built for. The
+  build fails if testkit code becomes reachable from a production entry.
 
 ## Verification
 

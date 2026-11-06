@@ -226,7 +226,9 @@ starts:
 
 The tests send the headers gatekeeper would add and drive a wallet through
 the testkit client in gateway mode: enrollment, one session, Bootstrap,
-TransactionKeys and a resend answered with the first answer, and the refusals
+TransactionKeys and a resend answered with the first answer; a Turnkey session
+key the client enrolls itself, and after a new login enrolls the next key,
+verifies again and opens the stored sealed seed with it; and the refusals
 of stale, forged, other-domain, other-network and other-project enrollments,
 other projects' wallets and resends, and descriptors this gateway did not
 provision. One test signs a release for the testkit through

@@ -1,4 +1,6 @@
-//! Direct P-256/SHA-256 client authorization. No generic signer API.
+//! Client authorization: ECDSA P-256 over SHA-256 of the UTF-8
+//! [`client_auth_message`](crate::digest::client_auth_message), low-S, so a
+//! key that signs only text, such as a Turnkey session key, can authorize.
 
 use sha2::{Digest, Sha256};
 

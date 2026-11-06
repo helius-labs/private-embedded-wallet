@@ -24,17 +24,6 @@ function domainSeparatedHash(domain: string, payload: Uint8Array): Uint8Array {
   return sha256(input);
 }
 
-function concatBytes(parts: Uint8Array[]): Uint8Array {
-  const length = parts.reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(length);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
-}
-
 export function requestDigest(request: object): Uint8Array {
   const cloned = structuredClone(request) as Record<string, unknown>;
   const authorization = cloned.authorization as Record<string, unknown> | undefined;
@@ -48,15 +37,19 @@ export function requestDigest(request: object): Uint8Array {
   return domainSeparatedHash(REQUEST_DIGEST_DOMAIN, te.encode(canonicalizeJsonValue(cloned)));
 }
 
+/** SHA-256 of the UTF-8 {@link clientAuthMessage}: the digest ECDSA signs. */
 export function clientAuthDigest(requestDigestBytes: Uint8Array): Uint8Array {
-  return sha256(clientAuthMessage(requestDigestBytes));
+  return sha256(te.encode(clientAuthMessage(requestDigestBytes)));
 }
 
-/** Exact bytes that WebCrypto ECDSA hashes once with SHA-256 for client auth. */
-export function clientAuthMessage(requestDigestBytes: Uint8Array): Uint8Array {
+/**
+ * The text a client key signs for a request,
+ * `spr-tvc-client-auth-v1:<request digest in lowercase hex>`: ECDSA P-256 over
+ * SHA-256 of its UTF-8 bytes, as Turnkey's `signWithApiKey` signs.
+ */
+export function clientAuthMessage(requestDigestBytes: Uint8Array): string {
   if (requestDigestBytes.length !== SHA256_LEN) throw new TvcError("InvalidDigest");
-  const domain = te.encode(CLIENT_AUTH_DOMAIN);
-  return concatBytes([domain, Uint8Array.of(0), requestDigestBytes]);
+  return `${CLIENT_AUTH_DOMAIN}:${encodeLowerHex(requestDigestBytes)}`;
 }
 
 export function resultDigest(encryptedResult: Uint8Array): Uint8Array {

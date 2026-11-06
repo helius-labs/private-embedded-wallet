@@ -2,16 +2,8 @@ import {
   connectLocalUnattestedTvc,
   type LocalUnattestedConnectionConfig,
 } from "./local-connection.js";
-import type { OperationsConfig } from "./operation-executor.js";
 import { sessionFromConnector, type TvcSession } from "./session.js";
 
-type LocalTvcSessionConfig = LocalUnattestedConnectionConfig & {
-  readonly operations: OperationsConfig;
-};
-
-export function createLocalTvcSession(config: LocalTvcSessionConfig): TvcSession {
-  return sessionFromConnector(
-    (signal) => connectLocalUnattestedTvc(config, signal),
-    config.operations,
-  );
+export function createLocalTvcSession(config: LocalUnattestedConnectionConfig): TvcSession {
+  return sessionFromConnector((signal) => connectLocalUnattestedTvc(config, signal));
 }

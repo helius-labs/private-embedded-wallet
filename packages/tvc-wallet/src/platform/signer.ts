@@ -4,7 +4,6 @@ import type {
 } from "../client/operation-executor.js";
 import { clientAuthMessage, requestDigest } from "../protocol/digest.js";
 import { TvcError } from "../protocol/error.js";
-import { bytesEqual } from "../protocol/hex.js";
 
 const P256_ORDER = BigInt(
   "0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
@@ -22,12 +21,12 @@ const P256_HALF_ORDER = P256_ORDER >> 1n;
 export function signedRequestMessage(
   input: SignTvcRequestInput,
   clientKeyId: string,
-): Uint8Array {
+): string {
   if (input.request.authorization.client_key_id !== clientKeyId) {
     throw new TvcError("OperationNotAllowed");
   }
   const expected = clientAuthMessage(requestDigest(input.request));
-  if (!bytesEqual(input.clientAuthMessage, expected)) {
+  if (input.clientAuthMessage !== expected) {
     throw new TvcError("OperationNotAllowed");
   }
   return expected;
@@ -54,20 +53,17 @@ export function compactLowS(signature: ArrayBuffer | Uint8Array): Uint8Array {
   return output;
 }
 
-/** A P-256 client key the caller holds, such as in a server's key store. */
+/** A P-256 client key: a Turnkey session key, or the testkit's. */
 export type TvcRequestKey = {
   /** `clientKeyIdFor` of the uncompressed P-256 public key the descriptor lists. */
   readonly clientKeyId: string;
-  /** ECDSA over `SHA-256` of the message, returned as 64-byte `r||s`. */
-  sign(message: Uint8Array): Promise<Uint8Array>;
+  /** ECDSA over SHA-256 of the message's UTF-8 bytes, returned as 64-byte `r||s`. */
+  sign(message: string): Promise<Uint8Array>;
 };
 
 /**
- * The request signer for a key the caller holds.
- *
- * The message and the low-S normalization stay here, so a caller outside the
- * browser supplies a key and nothing else. Reimplementing either would put the
- * canonical form in two places.
+ * The request signer for a key. The message and the low-S normalization stay
+ * here, so a key supplies its signature and nothing else.
  */
 export function createTvcRequestSigner(key: TvcRequestKey): TvcRequestSigner {
   return {

@@ -8,7 +8,7 @@ use spr_keypair::shielded::ShieldedAddress;
 use spr_keypair::{derivation, Curve, NullifierKey, PublicKey, ViewingKey};
 use zeroize::{Zeroize, Zeroizing};
 use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::digest::{descriptor_digest, sealed_seed_digest, wallet_id_hash};
+use zolana_tvc_protocol::digest::{sealed_seed_digest, wallet_binding_digest, wallet_id_hash};
 use zolana_tvc_protocol::types::{OperationRequest, SealedSeed};
 
 use super::{Failure, DERIVATION_SUITE};
@@ -56,14 +56,15 @@ impl Roles {
 }
 
 /// Borsh contents of the sealed seed. The seed is the only secret; every other
-/// field pins the blob to one descriptor and Quorum key epoch. The descriptor
-/// digest covers the Turnkey wallet and its address, so it pins the wallet too.
+/// field pins the blob to one wallet and Quorum key epoch. The wallet binding
+/// names the wallet, not a client key, so the blob opens under any descriptor
+/// of that wallet.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub(super) struct UnsealedSeed {
     pub version: u8,
     pub quorum_key_id: String,
     pub quorum_key_epoch: u64,
-    pub descriptor_digest: [u8; 32],
+    pub wallet_binding: [u8; 32],
     pub derivation_suite: String,
     pub derivation_seed: [u8; 64],
 }
@@ -85,7 +86,7 @@ pub(super) fn seal(
         version: API_VERSION,
         quorum_key_id: request.quorum_key_id.clone(),
         quorum_key_epoch: request.quorum_key_epoch,
-        descriptor_digest: descriptor_digest(&request.wallet_descriptor)
+        wallet_binding: wallet_binding_digest(&request.wallet_descriptor)
             .map_err(|_| Failure::Invalid)?,
         derivation_suite: DERIVATION_SUITE.to_owned(),
         derivation_seed: *seed,
@@ -109,8 +110,9 @@ pub(super) fn seal(
 
 /// Unseals the request's seed into the wallet's roles. The envelope is
 /// checked against the request and the contents against both the envelope and
-/// the descriptor, so a blob works only under the descriptor and Quorum key
-/// epoch it was issued for. Returns the roles and the sealed-seed digest.
+/// the descriptor's wallet, so a blob works only for the wallet and Quorum key
+/// epoch it was issued for, under any descriptor of that wallet. Returns the
+/// roles and the sealed-seed digest.
 pub(super) fn unseal(
     request: &OperationRequest,
     runtime: &Runtime,
@@ -136,8 +138,8 @@ pub(super) fn unseal(
     if contents.version != API_VERSION
         || contents.quorum_key_id != sealed.quorum_key_id
         || contents.quorum_key_epoch != sealed.quorum_key_epoch
-        || contents.descriptor_digest
-            != descriptor_digest(descriptor).map_err(|_| Failure::Invalid)?
+        || contents.wallet_binding
+            != wallet_binding_digest(descriptor).map_err(|_| Failure::Invalid)?
         || contents.derivation_suite != DERIVATION_SUITE
     {
         return Err(Failure::Invalid);

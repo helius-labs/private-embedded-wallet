@@ -4,45 +4,37 @@ import {
   type ConnectedTvcRuntime,
   type TvcConnectionConfig,
 } from "./connection.js";
-import type {
-  OperationExecutionContext,
-  OperationsConfig,
-} from "./operation-executor.js";
-
-export type TvcSessionConfig = TvcConnectionConfig & {
-  /** The wallet the operations act on and the key that signs them. */
-  operations: OperationsConfig;
-};
 
 /**
  * The client's one verified connection, made on first use. Verification runs
  * again once the release policy's validity window no longer holds, and after
- * `forget`; nothing else replaces it.
+ * `forget` or `reset`; nothing else replaces it.
  */
 export type TvcSession = {
-  /** The operation context of the verified connection, verifying first when there is none or it no longer holds. */
-  context(options?: TvcRequestOptions): Promise<OperationExecutionContext>;
+  /** The verified connection, verifying first when there is none or it no longer holds. */
+  context(options?: TvcRequestOptions): Promise<ConnectedTvcRuntime>;
   /** Drops `context` if it is still the current one, so the next call verifies again. */
-  forget(context: OperationExecutionContext): void;
+  forget(context: ConnectedTvcRuntime): void;
+  /** Drops the current connection and any verification in flight, so the next call verifies anew. */
+  reset(): void;
 };
 
 /** Whether the connection's release policy is still in force. Operations check the same window again before they sign. */
-function holds(context: OperationExecutionContext): boolean {
+function holds(context: ConnectedTvcRuntime): boolean {
   const now = context.nowMs();
   return now >= context.releasePolicyValidFromMs && now <= context.releasePolicyExpiresAtMs;
 }
 
 export function sessionFromConnector(
   connect: (signal: AbortSignal) => Promise<ConnectedTvcRuntime>,
-  operations: OperationsConfig,
   requestTimeoutMs?: number,
 ): TvcSession {
-  let active: OperationExecutionContext | null = null;
-  type Flight = { controller: AbortController; promise: Promise<OperationExecutionContext>; users: number };
+  let active: ConnectedTvcRuntime | null = null;
+  type Flight = { controller: AbortController; promise: Promise<ConnectedTvcRuntime>; users: number };
   let pending: Flight | null = null;
 
   return {
-    async context(options): Promise<OperationExecutionContext> {
+    async context(options): Promise<ConnectedTvcRuntime> {
       const scope = requestScope(options, requestTimeoutMs);
       let flight: Flight | undefined;
       try {
@@ -53,11 +45,11 @@ export function sessionFromConnector(
           const controller = new AbortController();
           const current: Flight = { controller, users: 0, promise: Promise.resolve().then(async () => {
             controller.signal.throwIfAborted();
-            const runtime = await connect(controller.signal);
-            // An abandoned connector may ignore cancellation and finish after its replacement.
+            const context = await connect(controller.signal);
+            // An abandoned connector may ignore cancellation and finish after its
+            // replacement, and a reset one must not become current.
             controller.signal.throwIfAborted();
-            const context = { ...runtime, operations };
-            active = context;
+            if (pending === current) active = context;
             return context;
           }).finally(() => { if (pending === current) pending = null; }) };
           pending = current;
@@ -78,10 +70,15 @@ export function sessionFromConnector(
     forget(context): void {
       if (active === context) active = null;
     },
+
+    reset(): void {
+      active = null;
+      pending = null;
+    },
   };
 }
 
-export function createTvcSession(config: TvcSessionConfig): TvcSession {
+export function createTvcSession(config: TvcConnectionConfig): TvcSession {
   // Single-flighted: concurrent first calls share one verification.
-  return sessionFromConnector((signal) => connectAndVerifyTvc(config, signal), config.operations, config.requestTimeoutMs);
+  return sessionFromConnector((signal) => connectAndVerifyTvc(config, signal), config.requestTimeoutMs);
 }

@@ -4,6 +4,8 @@ import tsParser from "@typescript-eslint/parser";
 
 const TURNKEY_PROOF_SEAM =
   "packages/tvc-wallet/src/verify/internal/turnkey-proof-seam.ts";
+const TURNKEY_CONFORMANCE_TEST =
+  "packages/tvc-wallet/src/wallet/turnkey.conformance.test.ts";
 
 export default [
   {
@@ -49,7 +51,8 @@ export default [
     },
   },
   {
-    files: [TURNKEY_PROOF_SEAM],
+    // The conformance test imports `@turnkey/core`'s types, a dev dependency.
+    files: [TURNKEY_PROOF_SEAM, TURNKEY_CONFORMANCE_TEST],
     rules: {
       "no-restricted-imports": "off",
     },

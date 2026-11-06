@@ -18,8 +18,8 @@ use zolana_tvc_protocol::crypto::{
     sign_p256_prehash, verify_p256_prehash, verify_turnkey_app_proof_p256_message, QosP256Public,
 };
 use zolana_tvc_protocol::digest::{
-    client_auth_digest, descriptor_digest, request_digest, request_id_hash, result_digest,
-    sealed_seed_digest, wallet_grant_digest, wallet_id_hash,
+    client_auth_digest, client_auth_message, descriptor_digest, request_digest, request_id_hash,
+    result_digest, sealed_seed_digest, wallet_grant_digest, wallet_id_hash,
 };
 use zolana_tvc_protocol::encoding::{
     canonicalize_json_str, canonicalize_json_value, encode_decimal_u64, encode_lower_hex,
@@ -320,6 +320,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
     let request =
         authorize_operation_request(sample_request(&client_public, &running), &client_sk)?;
     let request_digest_bytes = request_digest(&request)?;
+    let client_auth_text = client_auth_message(&request_digest_bytes);
     let client_auth = client_auth_digest(&request_digest_bytes);
     verify_client_authorization(&request, &client_public).expect("signed request verifies");
 
@@ -363,6 +364,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
             "id": "request-digest",
             "request": serde_json::to_value(&request).expect("request"),
             "request_digest": encode_lower_hex(&request_digest_bytes),
+            "client_auth_message": client_auth_text,
             "client_auth_digest": encode_lower_hex(&client_auth),
             "includes_client_key_id": true,
             "excludes_signature_only": true,
@@ -382,7 +384,6 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
         ,
     );
 
-    let message = b"ZOLANA_TVC_CLIENT_AUTH_V1";
     let raw_sig = sign_p256_prehash(&client_sk, &client_auth)?;
     verify_p256_prehash(&client_public, &client_auth, &raw_sig).expect("raw sig");
     let der = der_encode_signature(&raw_sig);
@@ -408,7 +409,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
             "compressed_public_key": encode_lower_hex(&compressed),
             "double_hash_digest": encode_lower_hex(&double_hash),
             "double_hash_signature": encode_lower_hex(&double_sig),
-            "message_domain": encode_lower_hex(message),
+            "message": client_auth_text,
         })),
     );
 

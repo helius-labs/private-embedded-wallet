@@ -16,7 +16,6 @@ import type {
 } from "../protocol/types.js";
 import { policySigningDigest } from "../verify/release-policy.js";
 import type { TvcConnectionConfig } from "./connection.js";
-import type { OperationsConfig } from "./operation-executor.js";
 import type { TvcRequestOptions } from "./request.js";
 import { createTvcSession } from "./session.js";
 
@@ -27,14 +26,9 @@ vi.mock("../verify/index.js", async (importOriginal) => ({
   verifyBootProof: verifyBootProofMock,
 }));
 
-const operations = {
-  descriptor: {},
-  signer: { clientKeyId: "unused", signRequest: () => Promise.reject(new Error("unused")) },
-} as unknown as OperationsConfig;
-
-/** What the client verifies on first use: a fresh session's operation context. */
+/** What the client verifies on first use: a fresh session's connection. */
 function verify(config: TvcConnectionConfig, options?: TvcRequestOptions) {
-  return createTvcSession({ ...config, operations }).context(options);
+  return createTvcSession(config).context(options);
 }
 
 function secret(label: string): Uint8Array {

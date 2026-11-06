@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { ed25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/p256";
 import { getAddressDecoder } from "@solana/kit";
-import type { TvcKeys, TvcRequestSigner, TvcTransport } from "@heliuslabs/spr-embedded-wallet";
+import type { TvcKeys, TvcTransport, TvcTurnkey } from "@heliuslabs/spr-embedded-wallet";
 import {
   decodeLowerHex,
   encodeLowerHex,
@@ -16,7 +17,7 @@ import {
   createTestTvcClient,
   type ReleaseTrust,
 } from "@heliuslabs/spr-embedded-wallet/testing";
-import { beforeAll, describe, expect, inject, it } from "vitest";
+import { beforeAll, describe, expect, inject, it, vi } from "vitest";
 import {
   ORGANIZATION_ID,
   PROJECT_ID,
@@ -224,6 +225,87 @@ describe("a wallet enrolled through the gateway", () => {
   });
 });
 
+/** A logged-in Turnkey session for the testkit's wallet, whose session key a new login replaces. */
+function turnkeySession() {
+  const sessionKeys = new Map<string, Uint8Array>();
+  let publicKey = "";
+  const signed: string[] = [];
+  const login = () => {
+    const secret = p256.utils.randomPrivateKey();
+    publicKey = encodeLowerHex(p256.getPublicKey(secret, true));
+    sessionKeys.set(publicKey, secret);
+    return publicKey;
+  };
+  login();
+  const turnkey: TvcTurnkey = {
+    getSession: async () => ({ publicKey, organizationId: ORGANIZATION_ID }),
+    async signWithApiKey({ message, publicKey: key }) {
+      signed.push(message);
+      const secret = sessionKeys.get(key);
+      if (!secret) throw new Error(`no session key ${key}`);
+      return p256.sign(createHash("sha256").update(message, "utf8").digest(), secret).toCompactHex();
+    },
+    fetchWallets: async () => [{
+      walletId: TURNKEY_WALLET_ID,
+      accounts: [{ address: ownerAddress, addressFormat: "ADDRESS_FORMAT_SOLANA" }],
+    }],
+    async signMessage({ message }) {
+      const signature = ed25519.sign(new TextEncoder().encode(message), ownerSeed);
+      return { r: encodeLowerHex(signature.slice(0, 32)), s: encodeLowerHex(signature.slice(32)) };
+    },
+  };
+  return { turnkey, login, signed };
+}
+
+describe("a Turnkey session key as the client key", () => {
+  const sent: { path: string; body: string }[] = [];
+  const transport: TvcTransport = {
+    async fetch(url, init) {
+      sent.push({ path: url.pathname, body: String(init?.body ?? "") });
+      return fetch(url, { ...init, headers: gatekeeperHeaders() });
+    },
+  };
+  const paths = () => sent.map(({ path }) => path.replace("/v1/private-wallet", ""));
+  const { turnkey, login, signed } = turnkeySession();
+  const tvc = createLocalTvcClient({
+    network: "devnet",
+    backend: { kind: "gateway", endpoint: new URL(privateWallet) },
+    turnkey,
+    transport,
+  });
+  let keys: TvcKeys;
+
+  it("is enrolled through the gateway on first use and signs the bootstrap", async () => {
+    keys = await tvc.open();
+    expect(keys.stored.identity.solanaAddress).toBe(ownerAddress);
+    expect(paths()).toEqual(["/session", "/enroll", "/operations"]);
+    const enrolled = JSON.parse(sent[1]!.body) as { clientPublicKey: string };
+    const operation = JSON.parse(sent[2]!.body) as { descriptor: WalletDescriptor };
+    expect(operation.descriptor.allowed_clients[0]?.client_public_key).toBe(enrolled.clientPublicKey);
+    expect(signed).toEqual([expect.stringMatching(/^spr-tvc-client-auth-v1:[0-9a-f]{64}$/)]);
+  });
+
+  it("enrolls the new key after a new login, verifies again, and opens the stored seed with it", async () => {
+    sent.length = 0;
+    login();
+    const reopened = await tvc.open(keys.stored);
+    expect(sent).toEqual([]);
+    const firstNullifier = new Uint8Array(32);
+    firstNullifier[31] = 2;
+    type Request = Parameters<TvcKeys["transactionKeys"]>[0][number];
+    const [viewingPublicKey] = reopened.viewingPublicKeys();
+    const request = [{ viewingPublicKey: viewingPublicKey!, firstNullifier: firstNullifier as Request["firstNullifier"] }];
+    // The enclave opens the seed sealed at the first key's bootstrap under
+    // the new key's descriptor: same wallet, another client key.
+    expect(await reopened.transactionKeys(request)).toHaveLength(1);
+    expect(paths()).toEqual(["/session", "/enroll", "/operations"]);
+    const enrolled = JSON.parse(sent[1]!.body) as { clientPublicKey: string };
+    const operation = JSON.parse(sent[2]!.body) as { descriptor: WalletDescriptor };
+    expect(operation.descriptor.allowed_clients[0]?.client_public_key).toBe(enrolled.clientPublicKey);
+    expect(signed).toHaveLength(2);
+  });
+});
+
 describe("a direct caller with a Helius API key", () => {
   async function postDirect(path: string, body: unknown, headers: Record<string, string> = {}) {
     const response = await fetch(`${privateWallet}${path}`, {
@@ -286,19 +368,15 @@ describe("a release the release script signs for the testkit", () => {
       qosIdentityPcrs: { 0: "00".repeat(48), 1: "00".repeat(48), 2: "00".repeat(48), 3: "00".repeat(48) },
     };
     expect(release.releasePolicy.policy).toEqual(policy);
-    const descriptor: WalletDescriptor = (await post("/enroll", enrollment())).body.descriptor;
-    // Verification fails before any request is signed.
-    const signer: TvcRequestSigner = {
-      clientKeyId: "unused",
-      signRequest: () => Promise.reject(new Error("signed before verification")),
-    };
+    // Verification fails before the session key is enrolled or signs anything.
+    const { turnkey, signed } = turnkeySession();
+    const signMessage = vi.spyOn(turnkey, "signMessage");
     const client = (network: Network) =>
       createTestTvcClient({
         network,
         backend: { kind: "gateway", endpoint: new URL(privateWallet) },
         release,
-        descriptor,
-        signer,
+        turnkey,
         transport: { fetch: (url, init) => fetch(url, { ...init, headers: gatekeeperHeaders() }) },
       });
     // The policy verifies and binds the testkit's discovery and ping; only
@@ -307,6 +385,8 @@ describe("a release the release script signs for the testkit", () => {
       code: "BootProofUnverified",
     });
     await expect(client("mainnet").open()).rejects.toMatchObject({ code: "NetworkMismatch" });
+    expect(signMessage).not.toHaveBeenCalled();
+    expect(signed).toEqual([]);
     expect(() => releasePolicy(info.release_id, { ...cfg, network: "mainnet" }, info, Date.now())).toThrow(
       "/v1/info network is devnet, expected mainnet",
     );

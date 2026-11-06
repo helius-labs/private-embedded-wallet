@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { webcrypto } from "node:crypto";
+import { createECDH, createPrivateKey, sign, type KeyObject } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 
 import {
@@ -31,19 +31,14 @@ import type { AssetBalance } from "@heliuslabs/spr/transaction";
 import { DEFAULT_SOLANA_ACCOUNTS, Turnkey } from "@turnkey/sdk-server";
 import {
   createTvcClient,
-  createTvcRequestSigner,
+  parseStoredWallet,
   type Network,
   type StoredWallet,
   type TvcClient,
   type TvcKeys,
   type TvcOpenOptions,
+  type TvcTurnkey,
 } from "@heliuslabs/spr-embedded-wallet";
-import {
-  clientKeyIdFor,
-  encodeLowerHex,
-  walletEnrollmentMessage,
-  type WalletDescriptor,
-} from "@heliuslabs/spr-embedded-wallet/protocol";
 import { createLocalTvcClient, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
 import { bootstrapWithApproval } from "./bootstrap-approval.js";
 
@@ -73,7 +68,7 @@ export interface ConfirmedTransaction {
 // Each network's Helius host. SPR_NETWORK picks one; it must be the network the
 // enclave serves. Its gatekeeper serves the RPC, the indexer and the TEE prover
 // at /v1/spr, and that network's tvc-gateway at /v1/private-wallet, which
-// enrolls a device for the host it is called at.
+// enrolls a client key for the host it is called at.
 const NETWORKS = {
   devnet: { host: "https://devnet.helius-rpc.com" },
   mainnet: { host: "https://mainnet.helius-rpc.com" },
@@ -81,7 +76,6 @@ const NETWORKS = {
 const LOCAL_PROVER_URL = "http://127.0.0.1:44021";
 const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
 const TURNKEY_API_URL = "https://api.turnkey.com";
-const P256 = { name: "ECDSA", namedCurve: "P-256" } as const;
 
 function env(name: string): string {
   const value = process.env[name]?.trim();
@@ -126,179 +120,97 @@ function clientConfigFromEnv(network: Network): SprClientConfig {
   });
 }
 
-/** Load or create the request-signing key enrolled in the wallet descriptor. */
-export async function clientKey(
-  path: string,
-): Promise<{ privateKey: webcrypto.CryptoKey; publicKey: Uint8Array }> {
-  let jwk: webcrypto.JsonWebKey;
-  try {
-    jwk = (await readJson(path)) as webcrypto.JsonWebKey;
-  } catch (error) {
-    if (!isRecord(error) || error["code"] !== "ENOENT") throw error;
-    const pair = await webcrypto.subtle.generateKey(P256, true, ["sign"]);
-    jwk = await webcrypto.subtle.exportKey("jwk", pair.privateKey);
-    await writeFile(path, JSON.stringify(jwk), { mode: 0o600, flag: "wx" });
-  }
-  const privateKey = await webcrypto.subtle.importKey("jwk", jwk, P256, false, [
-    "sign",
-  ]);
-  const { kty, crv, x, y } = jwk;
-  const publicJwk = await webcrypto.subtle.importKey(
-    "jwk",
-    { kty, crv, x, y },
-    P256,
-    true,
-    ["verify"],
-  );
-  const publicKey = new Uint8Array(
-    await webcrypto.subtle.exportKey("raw", publicJwk),
-  );
-  return { privateKey, publicKey };
-}
-
-/** The stored descriptor, checked to enroll this client key on `network`. */
-async function walletDescriptor(
-  path: string,
-  clientPublicKey: string,
-  network: Network,
-): Promise<WalletDescriptor> {
-  let parsed: unknown;
-  try {
-    parsed = await readJson(path);
-  } catch {
-    throw new Error(
-      `no wallet descriptor at ${path}. ` +
-        `Enroll client public key ${clientPublicKey} and save the descriptor there.`,
-    );
-  }
-  if (!isRecord(parsed) || !Array.isArray(parsed["allowed_clients"])) {
-    throw new Error(`${path} is not a wallet descriptor`);
-  }
-  const descriptor = parsed as unknown as WalletDescriptor;
-  if (descriptor.network !== network) {
-    throw new Error(`${path} is a ${String(descriptor.network)} descriptor, and SPR_NETWORK is ${network}`);
-  }
-  const allowed = descriptor.allowed_clients.some(
-    (grant) => grant.client_public_key === clientPublicKey,
-  );
-  if (!allowed) {
-    throw new Error(
-      `${path} does not list client public key ${clientPublicKey}`,
-    );
-  }
-  return descriptor;
-}
-
-/** Requests signed with the enrolled client key. */
-function requestSigner(key: { privateKey: webcrypto.CryptoKey; publicKey: Uint8Array }) {
-  return createTvcRequestSigner({
-    clientKeyId: clientKeyIdFor(key.publicKey),
-    sign: async (message) =>
-      new Uint8Array(
-        await webcrypto.subtle.sign(
-          { name: "ECDSA", hash: "SHA-256" },
-          key.privateKey,
-          message,
-        ),
-      ),
-  });
-}
-
 /** The hosted tvc-gateway: `TVC_GATEWAY_URL`, else the network's `/v1/private-wallet`. */
 function gatewayEndpoint(network: Network): URL {
   return new URL(process.env["TVC_GATEWAY_URL"]?.trim() || heliusUrl(network, "/v1/private-wallet"));
 }
 
 /**
- * The stored descriptor for this client key, or one the gateway issues: the
- * wallet owner signs a Sign-In With Solana message for the gateway's host and
- * network through Turnkey, and `POST /enroll` answers the descriptor.
- */
-async function gatewayDescriptor(
-  owner: TurnkeyApi,
-  organizationId: string,
-  network: Network,
-  endpoint: URL,
-  clientPublicKey: string,
-  path: string,
-): Promise<WalletDescriptor> {
-  try {
-    return await walletDescriptor(path, clientPublicKey, network);
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.startsWith("no wallet descriptor")) throw error;
-  }
-  const account = await walletAccount(owner, organizationId);
-  const enrollment = {
-    organizationId,
-    turnkeyWalletId: account.walletId,
-    solanaAddress: account.address,
-    clientPublicKey,
-    issuedAtMs: Date.now(),
-  };
-  const signed = await owner.signRawPayload({
-    signWith: account.address,
-    payload: walletEnrollmentMessage({ domain: endpoint.host, network, ...enrollment }),
-    encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
-    hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",
-  });
-  const url = new URL(endpoint);
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/enroll`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...enrollment,
-      ownerSignature: signed.r.padStart(64, "0") + signed.s.padStart(64, "0"),
-    }),
-  });
-  const answer = (await response.json()) as unknown;
-  if (!response.ok || !isRecord(answer) || !isRecord(answer["descriptor"])) {
-    throw new Error(`enroll: HTTP ${response.status} ${JSON.stringify(answer)}`);
-  }
-  await writeFile(path, JSON.stringify(answer["descriptor"], null, 2));
-  console.log(`enrolled client key with the gateway; descriptor saved at ${path}`);
-  return walletDescriptor(path, clientPublicKey, network);
-}
-
-/**
  * The network's enclave through the hosted tvc-gateway, verified against the
  * release the package pins for the network. Any Helius API key reaches it;
  * the wallet's Turnkey sub-organization must be named after the key's project.
+ * The owner's Turnkey API key stands in for a browser's login session: it signs
+ * every request, and the client enrolls it with the gateway on first use.
  */
 async function gatewayClientFromEnv(network: Network): Promise<WalletClient> {
-  const key = await clientKey(env("TVC_CLIENT_KEY_PATH"));
-  const enrollIn = env("TURNKEY_ORGANIZATION_ID");
-  const endpoint = gatewayEndpoint(network);
-  const descriptor = await gatewayDescriptor(
-    await turnkeyClient(enrollIn),
-    enrollIn,
-    network,
-    endpoint,
-    encodeLowerHex(key.publicKey),
-    env("TVC_DESCRIPTOR_PATH"),
-  );
+  const organizationId = env("TURNKEY_ORGANIZATION_ID");
+  const apiKey = await turnkeyApiKey();
+  const owner = turnkeyClient(organizationId, apiKey);
+  const turnkey = apiKeyTurnkey(owner, organizationId, apiKey);
+  const solanaAddress = await walletAddress(turnkey, owner, organizationId);
   // The enclave seals proofs to /v1/spr beside the gateway unless TVC_PROVER_URL names another prover.
   const prover = process.env["TVC_PROVER_URL"]?.trim();
   const tvc = createTvcClient({
     network,
-    endpoint,
-    descriptor,
-    signer: requestSigner(key),
+    endpoint: gatewayEndpoint(network),
+    turnkey,
+    solanaAddress,
     ...(prover ? { prover: new URL(prover) } : {}),
   });
-  const organizationId = descriptor.turnkey_organization_id;
-  const owner = await turnkeyClient(organizationId);
   const { servicePublicKey } = tvc;
-  const expected = { organizationId, walletAddress: descriptor.address, servicePublicKey };
+  const expected = { organizationId, walletAddress: solanaAddress, servicePublicKey };
   return {
     tvc,
-    signer: turnkeySigner(owner, descriptor),
+    signer: turnkeySigner(owner, solanaAddress),
     // The grant names the enclave's current service key, so it is set before
     // each bootstrap, including the one after a Quorum key rotation.
     async approve(bootstrap, signal) {
-      await grantEnclaveBootstrap(owner, organizationId, servicePublicKey, descriptor.address);
+      await grantEnclaveBootstrap(owner, organizationId, servicePublicKey, solanaAddress);
       await bootstrapWithApproval(owner, expected, bootstrap, signal);
     },
+  };
+}
+
+/** The P-256 private key of a Turnkey API key, checked against its public half. */
+function apiSigningKey(key: { publicKey: string; privateKey: string }): KeyObject {
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(Buffer.from(key.privateKey, "hex"));
+  if (ecdh.getPublicKey("hex", "compressed") !== key.publicKey.toLowerCase()) {
+    throw new Error("the Turnkey API private key does not match its public key");
+  }
+  const point = ecdh.getPublicKey();
+  return createPrivateKey({
+    format: "jwk",
+    key: {
+      kty: "EC",
+      crv: "P-256",
+      d: ecdh.getPrivateKey().toString("base64url"),
+      x: point.subarray(1, 33).toString("base64url"),
+      y: point.subarray(33).toString("base64url"),
+    },
+  });
+}
+
+/**
+ * The wallet owner's Turnkey API key as the client's Turnkey session, as a
+ * browser login session is: the API key is the session key that signs every
+ * request, and the owner signs the enrollment with the wallet through
+ * `signRawPayload`.
+ */
+export function apiKeyTurnkey(
+  api: Pick<TurnkeyApi, "getWallets" | "getWalletAccounts" | "signRawPayload">,
+  organizationId: string,
+  key: { publicKey: string; privateKey: string },
+): TvcTurnkey {
+  const signingKey = apiSigningKey(key);
+  return {
+    getSession: async () => ({ publicKey: key.publicKey, organizationId }),
+    async signWithApiKey({ message, publicKey }) {
+      if (publicKey !== key.publicKey) throw new Error(`no Turnkey API key ${publicKey}`);
+      return sign("sha256", Buffer.from(message, "utf8"), { key: signingKey, dsaEncoding: "ieee-p1363" })
+        .toString("hex");
+    },
+    async fetchWallets() {
+      const { wallets } = await api.getWallets({ organizationId });
+      return Promise.all(
+        wallets.map(async ({ walletId }) => ({
+          walletId,
+          accounts: (await api.getWalletAccounts({ organizationId, walletId })).accounts,
+        })),
+      );
+    },
+    signMessage: ({ message, walletAccount, encoding, hashFunction }) =>
+      api.signRawPayload({ organizationId, signWith: walletAccount.address, payload: message, encoding, hashFunction }),
   };
 }
 
@@ -330,8 +242,7 @@ async function turnkeyApiKey(): Promise<{ publicKey: string; privateKey: string 
   return { publicKey: stored["public_key"], privateKey: stored["private_key"] };
 }
 
-async function turnkeyClient(organizationId: string) {
-  const { publicKey, privateKey } = await turnkeyApiKey();
+function turnkeyClient(organizationId: string, { publicKey, privateKey }: { publicKey: string; privateKey: string }) {
   return new Turnkey({
     apiBaseUrl: TURNKEY_API_URL,
     apiPublicKey: publicKey,
@@ -340,7 +251,7 @@ async function turnkeyClient(organizationId: string) {
   }).apiClient();
 }
 
-type TurnkeyApi = Awaited<ReturnType<typeof turnkeyClient>>;
+type TurnkeyApi = ReturnType<typeof turnkeyClient>;
 export type BootstrapApprovalApi = Pick<TurnkeyApi, "getActivity" | "getActivities" | "approveActivity">;
 
 /**
@@ -433,21 +344,25 @@ export async function grantEnclaveBootstrap(
   }
 }
 
-/** The Solana wallet account behind `TURNKEY_WALLET_ADDRESS`, or a new wallet when none is named. */
-async function walletAccount(
-  turnkey: TurnkeyApi,
+/**
+ * The wallet the example uses: `TURNKEY_WALLET_ADDRESS`, else the
+ * organization's one Solana account, else a new wallet's.
+ */
+async function walletAddress(
+  turnkey: TvcTurnkey,
+  owner: Pick<TurnkeyApi, "createWallet">,
   organizationId: string,
-): Promise<{ walletId: string; address: string }> {
+): Promise<string> {
   const named = process.env["TURNKEY_WALLET_ADDRESS"]?.trim();
-  if (named) {
-    const { accounts } = await turnkey.getWalletAccounts({ organizationId });
-    const account = accounts.find((entry) => entry.address === named);
-    if (account === undefined) {
-      throw new Error(`organization ${organizationId} has no wallet account ${named}`);
-    }
-    return { walletId: account.walletId, address: named };
+  if (named) return named;
+  const accounts = (await turnkey.fetchWallets())
+    .flatMap((wallet) => wallet.accounts)
+    .filter((account) => account.addressFormat === "ADDRESS_FORMAT_SOLANA");
+  if (accounts.length > 1) {
+    throw new Error(`organization ${organizationId} holds several Solana accounts; set TURNKEY_WALLET_ADDRESS`);
   }
-  const created = await turnkey.createWallet({
+  if (accounts[0]) return accounts[0].address;
+  const created = await owner.createWallet({
     organizationId,
     walletName: `zolana-tvc-example-${Date.now()}`,
     accounts: DEFAULT_SOLANA_ACCOUNTS,
@@ -455,12 +370,12 @@ async function walletAccount(
   const [address] = created.addresses;
   if (address === undefined) throw new Error("Turnkey created a wallet without an address");
   console.log(`created wallet ${created.walletId} with Solana address ${address}`);
-  return { walletId: created.walletId, address };
+  return address;
 }
 
 /** Adapt Turnkey to a Solana signer, verifying the returned message and wallet signature. */
-function turnkeySigner(turnkey: TurnkeyApi, descriptor: WalletDescriptor): TransactionPartialSigner {
-  const signer: Address = address(descriptor.address);
+function turnkeySigner(turnkey: TurnkeyApi, walletAddress: string): TransactionPartialSigner {
+  const signer: Address = address(walletAddress);
   const publicKey = getPublicKeyFromAddress(signer);
   const encoder = getTransactionEncoder();
   const decoder = getTransactionDecoder();
@@ -475,7 +390,7 @@ function turnkeySigner(turnkey: TurnkeyApi, descriptor: WalletDescriptor): Trans
           throw new Error("SignerNotRequired");
         }
         const { signedTransaction } = await turnkey.signTransaction({
-          signWith: descriptor.address,
+          signWith: walletAddress,
           unsignedTransaction: Buffer.from(
             encoder.encode(transaction),
           ).toString("hex"),
@@ -550,15 +465,11 @@ async function loadWallet(
   } catch {
     return undefined;
   }
-  if (
-    !isRecord(parsed) ||
-    !isRecord(parsed["identity"]) ||
-    !isRecord(parsed["sealedSeed"]) ||
-    typeof parsed["sealedSeed"]["sealedSeed"] !== "string"
-  ) {
+  try {
+    return parseStoredWallet(parsed);
+  } catch {
     throw new Error(`${path} is not a stored wallet`);
   }
-  return parsed as unknown as StoredWallet;
 }
 
 /** The stored wallet, or a wallet the enclave bootstraps once and the file then keeps. */

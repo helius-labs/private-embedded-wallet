@@ -9,6 +9,7 @@ import { decodeLowerHex, encodeLowerHex } from "./hex.js";
 import { parseStrictJson } from "./json.js";
 import {
   clientAuthDigest,
+  clientAuthMessage,
   descriptorDigest,
   walletGrantDigest,
   requestDigest,
@@ -123,6 +124,8 @@ describe("request digest", () => {
     const request = fixture.request as Record<string, unknown>;
     const digest = requestDigest(request);
     expect(encodeLowerHex(digest)).toBe(fixture.request_digest);
+    expect(clientAuthMessage(digest)).toBe(fixture.client_auth_message);
+    expect(clientAuthMessage(digest)).toBe(`spr-tvc-client-auth-v1:${fixture.request_digest}`);
     expect(encodeLowerHex(clientAuthDigest(digest))).toBe(
       fixture.client_auth_digest
     );
@@ -154,6 +157,9 @@ describe("P-256 authorization", () => {
     const digest = decodeLowerHex(String(fixture.digest));
     const raw = decodeLowerHex(String(fixture.raw_low_s));
     verifyP256Prehash(publicKey, digest, raw);
+    // The digest is SHA-256 of the client-auth text, which a hash-internally
+    // signer such as Turnkey's signWithApiKey signs as it is.
+    verifyP256Message(publicKey, new TextEncoder().encode(String(fixture.message)), raw);
     expect(() =>
       verifyP256Prehash(publicKey, digest, decodeLowerHex(String(fixture.der)))
     ).toThrowError(/DerSignatureRejected/);

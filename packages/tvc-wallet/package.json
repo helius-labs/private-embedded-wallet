@@ -25,11 +25,6 @@
       "import": "./dist/protocol.js",
       "require": "./dist/protocol.cjs"
     },
-    "./browser": {
-      "types": "./dist/browser.d.ts",
-      "import": "./dist/browser.js",
-      "require": "./dist/browser.cjs"
-    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
@@ -60,6 +55,7 @@
   "devDependencies": {
     "@heliuslabs/spr": "0.9.0-alpha",
     "@solana/kit": "^8.3.0",
+    "@turnkey/core": "2.7.1",
     "@types/node": "^24.0.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
