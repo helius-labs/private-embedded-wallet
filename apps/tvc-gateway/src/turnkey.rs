@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use axum::http::StatusCode;
 use bytes::Bytes;
 use cadence_macros::statsd_count;
-use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, SemaphorePermit};
 use turnkey_client::generated::external::options::v1::Pagination;
 use turnkey_client::generated::services::coordinator::public::v1::{
     GetBootProofRequest, GetWalletAccountsRequest, GetWhoamiRequest,
@@ -14,11 +14,14 @@ use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeyP256ApiKey};
 
 use crate::config::{TurnkeyApiKey, TurnkeyConfig};
 use crate::error::ApiError;
+use crate::limits::InFlightLimiter;
 use crate::project::ProjectId;
 
 const TURNKEY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Both Turnkey keys are shared by every project, so their call rate is too.
 const MAX_CONCURRENT_TURNKEY_CALLS: usize = 32;
+/// One project's share of those calls, so no project can take them all.
+const MAX_CONCURRENT_TURNKEY_CALLS_PER_PROJECT: u32 = 8;
 const WALLET_ACCOUNTS_PAGE: &str = "100";
 const BOOT_PROOF_CACHE_CAPACITY: usize = 256;
 const OWNERSHIP_CACHE_CAPACITY: usize = 100_000;
@@ -43,7 +46,11 @@ pub struct Turnkey {
     ownership_ttl: Duration,
     sub_org_projects: Mutex<HashMap<String, (String, Instant)>>,
     calls: Semaphore,
+    project_calls: InFlightLimiter,
 }
+
+/// One Turnkey call's slots: the project's own and a shared one.
+type CallPermit<'a> = (OwnedSemaphorePermit, SemaphorePermit<'a>);
 
 impl Turnkey {
     pub fn new(config: &TurnkeyConfig) -> anyhow::Result<Self> {
@@ -59,11 +66,17 @@ impl Turnkey {
             ownership_ttl: Duration::from_secs(config.ownership_cache_secs),
             sub_org_projects: Mutex::new(HashMap::new()),
             calls: Semaphore::new(MAX_CONCURRENT_TURNKEY_CALLS),
+            project_calls: project_calls(),
         })
     }
 
-    /// The Boot Proof JSON for one replica. A replica's proof never changes.
-    pub async fn boot_proof(&self, ephemeral_key: &str) -> Result<Bytes, ApiError> {
+    /// The Boot Proof JSON for the replica whose ephemeral key is
+    /// `ephemeral_key`, fetched for `project`. A replica's proof never changes.
+    pub async fn boot_proof(
+        &self,
+        project: &ProjectId,
+        ephemeral_key: &str,
+    ) -> Result<Bytes, ApiError> {
         if !is_lower_hex(ephemeral_key, EPHEMERAL_KEY_HEX_LEN) {
             return Err(ApiError::InvalidEnclaveAnswer);
         }
@@ -71,7 +84,7 @@ impl Turnkey {
             statsd_count!("boot_proof.cache_hit", 1);
             return Ok(cached);
         }
-        let _call = self.call_permit()?;
+        let _call = self.call_permit(project)?;
         let response = self
             .boot_proofs
             .get_boot_proof(GetBootProofRequest {
@@ -101,7 +114,7 @@ impl Turnkey {
     ) -> Result<(), ApiError> {
         self.verify_sub_org_project(project, wallet.organization_id)
             .await?;
-        let _call = self.call_permit()?;
+        let _call = self.call_permit(project)?;
         let accounts = self
             .waas
             .get_wallet_accounts(GetWalletAccountsRequest {
@@ -135,7 +148,7 @@ impl Turnkey {
     ) -> Result<(), ApiError> {
         let name = match self.cached_sub_org_project(organization_id) {
             Some(name) => name,
-            None => self.fetch_sub_org_project(organization_id).await?,
+            None => self.fetch_sub_org_project(project, organization_id).await?,
         };
         if name != project.as_str() {
             statsd_count!("ownership.rejected", 1, "reason" => "project");
@@ -144,8 +157,12 @@ impl Turnkey {
         Ok(())
     }
 
-    async fn fetch_sub_org_project(&self, organization_id: &str) -> Result<String, ApiError> {
-        let _call = self.call_permit()?;
+    async fn fetch_sub_org_project(
+        &self,
+        project: &ProjectId,
+        organization_id: &str,
+    ) -> Result<String, ApiError> {
+        let _call = self.call_permit(project)?;
         let whoami = self
             .waas
             .get_whoami(GetWhoamiRequest {
@@ -167,11 +184,15 @@ impl Turnkey {
         Ok(whoami.organization_name)
     }
 
-    fn call_permit(&self) -> Result<SemaphorePermit<'_>, ApiError> {
-        self.calls.try_acquire().map_err(|_| {
+    /// Slots for one call for `project`: one of its own, then one of the
+    /// shared ones. Neither waits.
+    fn call_permit(&self, project: &ProjectId) -> Result<CallPermit<'_>, ApiError> {
+        let own = self.project_calls.try_acquire(project)?;
+        let shared = self.calls.try_acquire().map_err(|_| {
             statsd_count!("turnkey.concurrency_rejected", 1);
             ApiError::TooManyInFlight
-        })
+        })?;
+        Ok((own, shared))
     }
 
     fn cached_sub_org_project(&self, organization_id: &str) -> Option<String> {
@@ -201,6 +222,13 @@ impl Turnkey {
         }
         cache.insert(ephemeral_key.to_owned(), body.clone());
     }
+}
+
+fn project_calls() -> InFlightLimiter {
+    InFlightLimiter::new(
+        MAX_CONCURRENT_TURNKEY_CALLS_PER_PROJECT,
+        "turnkey.project_concurrency_rejected",
+    )
 }
 
 /// `name` identifies the key in errors. The key is checked for shape first:
@@ -293,6 +321,7 @@ impl Turnkey {
             ownership_ttl: Duration::from_secs(600),
             sub_org_projects: Mutex::new(HashMap::new()),
             calls: Semaphore::new(MAX_CONCURRENT_TURNKEY_CALLS),
+            project_calls: project_calls(),
         }
     }
 }
@@ -367,6 +396,40 @@ mod tests {
             error.to_string().contains("not a valid key pair"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn one_project_cannot_take_every_turnkey_call() {
+        crate::metrics::init_for_tests();
+        let turnkey = Turnkey::for_tests("http://127.0.0.1:9");
+        let busy = ProjectId::for_tests("busy");
+        let held: Vec<_> = (0..MAX_CONCURRENT_TURNKEY_CALLS_PER_PROJECT)
+            .map(|_| {
+                turnkey
+                    .call_permit(&busy)
+                    .expect("within the project's share")
+            })
+            .collect();
+        assert_eq!(
+            turnkey.call_permit(&busy).err(),
+            Some(ApiError::TooManyInFlight)
+        );
+        // The other projects share the rest, and only the rest.
+        let rest = MAX_CONCURRENT_TURNKEY_CALLS - held.len();
+        let others: Vec<_> = (0..rest)
+            .map(|index| {
+                let project = ProjectId::for_tests(&format!("other-{index}"));
+                turnkey.call_permit(&project).expect("a shared slot")
+            })
+            .collect();
+        assert_eq!(
+            turnkey.call_permit(&ProjectId::for_tests("late")).err(),
+            Some(ApiError::TooManyInFlight)
+        );
+        drop(others);
+        assert!(turnkey.call_permit(&ProjectId::for_tests("late")).is_ok());
+        drop(held);
+        assert!(turnkey.call_permit(&busy).is_ok());
     }
 
     #[test]

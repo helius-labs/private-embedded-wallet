@@ -22,7 +22,7 @@ use crate::error::Problem;
 use crate::json::ApiJson;
 use crate::limits::InFlightLimiter;
 use crate::openapi::PingRequest;
-use crate::project::Caller;
+use crate::project::{Caller, ProjectId};
 use crate::provisioner::{self, Provisioner};
 use crate::replay::{Claim, Outcome, ReplayLedger};
 use crate::turnkey::{ClaimedWallet, Turnkey};
@@ -55,7 +55,10 @@ impl AppState {
             provisioner: Provisioner::new(&config.provisioning, config.network)?,
             enrollment: Enrollment::new(config.network, &config.enrollment.domains),
             wallet_grants: WalletGrants::new(&config.wallet_grant)?,
-            limiter: InFlightLimiter::new(config.enclave.max_in_flight_per_project),
+            limiter: InFlightLimiter::new(
+                config.enclave.max_in_flight_per_project,
+                "enclave.in_flight_rejected",
+            ),
             replay: ReplayLedger::connect(
                 Duration::from_secs(config.enclave.replay_window_secs),
                 config.enclave.replay_max_entries,
@@ -180,7 +183,7 @@ pub(crate) async fn session(
     }
     let boot_proof = state
         .turnkey
-        .boot_proof(&app_proof_key(&ping.body)?)
+        .boot_proof(&project, &app_proof_key(&ping.body)?)
         .await?;
     Ok(Json(Session {
         info: raw_json(&info.body)?,
@@ -216,6 +219,7 @@ pub(crate) async fn enroll(
     state
         .wallet_grants
         .check_client_key(&input.client_public_key)?;
+    let _permit = state.limiter.try_acquire(&project)?;
     let wallet = ClaimedWallet {
         organization_id: &input.organization_id,
         wallet_id: &input.turnkey_wallet_id,
@@ -265,7 +269,7 @@ pub(crate) async fn operations(
     let key = match state.replay.claim(&project, &request.ciphertext).await? {
         Claim::New(key) => key,
         Claim::Answered(outcome) => {
-            let mut response = answer(&state, outcome).await;
+            let mut response = answer(&state, &project, outcome).await;
             response
                 .headers_mut()
                 .insert(IDEMPOTENT_REPLAYED, HeaderValue::from_static("true"));
@@ -291,14 +295,14 @@ pub(crate) async fn operations(
     };
     request.wallet_grant = Some(grant);
     let outcome = state.enclave.operations(&request).await;
-    state.replay.record(key, &project, &outcome).await;
-    Ok(answer(&state, outcome).await)
+    state.replay.record(key, &outcome).await;
+    Ok(answer(&state, &project, outcome).await)
 }
 
 /// The client's answer to an enclave outcome: a success with the Boot Proof
 /// of the replica that answered, the enclave's refusal as it is, or the
 /// failure.
-async fn answer(state: &AppState, outcome: Outcome) -> Response {
+async fn answer(state: &AppState, project: &ProjectId, outcome: Outcome) -> Response {
     let answered = async {
         let forwarded = outcome?;
         if !forwarded.is_success() {
@@ -306,7 +310,7 @@ async fn answer(state: &AppState, outcome: Outcome) -> Response {
         }
         let boot_proof = state
             .turnkey
-            .boot_proof(&app_proof_key(&forwarded.body)?)
+            .boot_proof(project, &app_proof_key(&forwarded.body)?)
             .await?;
         Ok(Json(Operated {
             response: raw_json(&forwarded.body)?,
@@ -392,7 +396,7 @@ mod tests {
             provisioner: crate::provisioner::tests::provisioner(),
             enrollment: crate::enrollment::tests::enrollment(&[crate::enrollment::tests::DOMAIN]),
             wallet_grants: crate::wallet_grant::tests::grants(Vec::new()),
-            limiter: InFlightLimiter::new(4),
+            limiter: InFlightLimiter::new(4, "test.in_flight_rejected"),
             replay: ReplayLedger::Local(LocalLedger::new(Duration::from_secs(360), 1_000)),
         })
     }
@@ -567,19 +571,50 @@ mod tests {
         );
     }
 
+    fn enrollment_body(request: &EnrollmentRequest) -> String {
+        serde_json::json!({
+            "organizationId": request.organization_id,
+            "turnkeyWalletId": request.turnkey_wallet_id,
+            "solanaAddress": request.solana_address,
+            "clientPublicKey": request.client_public_key,
+            "issuedAtMs": request.issued_at_ms,
+            "ownerSignature": request.owner_signature,
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn an_enrollment_takes_one_of_the_projects_in_flight_slots() {
+        let state = state();
+        let now = provisioner::now_ms().expect("clock");
+        let body = enrollment_body(&crate::enrollment::tests::signed_request(now));
+        let held: Vec<_> = (0..4)
+            .map(|_| {
+                state
+                    .limiter
+                    .try_acquire(&ProjectId::for_tests(PROJECT))
+                    .expect("a free slot")
+            })
+            .collect();
+        assert_eq!(
+            call(&state, request("POST", "/v1/private-wallet/enroll", &body)).await,
+            (StatusCode::TOO_MANY_REQUESTS, "TooManyInFlight".to_owned())
+        );
+        drop(held);
+        assert_eq!(
+            call(&state, request("POST", "/v1/private-wallet/enroll", &body)).await,
+            (
+                StatusCode::FAILED_DEPENDENCY,
+                "TurnkeyUnavailable".to_owned()
+            )
+        );
+    }
+
     #[tokio::test]
     async fn a_stale_or_malformed_enrollment_is_refused_before_turnkey_is_asked() {
         let state = state();
         let future = crate::enrollment::tests::signed_request(crate::enrollment::tests::NOW);
-        let body = serde_json::json!({
-            "organizationId": future.organization_id,
-            "turnkeyWalletId": future.turnkey_wallet_id,
-            "solanaAddress": future.solana_address,
-            "clientPublicKey": future.client_public_key,
-            "issuedAtMs": future.issued_at_ms,
-            "ownerSignature": future.owner_signature,
-        })
-        .to_string();
+        let body = enrollment_body(&future);
         assert_eq!(
             call(&state, request("POST", "/v1/private-wallet/enroll", &body)).await,
             (StatusCode::BAD_REQUEST, "StaleEnrollment".to_owned())

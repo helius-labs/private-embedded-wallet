@@ -124,7 +124,7 @@ key. Enrolling again answers the same descriptor.
 gateway checks:
 
 - that it signed the descriptor, and that its client key is not revoked;
-- that no request sent the ciphertext before;
+- that no request from the caller's project sent the ciphertext before;
 - that the descriptor's Turnkey sub-org is named after the caller's project.
 
 It then adds a wallet grant, the protocol's `WalletGrant`
@@ -136,9 +136,13 @@ names the request's descriptor and client key. The answer is the enclave's
 A resent ciphertext does not run twice. From the same project within
 `enclave.replay_window_secs`, it gets the first request's answer again,
 marked `Idempotent-Replayed: true`, or `409 OperationInProgress` while the
-first is still running. From another project it gets `409 ReplayedRequest`.
-A request that never reached the enclave, refused by the ownership check for
-example, can be resent.
+first is still running. Each project's ciphertexts are its own: the same
+ciphertext from another project is a separate request, which the ownership
+check refuses, so no project can claim another's first. A request that never
+reached the enclave, refused by the ownership check for example, can be
+resent, and so can one whose answer was larger than 64 KiB, which the ledger
+does not keep: only `Decrypt`, `Derive`, `TransactionKeys` and `Prove`
+answer that much, and running them again is harmless.
 
 To revoke a client key, add its `tvc-browser-p256-…` ID to
 `wallet_grant.revoked_client_key_ids`. The gateway refuses its enrollments and
@@ -146,9 +150,9 @@ operations from the next deploy.
 
 ### Limits
 
-- **In-flight enclave calls:** at most `enclave.max_in_flight_per_project` per project (`429`).
-- **Turnkey calls:** at most 32 at once across all projects (`429`); both Turnkey keys are shared.
-- **Resends:** the replay ledger keys each `/operations` ciphertext by its digest, however its JSON is encoded. With `enclave.replay_redis_url` set, every task shares it through Redis, claiming with one `SET key running NX GET EX`, and it survives restarts; an unreachable Redis refuses the request with `424`. Without it, each process keeps its own.
+- **Requests in flight:** at most `enclave.max_in_flight_per_project` sessions, enrollments and operations per project (`429`).
+- **Turnkey calls:** at most 8 at once per project and 32 across all projects (`429`); both Turnkey keys are shared.
+- **Resends:** the replay ledger keys each `/operations` ciphertext by the digest of the project and the ciphertext, however its JSON is encoded, and keeps answers up to 64 KiB. With `enclave.replay_redis_url` set, every task shares it through Redis, claiming with one `SET key running NX GET EX`, and it survives restarts; an unreachable Redis refuses the request with `424`. Without it, each process keeps its own.
 - **Body size:** `enclave.max_body_bytes`.
 
 ## Configuration
@@ -224,7 +228,7 @@ The tests send the headers gatekeeper would add and drive a wallet through
 the testkit client in gateway mode: enrollment, one session, Bootstrap,
 TransactionKeys and a resend answered with the first answer, and the refusals
 of stale, forged, other-domain and other-project enrollments, other projects'
-wallets and resends, and descriptors this gateway did not provision. CI runs it after `just ci`. Service logs go to a temporary
+wallets, and descriptors this gateway did not provision. CI runs it after `just ci`. Service logs go to a temporary
 directory the run prints.
 
 `fixtures/wallet-enrollment.json` is the enrollment message test vector that
@@ -261,11 +265,12 @@ statsd, prefix `tvc_gateway`:
 - `upstream.failed`.
 - `turnkey.rejected` and `turnkey.failed`, tagged by `call`.
 - `ownership.rejected`, tagged by `reason`.
-- `enclave.in_flight_rejected`.
-- `enclave.replay_rejected`: another project resent a ciphertext.
+- `enclave.in_flight_rejected`: a project had too many requests in flight.
 - `operations.replayed` and `operations.in_progress`: a resend got the first answer, or found it still running.
+- `operations.answer_not_kept`: an answer was too large for the replay ledger.
 - `enclave.replay_guard_unavailable` and `enclave.replay_guard_early_rotation`.
-- `turnkey.concurrency_rejected` and `upstream.response_too_large`.
+- `turnkey.concurrency_rejected` and `turnkey.project_concurrency_rejected`: every Turnkey slot, or the project's share, was taken.
+- `upstream.response_too_large`.
 - `origin_auth_rejected`.
 - `api_key.cache_hit`, `api_key.rejected` (tagged by `reason`) and `api_key.lookup_failed`.
 - `boot_proof.cache_hit`.

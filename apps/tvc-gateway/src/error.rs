@@ -53,8 +53,6 @@ pub enum ApiError {
 
     #[error("no such endpoint")]
     NotFound,
-    #[error("another project already sent this ciphertext")]
-    ReplayedRequest,
     #[error("an operation with this ciphertext is still running")]
     OperationInProgress,
     #[error("the body is too large")]
@@ -130,7 +128,7 @@ impl ApiError {
             | Self::TurnkeyRejected
             | Self::WaasNotEnabled => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
-            Self::ReplayedRequest | Self::OperationInProgress => StatusCode::CONFLICT,
+            Self::OperationInProgress => StatusCode::CONFLICT,
             Self::RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyInFlight => StatusCode::TOO_MANY_REQUESTS,
             Self::EnclaveUnavailable
