@@ -7,8 +7,8 @@ use spr_prover_tee::{
     SignedPolicyFile, TeePolicy,
 };
 use zolana_tvc_protocol::constants::{
-    API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
-    MAX_PROVE_INPUTS, TVC_APP_PROOF_TYPE,
+    API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, MAX_ENCRYPTED_RESPONSE_BYTES, MAX_PROVE_INPUTS,
+    TVC_APP_PROOF_TYPE,
 };
 use zolana_tvc_protocol::types::{
     ClientAuthorization, ClientAuthorizationScheme, ClientGrant, DecryptItem, DecryptLabel,
@@ -729,18 +729,16 @@ fn unavailable_state() -> AppState {
         quorum_key_epoch: 1,
         ephemeral_public_key: Vec::new(),
         supported_operations: OPERATIONS.to_vec(),
-        max_encrypted_request_bytes: DEVNET_MAX_ENCRYPTED_REQUEST_BYTES,
-        max_encrypted_response_bytes: DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
+        max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
+        max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
         proof_type: TVC_APP_PROOF_TYPE.to_owned(),
         boot_proof_lookup_key: Vec::new(),
     })
 }
 
-#[test]
-fn bootstrap_refuses_a_presented_state_and_the_rest_require_one() {
-    let runtime = runtime();
-    let wallet = test_wallet();
-    let running = RunningEnclave {
+/// The release [`request`] is bound to.
+fn running() -> RunningEnclave {
+    RunningEnclave {
         release_id: "test".to_owned(),
         manifest_digest: [0x33; 32],
         executable_digest: [0x44; 32],
@@ -748,7 +746,58 @@ fn bootstrap_refuses_a_presented_state_and_the_rest_require_one() {
         quorum_key_id: "quorum".to_owned(),
         quorum_key_epoch: 1,
         environment: Environment::Development,
-    };
+    }
+}
+
+#[test]
+fn a_request_bound_to_another_release_or_quorum_key_is_refused() {
+    use zolana_tvc_protocol::error::ErrorCode;
+
+    let running = running();
+    let bound = request(derive_nothing(), descriptor([0x07; 32]));
+    assert_eq!(check_request_bindings(&bound, &running), Ok(()));
+    type Edit = fn(&mut OperationRequest);
+    let cases: [(Edit, ErrorCode); 6] = [
+        (
+            |request| request.quorum_key_epoch = 9,
+            ErrorCode::QuorumKeyEpochMismatch,
+        ),
+        (
+            |request| request.target_release_id = "other-release".to_owned(),
+            ErrorCode::ReleaseBindingMismatch,
+        ),
+        (
+            |request| request.target_manifest_digest = [0xcc; 32],
+            ErrorCode::ReleaseBindingMismatch,
+        ),
+        (
+            |request| request.target_executable_digest = [0xdd; 32],
+            ErrorCode::ReleaseBindingMismatch,
+        ),
+        (
+            |request| request.quorum_key_id = "other-quorum".to_owned(),
+            ErrorCode::ReleaseBindingMismatch,
+        ),
+        (
+            |request| request.wallet_descriptor.turnkey_wallet_id.clear(),
+            ErrorCode::InvalidWalletDescriptor,
+        ),
+    ];
+    for (edit, code) in cases {
+        let mut request = bound.clone();
+        edit(&mut request);
+        assert_eq!(
+            check_request_bindings(&request, &running).map_err(|error| error.code),
+            Err(code)
+        );
+    }
+}
+
+#[test]
+fn bootstrap_refuses_a_presented_state_and_the_rest_require_one() {
+    let runtime = runtime();
+    let wallet = test_wallet();
+    let running = running();
     let state = unavailable_state();
     let with_state = sealed_request(&runtime, &wallet, Operation::Bootstrap);
     assert_eq!(
@@ -888,12 +937,7 @@ mod local {
             let info = &self.state.info;
             let now = now_ms().expect("clock");
             let descriptor = self.descriptor();
-            let client_key_id = format!(
-                "{CLIENT_KEY_ID_PREFIX}{}",
-                hex::encode(
-                    &Sha256::digest(&descriptor.allowed_clients[0].client_public_key)[..16]
-                )
-            );
+            let client_key_id = client_key_id(&descriptor.allowed_clients[0].client_public_key);
             let response_public = public_key_uncompressed(
                 &p256::SecretKey::from_slice(&self.response_secret)
                     .expect("response scalar")

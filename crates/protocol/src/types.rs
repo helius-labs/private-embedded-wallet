@@ -3,9 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::encoding::{
-    self, decimal_u64, hex32, hex32_vec, hex_bytes, hex_bytes_vec, option_hex_bytes,
-};
+use crate::encoding::{self, decimal_u64, hex};
 use crate::error::{ErrorCode, TvcError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,19 +48,19 @@ pub struct HealthResponse {
 pub struct ServiceInfo {
     pub version: u8,
     pub environment: Environment,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub security_domain_id: [u8; 32],
     pub release_id: String,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub manifest_digest: [u8; 32],
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub executable_digest: [u8; 32],
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub quorum_public_key: Vec<u8>,
     pub quorum_key_id: String,
     #[serde(with = "decimal_u64")]
     pub quorum_key_epoch: u64,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub ephemeral_public_key: Vec<u8>,
     pub supported_operations: Vec<OperationKind>,
     #[serde(with = "decimal_u64")]
@@ -70,14 +68,14 @@ pub struct ServiceInfo {
     #[serde(with = "decimal_u64")]
     pub max_encrypted_response_bytes: u64,
     pub proof_type: String,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub boot_proof_lookup_key: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientGrant {
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub client_public_key: Vec<u8>,
     pub allowed_operations: Vec<OperationKind>,
 }
@@ -86,14 +84,14 @@ pub struct ClientGrant {
 #[serde(deny_unknown_fields)]
 pub struct WalletDescriptor {
     pub version: u8,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub security_domain_id: [u8; 32],
     pub environment: Environment,
     pub turnkey_organization_id: String,
     pub turnkey_wallet_id: String,
     pub address: String,
     pub allowed_clients: Vec<ClientGrant>,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub provisioning_signature: Vec<u8>,
 }
 
@@ -108,7 +106,7 @@ impl WalletDescriptor {
 pub struct ClientAuthorization {
     pub client_key_id: String,
     pub scheme: ClientAuthorizationScheme,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub signature: Vec<u8>,
 }
 
@@ -126,14 +124,14 @@ pub enum DecryptLabel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecryptItem {
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub ciphertext: Vec<u8>,
     /// Which of the wallet's viewing keys opens it; this wallet holds one.
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub viewing_public_key: Vec<u8>,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub transaction_viewing_public_key: Vec<u8>,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub salt: Vec<u8>,
     /// Zero for a ring deposit, which carries one envelope.
     #[serde(with = "decimal_u64")]
@@ -147,31 +145,31 @@ pub struct DecryptItem {
 pub enum DeriveItem {
     /// The nullifier that spends the UTXO with this commitment and blinding.
     Nullifier {
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         utxo_hash: [u8; 32],
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         blinding: [u8; 32],
     },
     /// The published nullifier of a padded merge slot.
     MergeDummyNullifier {
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         first_nullifier: [u8; 32],
         #[serde(with = "decimal_u64")]
         slot_index: u64,
     },
     /// The blinding of a merge's output.
     MergeOutputBlinding {
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         first_nullifier: [u8; 32],
     },
     /// The private-transaction hash blinding of a merge.
     MergePrivateTxBlinding {
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         first_nullifier: [u8; 32],
     },
     /// The key of a merge's output ciphertext.
     MergeOutputKey {
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         first_nullifier: [u8; 32],
     },
 }
@@ -182,9 +180,9 @@ pub enum DeriveItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransactionKeyItem {
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub viewing_public_key: Vec<u8>,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub first_nullifier: [u8; 32],
 }
 
@@ -219,7 +217,7 @@ pub struct ProverSealing {
     /// any prefix, without a query. The encryption binds it.
     pub target: String,
     /// The nonce the attestation was requested with.
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub nonce: [u8; 32],
     /// The prover's answer to `GET /attestation`, as received.
     pub attestation: serde_json::Value,
@@ -245,24 +243,24 @@ impl Operation {
 #[serde(deny_unknown_fields)]
 pub struct OperationRequest {
     pub version: u8,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub request_id: [u8; 32],
     #[serde(with = "decimal_u64")]
     pub issued_at_ms: u64,
     #[serde(with = "decimal_u64")]
     pub expires_at_ms: u64,
     pub target_release_id: String,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub target_manifest_digest: [u8; 32],
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub target_executable_digest: [u8; 32],
     pub quorum_key_id: String,
     #[serde(with = "decimal_u64")]
     pub quorum_key_epoch: u64,
     pub wallet_descriptor: WalletDescriptor,
-    #[serde(with = "option_hex_bytes")]
+    #[serde(with = "hex")]
     pub sealed_seed: Option<Vec<u8>>,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub client_response_public_key: Vec<u8>,
     pub operation: Operation,
     pub authorization: ClientAuthorization,
@@ -275,7 +273,7 @@ pub struct EncryptedRequest {
     pub quorum_key_id: String,
     #[serde(with = "decimal_u64")]
     pub quorum_key_epoch: u64,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub ciphertext: Vec<u8>,
     /// The grant admitting the request's descriptor and client key, outside
     /// the ciphertext so a gateway in front of the enclave can check it too.
@@ -290,7 +288,7 @@ pub struct EncryptedRequest {
 #[serde(deny_unknown_fields)]
 pub struct WalletGrant {
     pub version: u8,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub descriptor_digest: [u8; 32],
     pub client_key_id: String,
     pub project_id: String,
@@ -298,7 +296,7 @@ pub struct WalletGrant {
     pub issued_at_ms: u64,
     #[serde(with = "decimal_u64")]
     pub expires_at_ms: u64,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub signature: Vec<u8>,
 }
 
@@ -316,10 +314,10 @@ pub struct SealedSeed {
 #[serde(deny_unknown_fields)]
 pub struct AppProof {
     pub scheme: String,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub public_key: Vec<u8>,
     pub proof_payload: String,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub signature: Vec<u8>,
 }
 
@@ -329,7 +327,7 @@ pub struct AppProof {
 pub struct QosPingChallenge {
     pub r#type: String,
     pub version: u8,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub challenge: [u8; 32],
 }
 
@@ -337,7 +335,7 @@ pub struct QosPingChallenge {
 #[serde(deny_unknown_fields)]
 pub struct QosPingRequest {
     pub version: u8,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub encrypted_challenge: Vec<u8>,
 }
 
@@ -354,9 +352,9 @@ pub struct QosPingResponse {
 #[serde(deny_unknown_fields)]
 pub struct EncryptedResponse {
     pub version: u8,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub request_id: [u8; 32],
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub encrypted_result: Vec<u8>,
     pub tvc_app_proof: AppProof,
 }
@@ -387,33 +385,33 @@ pub enum FailureStage {
 pub enum OperationResult {
     Bootstrap {
         solana_address: String,
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         shielded_owner_hash: [u8; 32],
-        #[serde(with = "hex32")]
+        #[serde(with = "hex")]
         shielded_nullifier_public_key: [u8; 32],
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "hex")]
         shielded_viewing_public_key: Vec<u8>,
         /// The derivation seed sealed to the Quorum key: presented on every
         /// later operation, reproducible by another bootstrap, never a secret
         /// to the client. No secret appears elsewhere in this result.
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "hex")]
         sealed_seed: Vec<u8>,
         turnkey_activity_id: String,
         turnkey_app_proofs: Vec<TurnkeyAppProof>,
     },
     /// One plaintext per item, in request order.
     Decrypt {
-        #[serde(with = "hex_bytes_vec")]
+        #[serde(with = "hex")]
         plaintexts: Vec<Vec<u8>>,
     },
     /// One value per item, in request order.
     Derive {
-        #[serde(with = "hex32_vec")]
+        #[serde(with = "hex")]
         values: Vec<[u8; 32]>,
     },
     /// One per-transaction viewing secret per item, in request order.
     TransactionKeys {
-        #[serde(with = "hex32_vec")]
+        #[serde(with = "hex")]
         secrets: Vec<[u8; 32]>,
     },
     /// The completed request sealed to the attested prover, for the client
@@ -433,11 +431,11 @@ pub enum OperationResult {
 #[serde(deny_unknown_fields)]
 pub struct SealedProverRequest {
     pub target: String,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub enc: [u8; 32],
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub ciphertext: Vec<u8>,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub response_key: [u8; 32],
 }
 
@@ -446,14 +444,14 @@ pub struct SealedProverRequest {
 pub struct OperationProofPayload {
     pub r#type: String,
     pub version: u8,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub request_id: [u8; 32],
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub request_digest: [u8; 32],
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub result_digest: [u8; 32],
     pub operation: OperationKind,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub sealed_seed_digest: [u8; 32],
 }
 
@@ -464,14 +462,14 @@ pub struct ReleasePolicy {
     pub release_id: String,
     pub environment: Environment,
     pub tvc_application_id: String,
-    #[serde(with = "hex32")]
+    #[serde(with = "hex")]
     pub security_domain_id: [u8; 32],
     pub accepted_manifest_digests: Vec<String>,
     pub accepted_executable_digests: Vec<String>,
     pub quorum_key_id: String,
     #[serde(with = "decimal_u64")]
     pub quorum_key_epoch: u64,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub quorum_public_key: Vec<u8>,
     pub allowed_operations: Vec<OperationKind>,
     pub max_encrypted_request_bytes: u32,
@@ -491,7 +489,7 @@ pub struct ReleasePolicy {
 pub struct ReleaseAuthoritySignature {
     pub key_id: String,
     pub scheme: ClientAuthorizationScheme,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub signature: Vec<u8>,
 }
 

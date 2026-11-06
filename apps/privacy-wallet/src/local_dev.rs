@@ -13,8 +13,7 @@ use qos_p256::P256Pair;
 use serde::Deserialize;
 use spr_prover_tee::{Anchors, PolicySigners};
 use zolana_tvc_protocol::constants::{
-    API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
-    TVC_APP_PROOF_TYPE,
+    API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, MAX_ENCRYPTED_RESPONSE_BYTES, TVC_APP_PROOF_TYPE,
 };
 use zolana_tvc_protocol::digest::sha256;
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
@@ -152,8 +151,8 @@ pub fn local_unattested_state(
         quorum_key_epoch: 1,
         ephemeral_public_key: ephemeral_public_key.clone(),
         supported_operations: testkit.operations.clone(),
-        max_encrypted_request_bytes: DEVNET_MAX_ENCRYPTED_REQUEST_BYTES,
-        max_encrypted_response_bytes: DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
+        max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
+        max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
         proof_type: TVC_APP_PROOF_TYPE.to_owned(),
         boot_proof_lookup_key: ephemeral_public_key,
     };

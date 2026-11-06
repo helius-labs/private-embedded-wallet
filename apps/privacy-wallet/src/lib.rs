@@ -24,17 +24,19 @@ use qos_core::handles::Handles;
 use qos_core::{EPHEMERAL_KEY_FILE, MANIFEST_FILE, PIVOT_FILE, QUORUM_FILE};
 use qos_p256::P256Pair;
 use zolana_tvc_protocol::constants::{
-    API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
-    TVC_APP_PROOF_SCHEME, TVC_APP_PROOF_TYPE, TVC_QOS_PING_PROOF_TYPE,
+    API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, MAX_ENCRYPTED_RESPONSE_BYTES, TVC_APP_PROOF_SCHEME,
+    TVC_APP_PROOF_TYPE, TVC_QOS_PING_PROOF_TYPE,
 };
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
     parse_qos_ping_challenge, parse_qos_ping_request, AppProof, Environment, QosPingResponse,
     ServiceInfo,
 };
-use zolana_tvc_protocol::{handle_public_http, public_http_error, PublicError, PublicHttpResponse};
+
+use crate::http::{handle_public_http, public_http_error, PublicError, PublicHttpResponse};
 
 mod custody;
+mod http;
 mod operations;
 mod turnkey;
 
@@ -148,8 +150,8 @@ pub fn load_qos_state(config: DiscoveryConfig) -> io::Result<AppState> {
         quorum_key_epoch: config.quorum_key_epoch,
         ephemeral_public_key: ephemeral_public_key.clone(),
         supported_operations: OPERATIONS.to_vec(),
-        max_encrypted_request_bytes: DEVNET_MAX_ENCRYPTED_REQUEST_BYTES,
-        max_encrypted_response_bytes: DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
+        max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
+        max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
         proof_type: TVC_APP_PROOF_TYPE.to_owned(),
         boot_proof_lookup_key: ephemeral_public_key,
     };
@@ -167,7 +169,7 @@ async fn dispatch(State(state): State<AppState>, request: Request<Body>) -> Resp
         state
             .info
             .max_encrypted_request_bytes
-            .min(DEVNET_MAX_ENCRYPTED_REQUEST_BYTES),
+            .min(MAX_ENCRYPTED_REQUEST_BYTES),
     )
     .unwrap_or(usize::MAX);
     let Ok(body) = to_bytes(body, body_limit).await else {
@@ -314,8 +316,8 @@ mod tests {
             quorum_key_epoch: 1,
             ephemeral_public_key: ephemeral.public_key().to_bytes(),
             supported_operations: Vec::new(),
-            max_encrypted_request_bytes: DEVNET_MAX_ENCRYPTED_REQUEST_BYTES,
-            max_encrypted_response_bytes: DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
+            max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
+            max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
             proof_type: TVC_APP_PROOF_TYPE.to_owned(),
             boot_proof_lookup_key: ephemeral.public_key().to_bytes(),
         }
@@ -489,14 +491,76 @@ mod tests {
                     .header(CONTENT_TYPE, "application/json")
                     .body(Body::from(vec![
                         0u8;
-                        DEVNET_MAX_ENCRYPTED_REQUEST_BYTES as usize
-                            + 1
+                        MAX_ENCRYPTED_REQUEST_BYTES as usize + 1
                     ]))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn every_other_request_gets_a_generic_json_error() {
+        let quorum = P256Pair::generate().unwrap();
+        let ephemeral = P256Pair::generate().unwrap();
+        let app = router(AppState::ready(
+            info(&quorum, &ephemeral),
+            ephemeral,
+            quorum,
+        ));
+        let request = |method: &str, path: &str, content_type: &str, body: Vec<u8>| {
+            let mut request = Request::builder().method(method).uri(path);
+            if !content_type.is_empty() {
+                request = request.header(CONTENT_TYPE, content_type);
+            }
+            request.body(Body::from(body)).unwrap()
+        };
+        let json = "application/json";
+        let oversized = vec![0u8; MAX_ENCRYPTED_REQUEST_BYTES as usize + 1];
+        let not_allowed = (StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
+        let not_found = (StatusCode::NOT_FOUND, "NotFound");
+        let invalid = (StatusCode::BAD_REQUEST, "InvalidRequest");
+        let cases = [
+            (
+                request("GET", "/v1/operations", "", Vec::new()),
+                not_allowed,
+            ),
+            (request("PUT", "/v1/ping", json, Vec::new()), not_allowed),
+            (request("POST", "/health", json, Vec::new()), not_allowed),
+            (request("DELETE", "/v1/info", "", Vec::new()), not_allowed),
+            (request("GET", "/v1/unknown", "", Vec::new()), not_found),
+            (request("POST", "/", json, Vec::new()), not_found),
+            (
+                request("POST", "/v1/operations", "text/plain", Vec::new()),
+                invalid,
+            ),
+            (request("POST", "/v1/ping", "", Vec::new()), invalid),
+            (
+                request(
+                    "POST",
+                    "/v1/operations",
+                    "application/json; charset=utf-8",
+                    b"{}".to_vec(),
+                ),
+                invalid,
+            ),
+            (
+                request("GET", "/health", "", oversized),
+                (StatusCode::PAYLOAD_TOO_LARGE, "RequestTooLarge"),
+            ),
+        ];
+        for (request, (status, error)) in cases {
+            let target = format!("{} {}", request.method(), request.uri());
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), status, "{target}");
+            assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+            assert_eq!(
+                response_body(response).await,
+                format!(r#"{{"error":"{error}"}}"#),
+                "{target}"
+            );
+        }
     }
 
     #[test]

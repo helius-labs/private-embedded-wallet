@@ -4,19 +4,19 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use serde::de::{self, DeserializeOwned, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde::ser::{Serialize, Serializer};
+use serde::ser::Serialize;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::{ErrorCode, TvcError};
 
 pub fn encode_lower_hex(bytes: &[u8]) -> String {
-    hex::encode(bytes)
+    ::hex::encode(bytes)
 }
 
 pub fn decode_lower_hex(input: &str) -> Result<Vec<u8>, TvcError> {
-    let decoded = hex::decode(input).map_err(|_| TvcError::new(ErrorCode::InvalidHex))?;
-    if hex::encode(&decoded) != input {
+    let decoded = ::hex::decode(input).map_err(|_| TvcError::new(ErrorCode::InvalidHex))?;
+    if ::hex::encode(&decoded) != input {
         return Err(TvcError::new(ErrorCode::InvalidHex));
     }
     Ok(decoded)
@@ -51,115 +51,103 @@ pub fn decode_decimal_u64(input: &str) -> Result<u64, TvcError> {
         .map_err(|_| TvcError::new(ErrorCode::InvalidDecimal))
 }
 
-pub fn hex_bytes_serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&encode_lower_hex(bytes))
+/// `#[serde(with = "hex")]`: binary fields as lowercase hex strings, alone,
+/// optional, or in an array.
+pub mod hex {
+    use serde::de::{self, Deserialize, Deserializer};
+    use serde::ser::Serializer;
+
+    use super::{decode_lower_hex, decode_lower_hex_array, encode_lower_hex};
+
+    pub trait Hex: Sized {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error>;
+        fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error>;
+    }
+
+    pub fn serialize<T: Hex, S: Serializer>(value: &T, serializer: S) -> Result<S::Ok, S::Error> {
+        value.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, T: Hex, D: Deserializer<'de>>(deserializer: D) -> Result<T, D::Error> {
+        T::deserialize(deserializer)
+    }
+
+    impl Hex for Vec<u8> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(&encode_lower_hex(self))
+        }
+
+        fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            decode_lower_hex(&String::deserialize(deserializer)?).map_err(de::Error::custom)
+        }
+    }
+
+    impl<const N: usize> Hex for [u8; N] {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(&encode_lower_hex(self))
+        }
+
+        fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            decode_lower_hex_array(&String::deserialize(deserializer)?).map_err(de::Error::custom)
+        }
+    }
+
+    impl Hex for Option<Vec<u8>> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            match self {
+                Some(bytes) => serializer.serialize_some(&encode_lower_hex(bytes)),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            Option::<String>::deserialize(deserializer)?
+                .map(|value| decode_lower_hex(&value).map_err(de::Error::custom))
+                .transpose()
+        }
+    }
+
+    impl Hex for Vec<Vec<u8>> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.collect_seq(self.iter().map(|value| encode_lower_hex(value)))
+        }
+
+        fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            Vec::<String>::deserialize(deserializer)?
+                .iter()
+                .map(|value| decode_lower_hex(value).map_err(de::Error::custom))
+                .collect()
+        }
+    }
+
+    impl<const N: usize> Hex for Vec<[u8; N]> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.collect_seq(self.iter().map(|value| encode_lower_hex(value)))
+        }
+
+        fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            Vec::<String>::deserialize(deserializer)?
+                .iter()
+                .map(|value| decode_lower_hex_array(value).map_err(de::Error::custom))
+                .collect()
+        }
+    }
 }
 
-pub fn hex_bytes_deserialize<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<u8>, D::Error> {
-    let s = String::deserialize(deserializer)?;
-    decode_lower_hex(&s).map_err(de::Error::custom)
-}
-
-pub fn hex32_serialize<S: Serializer>(bytes: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&encode_lower_hex(bytes))
-}
-
-pub fn hex32_deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[u8; 32], D::Error> {
-    let s = String::deserialize(deserializer)?;
-    decode_lower_hex_array(&s).map_err(de::Error::custom)
-}
-
-pub fn decimal_u64_serialize<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&encode_decimal_u64(*value))
-}
-
-pub fn decimal_u64_deserialize<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<u64, D::Error> {
-    let s = String::deserialize(deserializer)?;
-    decode_decimal_u64(&s).map_err(de::Error::custom)
-}
-
-pub mod hex_bytes {
-    pub use super::{hex_bytes_deserialize as deserialize, hex_bytes_serialize as serialize};
-}
-
-pub mod hex32 {
-    pub use super::{hex32_deserialize as deserialize, hex32_serialize as serialize};
-}
-
+/// `#[serde(with = "decimal_u64")]`: a `u64` as a canonical decimal string.
 pub mod decimal_u64 {
-    pub use super::{decimal_u64_deserialize as deserialize, decimal_u64_serialize as serialize};
-}
+    use serde::de::{self, Deserialize, Deserializer};
+    use serde::ser::Serializer;
 
-pub fn hex32_vec_serialize<S: Serializer>(
-    values: &[[u8; 32]],
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(values.iter().map(|value| encode_lower_hex(value)))
-}
+    use super::{decode_decimal_u64, encode_decimal_u64};
 
-pub fn hex32_vec_deserialize<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<[u8; 32]>, D::Error> {
-    Vec::<String>::deserialize(deserializer)?
-        .iter()
-        .map(|value| decode_lower_hex_array(value).map_err(de::Error::custom))
-        .collect()
-}
-
-pub mod hex32_vec {
-    pub use super::{hex32_vec_deserialize as deserialize, hex32_vec_serialize as serialize};
-}
-
-pub fn hex_bytes_vec_serialize<S: Serializer>(
-    values: &[Vec<u8>],
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(values.iter().map(|value| encode_lower_hex(value)))
-}
-
-pub fn hex_bytes_vec_deserialize<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<Vec<u8>>, D::Error> {
-    Vec::<String>::deserialize(deserializer)?
-        .iter()
-        .map(|value| decode_lower_hex(value).map_err(de::Error::custom))
-        .collect()
-}
-
-pub mod hex_bytes_vec {
-    pub use super::{
-        hex_bytes_vec_deserialize as deserialize, hex_bytes_vec_serialize as serialize,
-    };
-}
-
-pub fn option_hex_bytes_serialize<S: Serializer>(
-    value: &Option<Vec<u8>>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    match value {
-        Some(bytes) => serializer.serialize_some(&encode_lower_hex(bytes)),
-        None => serializer.serialize_none(),
+    pub fn serialize<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&encode_decimal_u64(*value))
     }
-}
 
-pub fn option_hex_bytes_deserialize<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Vec<u8>>, D::Error> {
-    let value = Option::<String>::deserialize(deserializer)?;
-    match value {
-        Some(s) => decode_lower_hex(&s).map(Some).map_err(de::Error::custom),
-        None => Ok(None),
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+        decode_decimal_u64(&String::deserialize(deserializer)?).map_err(de::Error::custom)
     }
-}
-
-pub mod option_hex_bytes {
-    pub use super::{
-        option_hex_bytes_deserialize as deserialize, option_hex_bytes_serialize as serialize,
-    };
 }
 
 #[derive(Clone, Debug)]
@@ -376,5 +364,47 @@ pub fn is_rfc8785(input: &str) -> bool {
     match canonicalize_json_str(input) {
         Ok(canonical) => canonical == input,
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::{EncryptedRequest, OperationResult};
+
+    use super::parse_strict_json;
+
+    #[test]
+    fn hex_fields_are_strings_alone_optional_or_in_arrays() {
+        let derive = OperationResult::Derive {
+            values: vec![[0xab; 32]],
+        };
+        let json = format!(r#"{{"type":"Derive","values":["{}"]}}"#, "ab".repeat(32));
+        assert_eq!(serde_json::to_string(&derive).unwrap(), json);
+        assert_eq!(parse_strict_json::<OperationResult>(&json).unwrap(), derive);
+
+        let decrypt = OperationResult::Decrypt {
+            plaintexts: vec![vec![1, 2], Vec::new()],
+        };
+        let json = r#"{"type":"Decrypt","plaintexts":["0102",""]}"#;
+        assert_eq!(serde_json::to_string(&decrypt).unwrap(), json);
+        assert_eq!(parse_strict_json::<OperationResult>(json).unwrap(), decrypt);
+
+        let request =
+            r#"{"version":1,"quorum_key_id":"q","quorum_key_epoch":"1","ciphertext":"ff"}"#;
+        let parsed = parse_strict_json::<EncryptedRequest>(request).unwrap();
+        assert_eq!(parsed.ciphertext, [0xff]);
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), request);
+
+        for invalid in [
+            r#"{"type":"Derive","values":["AB"]}"#,
+            r#"{"type":"Derive","values":["abab"]}"#,
+            r#"{"type":"Decrypt","plaintexts":["0x01"]}"#,
+            r#"{"type":"Decrypt","plaintexts":"01"}"#,
+        ] {
+            assert!(
+                parse_strict_json::<OperationResult>(invalid).is_err(),
+                "{invalid}"
+            );
+        }
     }
 }

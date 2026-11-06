@@ -5,6 +5,9 @@ pub const TVC_APP_PROOF_TYPE: &str = "zolana.tvc.wallet_operation.v1";
 pub const TVC_APP_PROOF_SCHEME: &str = "SIGNATURE_SCHEME_EPHEMERAL_KEY_P256";
 pub const TVC_QOS_PING_PROOF_TYPE: &str = "zolana.tvc.qos_ping.v1";
 pub const EXPECTED_TURNKEY_TRUST_ROOT_ID: &str = "aws-nitro-root-g1";
+/// A client key's ID is this prefix and the first 16 bytes of the SHA-256 of
+/// its SEC1 encoding, in hex.
+pub const CLIENT_KEY_ID_PREFIX: &str = "tvc-browser-p256-";
 
 pub const CLIENT_AUTH_DOMAIN: &[u8] = b"ZOLANA_TVC_CLIENT_AUTH_V1";
 pub const PROVISIONING_AUTH_DOMAIN: &[u8] = b"ZOLANA_TVC_PROVISIONING_AUTH_V1";
@@ -22,8 +25,8 @@ pub const MAX_CLOCK_SKEW_MS: u64 = 60_000;
 /// within this window whoever issued the grant.
 pub const MAX_WALLET_GRANT_LIFETIME_MS: u64 = 3_600_000;
 /// Maximum bytes of the entire serialized encrypted HTTP request envelope.
-pub const DEVNET_MAX_ENCRYPTED_REQUEST_BYTES: u64 = 262_144;
-pub const DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES: u64 = 262_144;
+pub const MAX_ENCRYPTED_REQUEST_BYTES: u64 = 262_144;
+pub const MAX_ENCRYPTED_RESPONSE_BYTES: u64 = 262_144;
 
 /// Caps the items of one `Decrypt`, `Derive`, or `TransactionKeys` batch. The
 /// envelope limit bounds bytes, not work; this bounds work, and clients page

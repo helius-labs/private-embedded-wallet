@@ -12,14 +12,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
-use sha2::{Digest as _, Sha256};
 use solana_pubkey::Pubkey;
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::bindings::{
-    check_encrypted_request_bindings, check_request_bindings, RunningEnclave,
-};
 use zolana_tvc_protocol::constants::{
-    API_VERSION, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES, MAX_CLOCK_SKEW_MS, MAX_REQUEST_AGE_MS,
+    API_VERSION, MAX_CLOCK_SKEW_MS, MAX_ENCRYPTED_RESPONSE_BYTES, MAX_REQUEST_AGE_MS,
     TVC_APP_PROOF_SCHEME, TVC_APP_PROOF_TYPE,
 };
 use zolana_tvc_protocol::crypto::{parse_uncompressed_sec1, qos_encrypt, verify_p256_prehash};
@@ -30,13 +26,14 @@ use zolana_tvc_protocol::types::{
     FailureStage, Operation, OperationKind, OperationProofPayload, OperationRequest,
     OperationResult,
 };
-use zolana_tvc_protocol::{
-    public_http_error, verify_wallet_grant, PublicError, PublicHttpResponse,
-};
+use zolana_tvc_protocol::{client_key_id, verify_wallet_grant};
 
+use self::bindings::{check_encrypted_request_bindings, check_request_bindings, RunningEnclave};
 use crate::custody::{CustodyError, WalletKey};
+use crate::http::{public_http_error, PublicError, PublicHttpResponse};
 use crate::{into_response, sign_ephemeral_low_s, AppState, Runtime};
 
+mod bindings;
 mod bootstrap;
 mod keys;
 mod prove;
@@ -55,7 +52,6 @@ pub const OPERATIONS: [OperationKind; 5] = [
     OperationKind::Prove,
 ];
 
-const CLIENT_KEY_ID_PREFIX: &str = "tvc-browser-p256-";
 const DERIVATION_SUITE: &str = "zolana-ed25519-role-expansion-v1";
 /// Leave time to respond before the proxy deadline; request expiry may shorten this.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(75);
@@ -231,7 +227,7 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
         result_plaintext.as_bytes(),
     )
     .map_err(|_| Failure::Unavailable)?;
-    if encrypted_result.len() as u64 > DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES {
+    if encrypted_result.len() as u64 > MAX_ENCRYPTED_RESPONSE_BYTES {
         return Err(Failure::Unavailable);
     }
 
@@ -323,13 +319,9 @@ fn validate<'a>(
     .map_err(|_| Failure::Invalid)?;
 
     let grant = &descriptor.allowed_clients[0];
-    let expected_client_key_id = format!(
-        "{CLIENT_KEY_ID_PREFIX}{}",
-        hex::encode(&Sha256::digest(&grant.client_public_key)[..16])
-    );
     if grant.client_public_key.len() != 65
         || grant.allowed_operations != OPERATIONS
-        || request.authorization.client_key_id != expected_client_key_id
+        || request.authorization.client_key_id != client_key_id(&grant.client_public_key)
     {
         return Err(Failure::Invalid);
     }

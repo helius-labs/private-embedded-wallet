@@ -4,8 +4,10 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use serde::{Deserialize, Serialize};
 
-/// Protocol and verification error codes from the specification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Protocol and verification error codes from the specification. The
+/// TypeScript client raises the same names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::IntoStaticStr)]
+#[cfg_attr(test, derive(strum::VariantArray))]
 #[serde(deny_unknown_fields)]
 pub enum ErrorCode {
     UnsupportedVersion,
@@ -38,34 +40,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::UnsupportedVersion => "UnsupportedVersion",
-            Self::RequestTooLarge => "RequestTooLarge",
-            Self::InvalidEncryptedEnvelope => "InvalidEncryptedEnvelope",
-            Self::ReleaseBindingMismatch => "ReleaseBindingMismatch",
-            Self::QuorumKeyEpochMismatch => "QuorumKeyEpochMismatch",
-            Self::InvalidWalletDescriptor => "InvalidWalletDescriptor",
-            Self::WalletBindingMismatch => "WalletBindingMismatch",
-            Self::UnauthorizedClient => "UnauthorizedClient",
-            Self::ExpiredRequest => "ExpiredRequest",
-            Self::TurnkeyEvidenceInvalid => "TurnkeyEvidenceInvalid",
-            Self::InvalidCanonicalJson => "InvalidCanonicalJson",
-            Self::DuplicateJsonField => "DuplicateJsonField",
-            Self::UnknownJsonField => "UnknownJsonField",
-            Self::InvalidHex => "InvalidHex",
-            Self::InvalidDecimal => "InvalidDecimal",
-            Self::InvalidPublicKey => "InvalidPublicKey",
-            Self::InvalidSignature => "InvalidSignature",
-            Self::HighSSignature => "HighSSignature",
-            Self::DerSignatureRejected => "DerSignatureRejected",
-            Self::CompressedKeyRejected => "CompressedKeyRejected",
-            Self::DoubleHashRejected => "DoubleHashRejected",
-            Self::UnsupportedProofPath => "UnsupportedProofPath",
-            Self::BootProofUnverified => "BootProofUnverified",
-            Self::DiscoveryUntrusted => "DiscoveryUntrusted",
-            Self::ProductionClaimRejected => "ProductionClaimRejected",
-            Self::ReleasePolicyInvalid => "ReleasePolicyInvalid",
-        }
+        self.into()
     }
 }
 
@@ -101,35 +76,52 @@ impl From<ErrorCode> for TvcError {
     }
 }
 
-/// Unauthenticated public errors. These MUST NOT reveal wallet or key existence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub enum PublicError {
-    RequestTooLarge,
-    MethodNotAllowed,
-    NotFound,
-    Unavailable,
-    InvalidRequest,
-}
+#[cfg(test)]
+mod tests {
+    use strum::VariantArray;
 
-impl PublicError {
-    pub fn status(self) -> u16 {
-        match self {
-            Self::RequestTooLarge => 413,
-            Self::MethodNotAllowed => 405,
-            Self::NotFound => 404,
-            Self::Unavailable => 503,
-            Self::InvalidRequest => 400,
-        }
-    }
+    use super::ErrorCode;
 
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::RequestTooLarge => "RequestTooLarge",
-            Self::MethodNotAllowed => "MethodNotAllowed",
-            Self::NotFound => "NotFound",
-            Self::Unavailable => "Unavailable",
-            Self::InvalidRequest => "InvalidRequest",
+    #[test]
+    fn every_code_is_its_variant_name() {
+        let names: Vec<&str> = ErrorCode::VARIANTS
+            .iter()
+            .map(|code| code.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "UnsupportedVersion",
+                "RequestTooLarge",
+                "InvalidEncryptedEnvelope",
+                "ReleaseBindingMismatch",
+                "QuorumKeyEpochMismatch",
+                "InvalidWalletDescriptor",
+                "WalletBindingMismatch",
+                "UnauthorizedClient",
+                "ExpiredRequest",
+                "TurnkeyEvidenceInvalid",
+                "InvalidCanonicalJson",
+                "DuplicateJsonField",
+                "UnknownJsonField",
+                "InvalidHex",
+                "InvalidDecimal",
+                "InvalidPublicKey",
+                "InvalidSignature",
+                "HighSSignature",
+                "DerSignatureRejected",
+                "CompressedKeyRejected",
+                "DoubleHashRejected",
+                "UnsupportedProofPath",
+                "BootProofUnverified",
+                "DiscoveryUntrusted",
+                "ProductionClaimRejected",
+                "ReleasePolicyInvalid",
+            ]
+        );
+        for code in ErrorCode::VARIANTS {
+            assert_eq!(code.to_string(), code.as_str());
+            assert_eq!(crate::TvcError::new(*code).to_string(), code.as_str());
         }
     }
 }

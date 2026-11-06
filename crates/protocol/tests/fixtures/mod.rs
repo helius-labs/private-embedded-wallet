@@ -9,10 +9,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use zolana_tvc_protocol::auth::{authorize_operation_request, verify_client_authorization};
-use zolana_tvc_protocol::bindings::{check_request_bindings, RunningEnclave};
 use zolana_tvc_protocol::constants::{
-    API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES, DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
-    EXPECTED_TURNKEY_TRUST_ROOT_ID, QOS_P256_PUBLIC_LEN, TVC_APP_PROOF_TYPE,
+    API_VERSION, EXPECTED_TURNKEY_TRUST_ROOT_ID, MAX_ENCRYPTED_REQUEST_BYTES,
+    MAX_ENCRYPTED_RESPONSE_BYTES, QOS_P256_PUBLIC_LEN, TVC_APP_PROOF_TYPE,
 };
 use zolana_tvc_protocol::crypto::{
     public_key_uncompressed, qos_decrypt, qos_encrypt_with, qos_public_from_secrets,
@@ -24,17 +23,18 @@ use zolana_tvc_protocol::digest::{
 };
 use zolana_tvc_protocol::encoding::{
     canonicalize_json_str, canonicalize_json_value, encode_decimal_u64, encode_lower_hex,
+    jcs_serialize,
 };
 use zolana_tvc_protocol::error::{ErrorCode, TvcError};
-use zolana_tvc_protocol::http::handle_public_http;
 use zolana_tvc_protocol::release::{
-    bind_discovery_to_policy, sign_release_policy, verify_signed_release_policy,
-    PinnedReleaseAuthorities, ReleaseAuthorityKey,
+    sign_release_policy, verify_signed_release_policy, PinnedReleaseAuthorities,
+    ReleaseAuthorityKey,
 };
 use zolana_tvc_protocol::types::{
-    ClientAuthorization, ClientAuthorizationScheme, ClientGrant, Environment, Operation,
-    OperationKind, OperationRequest, ReleaseAuthoritySignature, ReleasePolicy, ServiceInfo,
-    SignedReleasePolicy, WalletDescriptor, WalletGrant,
+    reject_production_environment, ClientAuthorization, ClientAuthorizationScheme, ClientGrant,
+    Environment, HealthResponse, HealthStatus, Operation, OperationKind, OperationRequest,
+    ReleaseAuthoritySignature, ReleasePolicy, ServiceInfo, SignedReleasePolicy, WalletDescriptor,
+    WalletGrant,
 };
 
 const OPERATIONS: [OperationKind; 5] = [
@@ -84,6 +84,62 @@ fn verify_turnkey_app_proof(
     let public = QosP256Public::from_bytes(qos_public_key)?;
     verify_turnkey_app_proof_p256_message(&public.signing, proof_payload_utf8.as_bytes(), signature)
         .map_err(|_| TvcError::new(ErrorCode::TurnkeyEvidenceInvalid))
+}
+
+/// What `discovery-binding.json` expects: check for check, the TypeScript
+/// client's `bindDiscoveryToPolicy`.
+pub fn bind_discovery_to_policy(
+    info: &ServiceInfo,
+    policy: &ReleasePolicy,
+) -> Result<(), TvcError> {
+    reject_production_environment(info.environment)?;
+    reject_production_environment(policy.environment)?;
+    if info.version != API_VERSION {
+        return Err(TvcError::new(ErrorCode::UnsupportedVersion));
+    }
+    if info.proof_type != TVC_APP_PROOF_TYPE {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    if info.release_id != policy.release_id {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    if info.security_domain_id != policy.security_domain_id {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    if info.quorum_key_id != policy.quorum_key_id {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    if info.quorum_key_epoch != policy.quorum_key_epoch {
+        return Err(TvcError::new(ErrorCode::QuorumKeyEpochMismatch));
+    }
+    if info.quorum_public_key != policy.quorum_public_key {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    let manifest = encode_lower_hex(&info.manifest_digest);
+    if !policy
+        .accepted_manifest_digests
+        .iter()
+        .any(|value| value == &manifest)
+    {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    let executable = encode_lower_hex(&info.executable_digest);
+    if !policy
+        .accepted_executable_digests
+        .iter()
+        .any(|value| value == &executable)
+    {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    if info.supported_operations != policy.allowed_operations {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    if info.max_encrypted_request_bytes != u64::from(policy.max_encrypted_request_bytes)
+        || info.max_encrypted_response_bytes != u64::from(policy.max_encrypted_response_bytes)
+    {
+        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
+    }
+    Ok(())
 }
 
 fn sub_mod_n(s: &[u8; 32]) -> [u8; 32] {
@@ -146,7 +202,17 @@ fn sample_descriptor(client_public: &[u8], security_domain: [u8; 32]) -> WalletD
     }
 }
 
-fn sample_request(client_public: &[u8], running: &RunningEnclave) -> OperationRequest {
+/// The release a sample request is bound to.
+struct Running {
+    release_id: String,
+    manifest_digest: [u8; 32],
+    executable_digest: [u8; 32],
+    security_domain_id: [u8; 32],
+    quorum_key_id: String,
+    quorum_key_epoch: u64,
+}
+
+fn sample_request(client_public: &[u8], running: &Running) -> OperationRequest {
     OperationRequest {
         version: API_VERSION,
         request_id: sha256_label("zolana-tvc-test-request-id"),
@@ -169,15 +235,14 @@ fn sample_request(client_public: &[u8], running: &RunningEnclave) -> OperationRe
     }
 }
 
-fn sample_running() -> RunningEnclave {
-    RunningEnclave {
+fn sample_running() -> Running {
+    Running {
         release_id: "tvc-dev-phase0".to_owned(),
         manifest_digest: sha256_label("zolana-tvc-test-manifest"),
         executable_digest: sha256_label("zolana-tvc-test-executable"),
         security_domain_id: sha256_label("zolana-tvc-test-security-domain"),
         quorum_key_id: "quorum-dev-1".to_owned(),
         quorum_key_epoch: 1,
-        environment: Environment::Development,
     }
 }
 
@@ -195,8 +260,8 @@ fn sample_info(quorum: &QosP256Public, ephemeral: &QosP256Public) -> ServiceInfo
         quorum_key_epoch: running.quorum_key_epoch,
         ephemeral_public_key: ephemeral.to_bytes().to_vec(),
         supported_operations: OPERATIONS.to_vec(),
-        max_encrypted_request_bytes: DEVNET_MAX_ENCRYPTED_REQUEST_BYTES,
-        max_encrypted_response_bytes: DEVNET_MAX_ENCRYPTED_RESPONSE_BYTES,
+        max_encrypted_request_bytes: MAX_ENCRYPTED_REQUEST_BYTES,
+        max_encrypted_response_bytes: MAX_ENCRYPTED_RESPONSE_BYTES,
         proof_type: TVC_APP_PROOF_TYPE.to_owned(),
         boot_proof_lookup_key: ephemeral.to_bytes().to_vec(),
     }
@@ -384,33 +449,6 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
         })),
     );
 
-    let mut wrong_epoch = request.clone();
-    wrong_epoch.quorum_key_epoch = 9;
-    let mut wrong_release = request.clone();
-    wrong_release.target_release_id = "other-release".to_owned();
-    let mut wrong_manifest = request.clone();
-    wrong_manifest.target_manifest_digest = sha256_label("wrong-manifest");
-    let mut wrong_executable = request.clone();
-    wrong_executable.target_executable_digest = sha256_label("wrong-executable");
-    let mut wrong_quorum = request.clone();
-    wrong_quorum.quorum_key_id = "other-quorum".to_owned();
-    let mut empty_wallet_id = request.clone();
-    empty_wallet_id.wallet_descriptor.turnkey_wallet_id = String::new();
-    files.insert(
-        "request-bindings.json".to_owned(),
-        fixture_json(&json!({
-            "id": "request-bindings",
-            "ok": check_request_bindings(&request, &running).is_ok(),
-            "wrong_epoch": check_request_bindings(&wrong_epoch, &running).unwrap_err().code.as_str(),
-            "wrong_release": check_request_bindings(&wrong_release, &running).unwrap_err().code.as_str(),
-            "wrong_manifest": check_request_bindings(&wrong_manifest, &running).unwrap_err().code.as_str(),
-            "wrong_executable": check_request_bindings(&wrong_executable, &running).unwrap_err().code.as_str(),
-            "wrong_quorum_key": check_request_bindings(&wrong_quorum, &running).unwrap_err().code.as_str(),
-            "empty_wallet_id": check_request_bindings(&empty_wallet_id, &running).unwrap_err().code.as_str(),
-        }))
-        ,
-    );
-
     files.insert(
         "json-reject.json".to_owned(),
         fixture_json(&json!({
@@ -448,20 +486,21 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
         })),
     );
 
+    // What the enclave answers to `GET /health` and `GET /v1/info`.
     let info = sample_info(&quorum, &ephemeral);
-    let health = handle_public_http("GET", "/health", &[], true, &info);
-    let discovery = handle_public_http("GET", "/v1/info", &[], true, &info);
+    let health = jcs_serialize(&HealthResponse {
+        status: HealthStatus::Healthy,
+    })?;
     files.insert(
         "http-skeleton.json".to_owned(),
         fixture_json(&json!({
             "id": "http-skeleton",
-            "health_status": health.status,
-            "health_body": String::from_utf8(health.body.clone()).expect("utf8"),
-            "info_status": discovery.status,
-            "info_body": String::from_utf8(discovery.body.clone()).expect("utf8"),
-            "health_has_release_id": String::from_utf8_lossy(&health.body).contains("tvc-dev-phase0"),
-        }))
-        ,
+            "health_status": 200,
+            "health_body": health,
+            "info_status": 200,
+            "info_body": jcs_serialize(&info)?,
+            "health_has_release_id": health.contains("tvc-dev-phase0"),
+        })),
     );
 
     files.insert(

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::constants::{API_VERSION, EXPECTED_TURNKEY_TRUST_ROOT_ID};
 use crate::crypto::{sign_p256_prehash, verify_p256_prehash};
 use crate::digest::release_policy_digest;
-use crate::encoding::{self, decimal_u64, hex_bytes, jcs_serialize};
+use crate::encoding::{decimal_u64, hex, jcs_serialize};
 use crate::error::{ErrorCode, TvcError};
 use crate::types::{ClientAuthorizationScheme, ReleasePolicy, SignedReleasePolicy};
 
@@ -19,7 +19,7 @@ use crate::types::{ClientAuthorizationScheme, ReleasePolicy, SignedReleasePolicy
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReleaseAuthorityKey {
     pub key_id: String,
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "hex")]
     pub public_key: Vec<u8>,
 }
 
@@ -111,62 +111,6 @@ pub fn verify_signed_release_policy(
     }
     if accepted < authorities.threshold {
         return Err(TvcError::new(ErrorCode::ReleasePolicyInvalid));
-    }
-    let _ = encoding::to_canonical_value(&signed.policy)?;
-    Ok(())
-}
-
-/// Check-for-check parallel to the TypeScript `bindDiscoveryToPolicy`.
-pub fn bind_discovery_to_policy(
-    info: &crate::types::ServiceInfo,
-    policy: &ReleasePolicy,
-) -> Result<(), TvcError> {
-    crate::types::reject_production_environment(info.environment)?;
-    crate::types::reject_production_environment(policy.environment)?;
-    if info.version != API_VERSION {
-        return Err(TvcError::new(ErrorCode::UnsupportedVersion));
-    }
-    if info.proof_type != crate::constants::TVC_APP_PROOF_TYPE {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    if info.release_id != policy.release_id {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    if info.security_domain_id != policy.security_domain_id {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    if info.quorum_key_id != policy.quorum_key_id {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    if info.quorum_key_epoch != policy.quorum_key_epoch {
-        return Err(TvcError::new(ErrorCode::QuorumKeyEpochMismatch));
-    }
-    if info.quorum_public_key != policy.quorum_public_key {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    let manifest = crate::encoding::encode_lower_hex(&info.manifest_digest);
-    if !policy
-        .accepted_manifest_digests
-        .iter()
-        .any(|value| value == &manifest)
-    {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    let executable = crate::encoding::encode_lower_hex(&info.executable_digest);
-    if !policy
-        .accepted_executable_digests
-        .iter()
-        .any(|value| value == &executable)
-    {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    if info.supported_operations != policy.allowed_operations {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    if info.max_encrypted_request_bytes != u64::from(policy.max_encrypted_request_bytes)
-        || info.max_encrypted_response_bytes != u64::from(policy.max_encrypted_response_bytes)
-    {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
     }
     Ok(())
 }

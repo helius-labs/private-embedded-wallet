@@ -1,9 +1,40 @@
 //! Bounded unauthenticated HTTP skeleton for `/health` and `/v1/info`.
 
-use crate::constants::{API_VERSION, DEVNET_MAX_ENCRYPTED_REQUEST_BYTES};
-use crate::encoding::jcs_serialize;
-use crate::error::PublicError;
-use crate::types::{HealthResponse, HealthStatus, ServiceInfo};
+use zolana_tvc_protocol::constants::{API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES};
+use zolana_tvc_protocol::encoding::jcs_serialize;
+use zolana_tvc_protocol::types::{HealthResponse, HealthStatus, ServiceInfo};
+
+/// Unauthenticated public errors. These MUST NOT reveal wallet or key existence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicError {
+    RequestTooLarge,
+    MethodNotAllowed,
+    NotFound,
+    Unavailable,
+    InvalidRequest,
+}
+
+impl PublicError {
+    pub fn status(self) -> u16 {
+        match self {
+            Self::RequestTooLarge => 413,
+            Self::MethodNotAllowed => 405,
+            Self::NotFound => 404,
+            Self::Unavailable => 503,
+            Self::InvalidRequest => 400,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RequestTooLarge => "RequestTooLarge",
+            Self::MethodNotAllowed => "MethodNotAllowed",
+            Self::NotFound => "NotFound",
+            Self::Unavailable => "Unavailable",
+            Self::InvalidRequest => "InvalidRequest",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicHttpResponse {
@@ -42,7 +73,7 @@ pub fn handle_public_http(
 ) -> PublicHttpResponse {
     let limit = info
         .max_encrypted_request_bytes
-        .min(DEVNET_MAX_ENCRYPTED_REQUEST_BYTES);
+        .min(MAX_ENCRYPTED_REQUEST_BYTES);
     if body.len() as u64 > limit {
         return public_http_error(PublicError::RequestTooLarge);
     }

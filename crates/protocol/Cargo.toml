@@ -16,6 +16,7 @@ p256 = { version = "=0.13.2", default-features = false, features = ["arithmetic"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = { version = "=1.0.150" }
 sha2 = { version = "=0.10.9" }
+strum = { version = "=0.28.0", features = ["derive"] }
 zeroize = { version = "=1.9.0", features = ["zeroize_derive"] }
 
 [dev-dependencies]
