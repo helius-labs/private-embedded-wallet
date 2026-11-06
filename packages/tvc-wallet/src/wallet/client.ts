@@ -1,14 +1,14 @@
 import { initializePoseidon } from "@heliuslabs/spr";
 import { p256 } from "@noble/curves/p256";
 
-import type { TvcBackend } from "../client/backend.js";
+import type { SprEmbeddedWalletBackend } from "../client/backend.js";
 import type { ConnectedTvcRuntime } from "../client/connection.js";
-import type { OperationExecutionContext, TvcRequestSigner } from "../client/operation-executor.js";
-import { requestScope, type TvcRequestOptions } from "../client/request.js";
-import { createTvcSession, type TvcSession } from "../client/session.js";
-import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
+import type { OperationExecutionContext, SprRequestSigner } from "../client/operation-executor.js";
+import { requestScope, type SprEmbeddedWalletRequestOptions } from "../client/request.js";
+import { createSprEmbeddedWalletSession, type SprEmbeddedWalletSession } from "../client/session.js";
+import { createDefaultTransport, type SprEmbeddedWalletTransport } from "../client/transport.js";
 import { parseQosP256Public } from "../crypto/qos.js";
-import { TvcError, TvcHttpError } from "../protocol/error.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletHttpError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex, requireHex } from "../protocol/hex.js";
 import { requireNetwork } from "../protocol/network.js";
 import { releaseFor, type ReleaseTrust } from "../protocol/releases.js";
@@ -19,8 +19,8 @@ import type {
   SealedSeed,
   WalletDescriptor,
 } from "../protocol/types.js";
-import { fixedClientKeys, type TvcClientKey, type TvcClientKeys } from "./client-keys.js";
-import { EnclaveKeys, type TvcEnclave, type TvcKeys } from "./keys.js";
+import { fixedClientKeys, type SprEmbeddedWalletClientKey, type SprEmbeddedWalletClientKeys } from "./client-keys.js";
+import { EnclaveKeys, type SprEmbeddedWalletEnclave, type SprEmbeddedWalletKeys } from "./keys.js";
 import {
   checkDecrypt,
   checkDerive,
@@ -29,11 +29,11 @@ import {
   executeOperation,
   type OperationOptions,
 } from "./operations.js";
-import type { TvcProver, TvcProverConfig } from "./prover.js";
-import { TvcProverPolicy } from "./prover-policy.js";
-import { turnkeyClientKeys, type TvcTurnkey, type TvcTurnkeyWalletAccount } from "./turnkey.js";
+import type { SprEmbeddedWalletProver, SprEmbeddedWalletProverConfig } from "./prover.js";
+import { SprEmbeddedWalletProverPolicy } from "./prover-policy.js";
+import { turnkeyClientKeys, type SprEmbeddedWalletTurnkey, type SprEmbeddedWalletTurnkeyWalletAccount } from "./turnkey.js";
 
-export type TvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = {
+export type SprEmbeddedWalletConfig<Account extends SprEmbeddedWalletTurnkeyWalletAccount = SprEmbeddedWalletTurnkeyWalletAccount> = {
   /**
    * The network the enclave serves. It picks the release this package pins
    * for it, and with it the Turnkey service key, and the prover policy.
@@ -50,7 +50,7 @@ export type TvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkey
    * request; the client enrolls each session key with the gateway on first
    * use, the wallet owner signing the enrollment.
    */
-  readonly turnkey: TvcTurnkey<Account>;
+  readonly turnkey: SprEmbeddedWalletTurnkey<Account>;
   /**
    * The wallet's Solana address, to name one when the session's organization
    * holds more than one Solana account. Defaults to its only one.
@@ -69,7 +69,7 @@ export type TvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkey
    */
   readonly nowMs?: () => bigint;
   /** Every HTTP request the client makes: the gateway, the prover and its policy file. */
-  readonly transport?: TvcTransport;
+  readonly transport?: SprEmbeddedWalletTransport;
   /** Total deadline for each verification or operation, including proof lookup. Defaults to two minutes. */
   readonly requestTimeoutMs?: number;
 };
@@ -107,7 +107,7 @@ export type StoredWallet = {
 };
 
 /** Applies to the verification and to the bootstrap, each. */
-export type TvcOpenOptions = TvcRequestOptions & {
+export type SprEmbeddedWalletOpenOptions = SprEmbeddedWalletRequestOptions & {
   /**
    * Runs `bootstrap` while the wallet owner approves the Turnkey activity it
    * starts, for a wallet whose Turnkey policy requires the owner to co-sign
@@ -125,7 +125,7 @@ export type TvcOpenOptions = TvcRequestOptions & {
  * on first use and holds that verification while it holds; it verifies again
  * when the session key changes.
  */
-export type TvcClient = {
+export type SprEmbeddedWallet = {
   /** The network the enclave serves. */
   readonly network: Network;
   /**
@@ -140,36 +140,36 @@ export type TvcClient = {
    * the wallet; otherwise the enclave bootstraps it, and refuses an identity
    * other than `stored.identity`. Persist `keys.stored` after a bootstrap.
    */
-  open(stored?: StoredWallet, options?: TvcOpenOptions): Promise<TvcKeys>;
+  open(stored?: StoredWallet, options?: SprEmbeddedWalletOpenOptions): Promise<SprEmbeddedWalletKeys>;
 };
 
 /**
  * The request key of a test client: the Turnkey session, through a gateway, as
- * `createTvcClient` has it, or a descriptor and the signer of the key it lists.
+ * `createSprEmbeddedWallet` has it, or a descriptor and the signer of the key it lists.
  */
-export type TestTvcClientKey<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> =
-  | Pick<TvcClientConfig<Account>, "turnkey" | "solanaAddress">
+export type TestSprEmbeddedWalletKey<Account extends SprEmbeddedWalletTurnkeyWalletAccount = SprEmbeddedWalletTurnkeyWalletAccount> =
+  | Pick<SprEmbeddedWalletConfig<Account>, "turnkey" | "solanaAddress">
   | {
       /** A wallet descriptor that lists `signer`'s key. */
       readonly descriptor: WalletDescriptor;
-      readonly signer: TvcRequestSigner;
+      readonly signer: SprRequestSigner;
     };
 
-/** `createTvcClient`'s configuration with the backend, release and prover spelled out, for tests. */
-export type TestTvcClientConfig<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = Pick<
-  TvcClientConfig<Account>,
+/** `createSprEmbeddedWallet`'s configuration with the backend, release and prover spelled out, for tests. */
+export type TestSprEmbeddedWalletConfig<Account extends SprEmbeddedWalletTurnkeyWalletAccount = SprEmbeddedWalletTurnkeyWalletAccount> = Pick<
+  SprEmbeddedWalletConfig<Account>,
   "network" | "nowMs" | "transport" | "requestTimeoutMs"
 > & {
   /** Where the client reaches the enclave: a tvc-gateway, or the enclave itself. */
-  readonly backend: TvcBackend;
+  readonly backend: SprEmbeddedWalletBackend;
   /**
    * The release to verify the enclave against in place of the one this
    * package pins for `network`. Its policy must still name `network`.
    */
   readonly release?: ReleaseTrust;
   /** Defaults to `/v1/spr` beside the backend's endpoint, under the network's policy. */
-  readonly prover?: TvcProverConfig;
-} & TestTvcClientKey<Account>;
+  readonly prover?: SprEmbeddedWalletProverConfig;
+} & TestSprEmbeddedWalletKey<Account>;
 
 function identityOf(result: BootstrapResult): ShieldedIdentity {
   return Object.freeze({
@@ -195,7 +195,7 @@ export function turnkeyServicePublicKey(quorumPublicKey: string): string {
   try {
     signing = parseQosP256Public(decodeLowerHex(quorumPublicKey)).signing;
   } catch {
-    throw new TvcError("ReleasePolicyInvalid", "the Quorum public key is not two P-256 points");
+    throw new SprEmbeddedWalletError("ReleasePolicyInvalid", "the Quorum public key is not two P-256 points");
   }
   return encodeLowerHex(p256.ProjectivePoint.fromHex(signing).toRawBytes(true));
 }
@@ -211,13 +211,13 @@ function proverBeside(endpoint: URL): string {
 export function proverFor(
   network: Network,
   endpoint: URL,
-  config: TvcProverConfig | undefined,
-  transport: TvcTransport | undefined,
-): TvcProver {
+  config: SprEmbeddedWalletProverConfig | undefined,
+  transport: SprEmbeddedWalletTransport | undefined,
+): SprEmbeddedWalletProver {
   const proverTransport = config?.transport ?? transport;
   return {
     url: config?.url ?? proverBeside(endpoint),
-    policy: config?.policy ?? TvcProverPolicy.forNetwork(network, proverTransport),
+    policy: config?.policy ?? SprEmbeddedWalletProverPolicy.forNetwork(network, proverTransport),
     ...(proverTransport ? { transport: proverTransport } : {}),
   };
 }
@@ -228,18 +228,18 @@ function signalOf(...signals: (AbortSignal | undefined)[]): AbortSignal | undefi
 }
 
 /** Where a client's request key comes from: the Turnkey session, enrolled through a gateway, or a fixed key. */
-export function clientKeysOf<Account extends TvcTurnkeyWalletAccount>(
-  key: TestTvcClientKey<Account>,
+export function clientKeysOf<Account extends SprEmbeddedWalletTurnkeyWalletAccount>(
+  key: TestSprEmbeddedWalletKey<Account>,
   setup: {
     readonly network: Network;
-    readonly backend: TvcBackend;
-    readonly transport?: TvcTransport | undefined;
+    readonly backend: SprEmbeddedWalletBackend;
+    readonly transport?: SprEmbeddedWalletTransport | undefined;
     readonly nowMs?: (() => bigint) | undefined;
   },
-): TvcClientKeys {
+): SprEmbeddedWalletClientKeys {
   if (!("turnkey" in key)) return fixedClientKeys({ descriptor: key.descriptor, signer: key.signer });
   if (setup.backend.kind !== "gateway") {
-    throw new TvcError("GatewayRequired", "a Turnkey session key enrolls through a tvc-gateway");
+    throw new SprEmbeddedWalletError("GatewayRequired", "a Turnkey session key enrolls through a tvc-gateway");
   }
   return turnkeyClientKeys({
     turnkey: key.turnkey,
@@ -252,15 +252,15 @@ export function clientKeysOf<Account extends TvcTurnkeyWalletAccount>(
 }
 
 export function clientFromSession(
-  session: TvcSession,
+  session: SprEmbeddedWalletSession,
   setup: {
     readonly network: Network;
     readonly servicePublicKey: string;
-    readonly keys: TvcClientKeys;
-    readonly prover: TvcProver;
+    readonly keys: SprEmbeddedWalletClientKeys;
+    readonly prover: SprEmbeddedWalletProver;
     readonly requestTimeoutMs?: number | undefined;
   },
-): TvcClient {
+): SprEmbeddedWallet {
   const { keys, prover } = setup;
   /** The key the current verification was made for. */
   let verifiedFor: string | undefined;
@@ -268,7 +268,7 @@ export function clientFromSession(
   type Prepared = {
     readonly runtime: ConnectedTvcRuntime;
     readonly context: OperationExecutionContext;
-    readonly key: TvcClientKey;
+    readonly key: SprEmbeddedWalletClientKey;
   };
 
   /**
@@ -307,7 +307,7 @@ export function clientFromSession(
     try {
       return await executeOperation(prepared.context, operation, sealedSeed, options);
     } catch (error) {
-      if (error instanceof TvcHttpError && error.status !== 429 && error.code !== "DescriptorExpired") {
+      if (error instanceof SprEmbeddedWalletHttpError && error.status !== 429 && error.code !== "DescriptorExpired") {
         session.forget(prepared.runtime);
       }
       throw error;
@@ -324,14 +324,14 @@ export function clientFromSession(
     try {
       return await attempt(prepared);
     } catch (error) {
-      if (!(error instanceof TvcError) || error.code !== "DescriptorExpired" || !prepared.key.expire) throw error;
+      if (!(error instanceof SprEmbeddedWalletError) || error.code !== "DescriptorExpired" || !prepared.key.expire) throw error;
       prepared.key.expire(prepared.context.operations.descriptor);
       return attempt(await prepare(options));
     }
   }
 
   /** The key operations of the wallet at `solanaAddress`, which the current key's descriptor must name. */
-  function enclaveFor(solanaAddress: string): TvcEnclave {
+  function enclaveFor(solanaAddress: string): SprEmbeddedWalletEnclave {
     async function run<TOperation extends Operation>(
       operation: TOperation,
       sealedSeed: SealedSeed,
@@ -339,7 +339,7 @@ export function clientFromSession(
     ) {
       return enrolled(options, (prepared) => {
         if (prepared.context.operations.descriptor.address !== solanaAddress) {
-          throw new TvcError("ShieldedIdentityChanged", "the stored identity is another wallet's");
+          throw new SprEmbeddedWalletError("ShieldedIdentityChanged", "the stored identity is another wallet's");
         }
         return execute(prepared, operation, sealedSeed, options);
       });
@@ -366,13 +366,13 @@ export function clientFromSession(
     return enrolled(options, async (prepared) => {
       const result = await execute(prepared, { type: "Bootstrap" }, undefined, options);
       if (result.solana_address !== prepared.context.operations.descriptor.address) {
-        throw new TvcError("ReleaseBindingMismatch");
+        throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
       }
       return result;
     });
   }
 
-  async function bootstrapApproved(options: TvcOpenOptions = {}): Promise<BootstrapResult> {
+  async function bootstrapApproved(options: SprEmbeddedWalletOpenOptions = {}): Promise<BootstrapResult> {
     const { approve, ...request } = options;
     if (!approve) return bootstrap(request);
     // A release that fails verification never reaches the owner's approver.
@@ -382,7 +382,7 @@ export function clientFromSession(
       const combined = signalOf(request.signal, signal);
       result = await bootstrap({ ...request, ...(combined ? { signal: combined } : {}) });
     }, request.signal);
-    if (result === undefined) throw new TvcError("BootstrapNotRun", "approve returned without running bootstrap");
+    if (result === undefined) throw new SprEmbeddedWalletError("BootstrapNotRun", "approve returned without running bootstrap");
     return result;
   }
 
@@ -401,13 +401,13 @@ export function clientFromSession(
         const result = await bootstrapApproved(options);
         identity = identityOf(result);
         if (stored && !sameIdentity(identity, stored.identity)) {
-          throw new TvcError("ShieldedIdentityChanged");
+          throw new SprEmbeddedWalletError("ShieldedIdentityChanged");
         }
         requireHex(result.sealed_seed);
         sealedSeed = Object.freeze({ sealedSeed: result.sealed_seed });
       }
       if (keys.solanaAddress !== undefined && identity.solanaAddress !== keys.solanaAddress) {
-        throw new TvcError("ShieldedIdentityChanged", "the stored identity is another wallet's");
+        throw new SprEmbeddedWalletError("ShieldedIdentityChanged", "the stored identity is another wallet's");
       }
       await initializePoseidon();
       return new EnclaveKeys({ enclave: enclaveFor(identity.solanaAddress), identity, sealedSeed, prover });
@@ -415,15 +415,15 @@ export function clientFromSession(
   };
 }
 
-/** `createTestTvcClient` in `./testing`; `createTvcClient` is this with a gateway and the pinned release. */
-export function createClient<Account extends TvcTurnkeyWalletAccount>(
-  config: TestTvcClientConfig<Account>,
-): TvcClient {
+/** `createTestSprEmbeddedWallet` in `./testing`; `createSprEmbeddedWallet` is this with a gateway and the pinned release. */
+export function createClient<Account extends SprEmbeddedWalletTurnkeyWalletAccount>(
+  config: TestSprEmbeddedWalletConfig<Account>,
+): SprEmbeddedWallet {
   const network = requireNetwork(config.network);
   const release = config.release ?? releaseFor(network);
   const { backend, transport, nowMs, requestTimeoutMs } = config;
   return clientFromSession(
-    createTvcSession({
+    createSprEmbeddedWalletSession({
       network,
       backend,
       release,
@@ -447,9 +447,9 @@ export function createClient<Account extends TvcTurnkeyWalletAccount>(
  * pins for `config.network`. A network without a pinned release is
  * `ReleaseNotPinned`.
  */
-export function createTvcClient<Account extends TvcTurnkeyWalletAccount>(
-  config: TvcClientConfig<Account>,
-): TvcClient {
+export function createSprEmbeddedWallet<Account extends SprEmbeddedWalletTurnkeyWalletAccount>(
+  config: SprEmbeddedWalletConfig<Account>,
+): SprEmbeddedWallet {
   // Only the fields above: a caller's `release`, `backend` or descriptor must
   // not reach `createClient`, which would trust them in place of the pin.
   const { network, endpoint, turnkey, solanaAddress, prover, nowMs, transport, requestTimeoutMs } = config;

@@ -8,11 +8,11 @@
  * The default is plain `fetch` with no platform-specific behaviour; supply your
  * own to add retries, tracing, or a pinned agent.
  */
-export type TvcTransport = {
+export type SprEmbeddedWalletTransport = {
   fetch(input: URL, init?: RequestInit): Promise<Response>;
 };
 
-export function createDefaultTransport(): TvcTransport {
+export function createDefaultTransport(): SprEmbeddedWalletTransport {
   return {
     fetch: (input, init) => fetch(input, init),
   };

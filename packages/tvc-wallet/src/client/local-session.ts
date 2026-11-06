@@ -2,8 +2,8 @@ import {
   connectLocalUnattestedTvc,
   type LocalUnattestedConnectionConfig,
 } from "./local-connection.js";
-import { sessionFromConnector, type TvcSession } from "./session.js";
+import { sessionFromConnector, type SprEmbeddedWalletSession } from "./session.js";
 
-export function createLocalTvcSession(config: LocalUnattestedConnectionConfig): TvcSession {
+export function createLocalSprEmbeddedWalletSession(config: LocalUnattestedConnectionConfig): SprEmbeddedWalletSession {
   return sessionFromConnector((signal) => connectLocalUnattestedTvc(config, signal));
 }

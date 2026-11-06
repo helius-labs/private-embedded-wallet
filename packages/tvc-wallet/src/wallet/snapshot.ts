@@ -8,7 +8,7 @@ import {
 } from "@heliuslabs/spr";
 import { sha256 } from "@noble/hashes/sha256";
 
-import type { TvcKeys } from "./keys.js";
+import type { SprEmbeddedWalletKeys } from "./keys.js";
 
 /**
  * The first-nullifier slot of the per-transaction key that keys the snapshot.
@@ -28,7 +28,7 @@ const SNAPSHOT_KEY_CONTEXT: Bytes32 = (() => {
  * snapshot opens for anyone who can drive this wallet's enclave operations and
  * for nobody else. The material is wiped once the AES key is imported.
  */
-export async function snapshotCipher(keys: TvcKeys, context?: RequestContext): Promise<WalletStateCipher> {
+export async function snapshotCipher(keys: SprEmbeddedWalletKeys, context?: RequestContext): Promise<WalletStateCipher> {
   const scope = requestScope(context);
   try {
     scope.signal.throwIfAborted();

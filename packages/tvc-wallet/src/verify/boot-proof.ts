@@ -1,7 +1,7 @@
 import { sha384 } from "@noble/hashes/sha512";
 import { verifyP256Message } from "../crypto/p256.js";
 import { parseQosP256Public } from "../crypto/qos.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import {
   MAX_CLOCK_SKEW_MS,
   SHA256_LEN,
@@ -94,7 +94,7 @@ export async function verifyBootProof(input: VerifyBootProofInput): Promise<void
     // Stage names contain no proof bytes or remote error text. They make a
     // fail-closed deployment diagnosable without widening the public error
     // code or leaking attestation material into application logs.
-    throw new TvcError("BootProofUnverified", stage);
+    throw new SprEmbeddedWalletError("BootProofUnverified", stage);
   }
 }
 
@@ -103,10 +103,10 @@ export function computeQosLiveManifestCommitmentPcr(
   ephemeralPublicKey: Uint8Array,
 ): Uint8Array {
   if (manifestDigest.length !== SHA256_LEN) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   if (ephemeralPublicKey.length !== QOS_EPHEMERAL_PUBLIC_KEY_LENGTH) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const commitmentPreimage = new TextEncoder().encode(
     `{"domain":"${QOS_LIVE_MANIFEST_PCR_COMMITMENT_DOMAIN}","ephemeralPublicKey":"${encodeLowerHex(
@@ -121,7 +121,7 @@ export function computeQosLiveManifestCommitmentPcr(
 
 function verifyTvcAppProof(appProof: TurnkeyAppProofWire): void {
   if (appProof.scheme !== TVC_APP_PROOF_SCHEME || !isRfc8785(appProof.proofPayload)) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const publicKey = decodeLowerHex(appProof.publicKey);
   const signature = decodeLowerHex(appProof.signature);
@@ -132,7 +132,7 @@ function verifyTvcAppProof(appProof: TurnkeyAppProofWire): void {
 function decodeBootProof(bootProof: TurnkeyBootProofWire): DecodedBootProof {
   const decodedCose = decodeCbor(decodeBase64(bootProof.awsAttestationDocB64));
   if (!Array.isArray(decodedCose) || decodedCose.length !== 4) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const [protectedHeaders, , payload, signature] = decodedCose;
   const coseSign1: CoseSign1 = {
@@ -142,12 +142,12 @@ function decodeBootProof(bootProof: TurnkeyBootProofWire): DecodedBootProof {
   };
   const decoded = decodeAwsNitroAttestationCbor(coseSign1.payload);
   if (!(decoded instanceof Map)) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const certificate = asBytes(decoded.get("certificate"));
   const cabundle = decoded.get("cabundle");
   if (!Array.isArray(cabundle) || cabundle.length === 0) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   return { coseSign1, attestation: decoded, certificate, cabundle: cabundle.map(asBytes) };
 }
@@ -155,22 +155,22 @@ function decodeBootProof(bootProof: TurnkeyBootProofWire): DecodedBootProof {
 function validateAttestationShape(attestation: AwsNitroAttestationDocument): void {
   const moduleId = attestation.get("module_id");
   if (typeof moduleId !== "string" || moduleId.length === 0) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   if (attestation.get("digest") !== "SHA384") {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const timestamp = attestation.get("timestamp");
   if (typeof timestamp !== "number" || !Number.isSafeInteger(timestamp) || timestamp <= 0) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const nonce = attestation.get("nonce");
   if (nonce !== null && nonce !== undefined) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const pcrs = attestation.get("pcrs");
   if (!(pcrs instanceof Map) || pcrs.size !== QOS_ATTESTABLE_PCR_COUNT) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   for (let index = 0; index < QOS_ATTESTABLE_PCR_COUNT; index += 1) {
     getPcr(attestation, index);
@@ -184,11 +184,11 @@ function assertAttestationFreshness(
   // Narrowed to Number below for the certificate-chain check, so anything past
   // the safe-integer range would silently lose precision.
   if (nowMs <= 0n || nowMs > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const timestamp = BigInt(attestation.get("timestamp") as number);
   if (timestamp > nowMs + MAX_CLOCK_SKEW_MS) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
 }
 
@@ -197,7 +197,7 @@ function verifyProofBindings(
   attestation: AwsNitroAttestationDocument,
 ): void {
   if (input.allowedManifestSha256.length === 0) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const allowed = input.allowedManifestSha256.map((value) =>
     decodeFixedLowerHex(value, SHA256_LEN),
@@ -209,12 +209,12 @@ function verifyProofBindings(
     manifestDigest.length !== SHA256_LEN ||
     !allowed.some((digest) => bytesEqual(digest, manifestDigest))
   ) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
 
   const attestedPublicKey = asBytes(attestation.get("public_key"));
   if (attestedPublicKey.length !== QOS_EPHEMERAL_PUBLIC_KEY_LENGTH) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   const appPublicKey = decodeFixedLowerHex(
     input.appProof.publicKey,
@@ -225,19 +225,19 @@ function verifyProofBindings(
     QOS_EPHEMERAL_PUBLIC_KEY_LENGTH,
   );
   if (!bytesEqual(appPublicKey, bootPublicKey) || !bytesEqual(bootPublicKey, attestedPublicKey)) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
 
   for (const index of [0, 1, 2, 3] as const) {
     const expected = decodeFixedLowerHex(input.expectedPcrs[index], SHA384_LEN);
     if (!bytesEqual(expected, getPcr(attestation, index))) {
-      throw new TvcError("BootProofUnverified");
+      throw new SprEmbeddedWalletError("BootProofUnverified");
     }
   }
 
   const expectedLivePcr = computeQosLiveManifestCommitmentPcr(manifestDigest, attestedPublicKey);
   if (!bytesEqual(expectedLivePcr, getPcr(attestation, QOS_LIVE_MANIFEST_COMMITMENT_PCR_INDEX))) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
 }
 
@@ -245,10 +245,10 @@ function getPcr(attestation: AwsNitroAttestationDocument, index: number): Uint8A
   // NSM keys the PCR map by CBOR unsigned integer, so the lookup is by number.
   // A text-keyed map is outside the format and is rejected here.
   const pcrs = attestation.get("pcrs");
-  if (!(pcrs instanceof Map)) throw new TvcError("BootProofUnverified");
+  if (!(pcrs instanceof Map)) throw new SprEmbeddedWalletError("BootProofUnverified");
   const bytes = asBytes(pcrs.get(index));
   if (bytes.length !== SHA384_LEN) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   return bytes;
 }
@@ -256,25 +256,25 @@ function getPcr(attestation: AwsNitroAttestationDocument, index: number): Uint8A
 function decodeFixedLowerHex(value: string, length: number): Uint8Array {
   const bytes = decodeLowerHex(value);
   if (bytes.length !== length) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   return bytes;
 }
 
 function decodeBase64(value: string): Uint8Array {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   let binary: string;
   try {
     binary = atob(value);
   } catch {
-    throw new TvcError("BootProofUnverified");
+    throw new SprEmbeddedWalletError("BootProofUnverified");
   }
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function asBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return value;
-  throw new TvcError("BootProofUnverified");
+  throw new SprEmbeddedWalletError("BootProofUnverified");
 }

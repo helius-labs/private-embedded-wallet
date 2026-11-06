@@ -1,5 +1,5 @@
 import { awaitWithSignal } from "./request.js";
-import { TvcError, TvcHttpError } from "../protocol/error.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletHttpError } from "../protocol/error.js";
 import { canonicalizeJsonValue } from "../protocol/jcs.js";
 import { parseStrictJson } from "../protocol/json.js";
 import type { WalletDescriptor, WalletGrant } from "../protocol/types.js";
@@ -8,7 +8,7 @@ import type {
   TurnkeyBootProofWire,
 } from "../verify/internal/turnkey-proof-seam.js";
 import { endpointUrl, fetchWithSignal, gatewayUrl, httpError, readBoundedText } from "./http.js";
-import type { TvcTransport } from "./transport.js";
+import type { SprEmbeddedWalletTransport } from "./transport.js";
 
 export type ResolveBootProofInput = {
   readonly appProof: TurnkeyAppProofWire;
@@ -47,7 +47,7 @@ export type GatewayBackend = {
  * the same evidence: the release policy, discovery, the ping and the Boot
  * Proof of each replica that answers.
  */
-export type TvcBackend = EnclaveBackend | GatewayBackend;
+export type SprEmbeddedWalletBackend = EnclaveBackend | GatewayBackend;
 
 /** The enclave's request fields around the ciphertext. */
 export type EncryptedRequestWire = {
@@ -82,7 +82,7 @@ const GATEWAY_OPERATION_KEYS = ["response", "bootProof"] as const;
 /** Room for the grant a gateway adds to the request it forwards. */
 const GATEWAY_GRANT_BYTES = 1_024;
 
-function postJson(transport: TvcTransport, url: URL, body: string, signal?: AbortSignal): Promise<Response> {
+function postJson(transport: SprEmbeddedWalletTransport, url: URL, body: string, signal?: AbortSignal): Promise<Response> {
   return fetchWithSignal(transport, url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -104,7 +104,7 @@ async function readAnswer(
 export async function fetchPing(
   endpoint: URL,
   pingBody: string,
-  transport: TvcTransport,
+  transport: SprEmbeddedWalletTransport,
   signal?: AbortSignal,
 ): Promise<string> {
   const ping = await postJson(transport, endpointUrl(endpoint, "/v1/ping"), pingBody, signal);
@@ -113,9 +113,9 @@ export async function fetchPing(
 
 /** Discovery and the answer to `pingBody`, a QOS ping encrypted to the pinned quorum key. */
 export async function fetchSession(
-  backend: TvcBackend,
+  backend: SprEmbeddedWalletBackend,
   pingBody: string,
-  transport: TvcTransport,
+  transport: SprEmbeddedWalletTransport,
   signal?: AbortSignal,
 ): Promise<SessionAnswer> {
   signal?.throwIfAborted();
@@ -144,12 +144,12 @@ export async function fetchSession(
 
 /** The Boot Proof of the replica that signed `appProof`, for an answer that carried none. */
 export function lookupBootProof(
-  backend: TvcBackend,
+  backend: SprEmbeddedWalletBackend,
   appProof: TurnkeyAppProofWire,
   signal?: AbortSignal,
 ): Promise<TurnkeyBootProofWire> {
   if (backend.kind !== "enclave" || !backend.resolveBootProof) {
-    return Promise.reject(new TvcError("BootProofUnverified"));
+    return Promise.reject(new SprEmbeddedWalletError("BootProofUnverified"));
   }
   return awaitWithSignal(backend.resolveBootProof({
     appProof,
@@ -160,16 +160,16 @@ export function lookupBootProof(
 
 /** What the request carries beside the ciphertext: the grant, unless a gateway adds it. */
 export async function requestGrant(
-  backend: TvcBackend,
+  backend: SprEmbeddedWalletBackend,
   signal?: AbortSignal,
 ): Promise<{ readonly wallet_grant?: WalletGrant }> {
   if (backend.kind === "gateway") return {};
-  if (!backend.walletGrant) throw new TvcError("WalletGrantRequired");
+  if (!backend.walletGrant) throw new SprEmbeddedWalletError("WalletGrantRequired");
   return { wallet_grant: await awaitWithSignal(backend.walletGrant(signal), signal) };
 }
 
 /** Bytes the backend adds to a request before the enclave receives it. */
-export function forwardedRequestBytes(backend: TvcBackend): number {
+export function forwardedRequestBytes(backend: SprEmbeddedWalletBackend): number {
   return backend.kind === "gateway" ? GATEWAY_GRANT_BYTES : 0;
 }
 
@@ -203,7 +203,7 @@ async function refusesExpiredDescriptor(response: Response, signal?: AbortSignal
  */
 async function readOperationAnswer(response: Response, maxBytes: bigint, signal?: AbortSignal): Promise<string> {
   if (await refusesExpiredDescriptor(response, signal)) {
-    throw new TvcHttpError("DescriptorExpired", response.status, response.headers.get("retry-after"));
+    throw new SprEmbeddedWalletHttpError("DescriptorExpired", response.status, response.headers.get("retry-after"));
   }
   const unavailable = response.status >= 500 || response.status === 424;
   return readAnswer(response, unavailable ? "OperationUnavailable" : "OperationRejected", maxBytes, signal);
@@ -211,10 +211,10 @@ async function readOperationAnswer(response: Response, maxBytes: bigint, signal?
 
 /** Sends one encrypted request, whose enclave answer may take up to `maxAnswerBytes`. */
 export async function sendOperation(
-  backend: TvcBackend,
+  backend: SprEmbeddedWalletBackend,
   request: EncryptedRequestWire,
   descriptor: WalletDescriptor,
-  transport: TvcTransport,
+  transport: SprEmbeddedWalletTransport,
   maxAnswerBytes: bigint,
   signal?: AbortSignal,
 ): Promise<OperationAnswer> {

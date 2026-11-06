@@ -1,7 +1,7 @@
-import { requestScope, type TvcRequestOptions } from "../client/request.js";
+import { requestScope, type SprEmbeddedWalletRequestOptions } from "../client/request.js";
 import { decodeDecimalU64 } from "../protocol/decimal.js";
 import { sealedSeedDigest } from "../protocol/digest.js";
-import { TvcError, TvcOperationError } from "../protocol/error.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex, requireHex } from "../protocol/hex.js";
 import { parseStrictJson } from "../protocol/json.js";
 import type {
@@ -56,8 +56,8 @@ type ResultFor<TOperation extends Operation> = Extract<
 >;
 
 function checkBatch(items: readonly unknown[]): void {
-  if (items.length === 0) throw new TvcError("EmptyBatch");
-  if (items.length > MAX_ITEMS_PER_BATCH) throw new TvcError("BatchTooLarge");
+  if (items.length === 0) throw new SprEmbeddedWalletError("EmptyBatch");
+  if (items.length > MAX_ITEMS_PER_BATCH) throw new SprEmbeddedWalletError("BatchTooLarge");
 }
 
 /** Checks a `Decrypt` request's bounds and encodings before it is signed. */
@@ -70,10 +70,10 @@ export function checkDecrypt(operation: DecryptOperation): DecryptOperation {
     requireHex(item.salt, SALT_BYTES);
     const slot = decodeDecimalU64(item.slot_index);
     if (slot > U32_MAX || (item.label === "RingDeposit" && slot !== 0n)) {
-      throw new TvcError("InvalidSlotIndex");
+      throw new SprEmbeddedWalletError("InvalidSlotIndex");
     }
     if (item.label !== "Transfer" && item.label !== "RingDeposit") {
-      throw new TvcError("InvalidCanonicalJson");
+      throw new SprEmbeddedWalletError("InvalidCanonicalJson");
     }
   }
   return operation;
@@ -90,7 +90,7 @@ export function checkDerive(operation: DeriveOperation): DeriveOperation {
         break;
       case "MergeDummyNullifier":
         requireHex(item.first_nullifier, 32);
-        if (decodeDecimalU64(item.slot_index) > U8_MAX) throw new TvcError("InvalidSlotIndex");
+        if (decodeDecimalU64(item.slot_index) > U8_MAX) throw new SprEmbeddedWalletError("InvalidSlotIndex");
         break;
       case "MergeOutputBlinding":
       case "MergePrivateTxBlinding":
@@ -135,19 +135,19 @@ export function checkProve(operation: ProveOperation): ProveOperation {
   for (const part of [sealing.policy.release, sealing.policy.freshness]) {
     assertExactObjectKeys(part, SIGNED_PART_KEYS, "InvalidProverRequest");
     if (typeof part.payload !== "string" || !Array.isArray(part.signatures)) {
-      throw new TvcError("InvalidProverRequest");
+      throw new SprEmbeddedWalletError("InvalidProverRequest");
     }
   }
   requireHex(sealing.nonce, 32);
-  if (!isObject(sealing.attestation)) throw new TvcError("InvalidProverRequest");
+  if (!isObject(sealing.attestation)) throw new SprEmbeddedWalletError("InvalidProverRequest");
   const body = operation.request;
   const circuit = body["circuitType"];
   if (!isProveCircuit(circuit)) {
-    throw new TvcError("InvalidProverRequest");
+    throw new SprEmbeddedWalletError("InvalidProverRequest");
   }
   const inputs = body["inputs"];
   if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > MAX_PROVE_INPUTS) {
-    throw new TvcError("InvalidProverRequest");
+    throw new SprEmbeddedWalletError("InvalidProverRequest");
   }
   const open =
     circuit === "merge" || circuit === "merge-ring"
@@ -158,16 +158,16 @@ export function checkProve(operation: ProveOperation): ProveOperation {
             input !== null &&
             (input as Record<string, unknown>)["nullifierSecret"] === null,
         );
-  if (!open) throw new TvcError("InvalidProverRequest");
+  if (!open) throw new SprEmbeddedWalletError("InvalidProverRequest");
   if (sealing.target !== proverTarget(provingKeyName(body))) {
-    throw new TvcError("InvalidProverRequest", "target is not the request's proving key route");
+    throw new SprEmbeddedWalletError("InvalidProverRequest", "target is not the request's proving key route");
   }
   return operation;
 }
 
 function checkHexList(values: unknown, count: number, bytes?: number): asserts values is string[] {
   if (!Array.isArray(values) || values.length !== count) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   for (const value of values) requireHex(value, bytes);
 }
@@ -180,20 +180,20 @@ function checkResult<TOperation extends Operation>(
   proofSeedDigest: string,
 ): asserts result is ResultFor<TOperation> {
   const keys = Object.hasOwn(RESULT_KEYS, result.type) ? RESULT_KEYS[result.type] : undefined;
-  if (!keys) throw new TvcError("UnsupportedVersion");
+  if (!keys) throw new SprEmbeddedWalletError("UnsupportedVersion");
   assertExactObjectKeys(result, keys, "InvalidCanonicalJson");
   if (result.type === "Failure") {
     if (result.operation !== operation.type) {
-      throw new TvcError(
+      throw new SprEmbeddedWalletError(
         "ReleaseBindingMismatch",
         `failure names ${result.operation}, asked for ${operation.type}`,
       );
     }
-    if (!FAILURE_STAGES.includes(result.stage)) throw new TvcError("UnsupportedVersion");
-    throw new TvcOperationError(result.operation, result.stage);
+    if (!FAILURE_STAGES.includes(result.stage)) throw new SprEmbeddedWalletError("UnsupportedVersion");
+    throw new SprEmbeddedWalletOperationError(result.operation, result.stage);
   }
   if (result.type !== operation.type) {
-    throw new TvcError("ReleaseBindingMismatch", `result is ${result.type}, asked for ${operation.type}`);
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch", `result is ${result.type}, asked for ${operation.type}`);
   }
 
   switch (result.type) {
@@ -201,38 +201,38 @@ function checkResult<TOperation extends Operation>(
       requireHex(result.shielded_owner_hash, 32);
       requireHex(result.shielded_nullifier_public_key, 32);
       requireHex(result.shielded_viewing_public_key, VIEWING_PUBLIC_KEY_BYTES);
-      if (!result.solana_address) throw new TvcError("ReleaseBindingMismatch");
+      if (!result.solana_address) throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
       // The sealed blob must be the one the App Proof committed to; otherwise a
       // response could carry a different seed than the one that was signed.
       const digest = encodeLowerHex(sealedSeedDigest(requireHex(result.sealed_seed)));
-      if (digest !== proofSeedDigest) throw new TvcError("ReleaseBindingMismatch");
+      if (digest !== proofSeedDigest) throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
       return;
     }
     case "Decrypt": {
-      if (operation.type !== "Decrypt") throw new TvcError("ReleaseBindingMismatch");
+      if (operation.type !== "Decrypt") throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
       checkHexList(result.plaintexts, operation.items.length);
       return;
     }
     case "Derive": {
-      if (operation.type !== "Derive") throw new TvcError("ReleaseBindingMismatch");
+      if (operation.type !== "Derive") throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
       checkHexList(result.values, operation.items.length, 32);
       return;
     }
     case "TransactionKeys": {
-      if (operation.type !== "TransactionKeys") throw new TvcError("ReleaseBindingMismatch");
+      if (operation.type !== "TransactionKeys") throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
       checkHexList(result.secrets, operation.items.length, 32);
       return;
     }
     case "Prove": {
-      if (operation.type !== "Prove") throw new TvcError("ReleaseBindingMismatch");
+      if (operation.type !== "Prove") throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
       assertExactObjectKeys(result.sealed, SEALED_KEYS, "InvalidCanonicalJson");
       if (result.sealed.target !== operation.prover.target) {
-        throw new TvcError("ReleaseBindingMismatch", "sealed for another target");
+        throw new SprEmbeddedWalletError("ReleaseBindingMismatch", "sealed for another target");
       }
       requireHex(result.sealed.enc, 32);
       requireHex(result.sealed.response_key, 32);
       if (requireHex(result.sealed.ciphertext).length === 0) {
-        throw new TvcError("ReleaseBindingMismatch", "empty sealed request");
+        throw new SprEmbeddedWalletError("ReleaseBindingMismatch", "empty sealed request");
       }
       return;
     }
@@ -240,7 +240,7 @@ function checkResult<TOperation extends Operation>(
 }
 
 /** Aborting the signal abandons the HTTP exchange; the enclave keeps no state for it. */
-export type OperationOptions = TvcRequestOptions;
+export type OperationOptions = SprEmbeddedWalletRequestOptions;
 
 /**
  * Runs one operation through the encrypted envelope and returns its checked
@@ -262,7 +262,7 @@ export async function executeOperation<TOperation extends Operation>(
       sealedSeed &&
       envelope.sealedSeedDigest !== encodeLowerHex(sealedSeedDigest(decodeLowerHex(sealedSeed.sealedSeed)))
     ) {
-      throw new TvcError("ReleaseBindingMismatch", "proof names another sealed seed");
+      throw new SprEmbeddedWalletError("ReleaseBindingMismatch", "proof names another sealed seed");
     }
     const result = parseStrictJson<OperationResult>(envelope.plaintext);
     checkResult(result, operation, envelope.sealedSeedDigest);

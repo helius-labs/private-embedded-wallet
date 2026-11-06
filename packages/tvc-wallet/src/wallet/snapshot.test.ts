@@ -13,8 +13,8 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { encodeLowerHex } from "../protocol/hex.js";
 import type { SealedSeed } from "../protocol/types.js";
 import type { ShieldedIdentity } from "./client.js";
-import { EnclaveKeys, type TvcEnclave, type TvcKeys } from "./keys.js";
-import { TvcProverPolicy } from "./prover-policy.js";
+import { EnclaveKeys, type SprEmbeddedWalletEnclave, type SprEmbeddedWalletKeys } from "./keys.js";
+import { SprEmbeddedWalletProverPolicy } from "./prover-policy.js";
 import { snapshotCipher } from "./snapshot.js";
 
 const sealedSeed: SealedSeed = { sealedSeed: "11".repeat(64) };
@@ -37,15 +37,15 @@ function enclave(secret: Uint8Array) {
       items.map(() => encodeLowerHex(secret)),
     ),
     prove: vi.fn(),
-  } satisfies TvcEnclave;
+  } satisfies SprEmbeddedWalletEnclave;
 }
 
-function keysFor(address: ShieldedAddress, enclave: TvcEnclave): TvcKeys {
+function keysFor(address: ShieldedAddress, enclave: SprEmbeddedWalletEnclave): SprEmbeddedWalletKeys {
   return new EnclaveKeys({
     enclave,
     sealedSeed,
     identity: identityOf(address),
-    prover: { url: "http://prover.invalid", policy: new TvcProverPolicy("http://prover.invalid/policy") },
+    prover: { url: "http://prover.invalid", policy: new SprEmbeddedWalletProverPolicy("http://prover.invalid/policy") },
   });
 }
 

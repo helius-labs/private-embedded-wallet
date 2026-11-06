@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { ed25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/p256";
 import { getAddressDecoder } from "@solana/kit";
-import type { TvcKeys, TvcTransport, TvcTurnkey } from "@heliuslabs/spr-embedded-wallet";
+import type { SprEmbeddedWalletKeys, SprEmbeddedWalletTransport, SprEmbeddedWalletTurnkey } from "@heliuslabs/spr-embedded-wallet";
 import {
   ENROLLMENT_DOMAINS,
   decodeLowerHex,
@@ -15,8 +15,8 @@ import {
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import {
-  createLocalTvcClient,
-  createTestTvcClient,
+  createLocalSprEmbeddedWallet,
+  createTestSprEmbeddedWallet,
   type ReleaseTrust,
 } from "@heliuslabs/spr-embedded-wallet/testing";
 import { beforeAll, describe, expect, inject, it, vi } from "vitest";
@@ -147,14 +147,14 @@ describe("enrollment", () => {
 
 describe("a wallet enrolled through the gateway", () => {
   const sent: { path: string; body: string; answer: string }[] = [];
-  const transport: TvcTransport = {
+  const transport: SprEmbeddedWalletTransport = {
     async fetch(url, init) {
       const response = await fetch(url, { ...init, headers: gatekeeperHeaders() });
       sent.push({ path: url.pathname, body: String(init?.body ?? ""), answer: await response.clone().text() });
       return response;
     },
   };
-  let keys: TvcKeys;
+  let keys: SprEmbeddedWalletKeys;
   const firstSent = () => {
     const operation = sent.find(({ path }) => path.endsWith("/operations"));
     if (!operation) throw new Error("no operation was sent");
@@ -164,7 +164,7 @@ describe("a wallet enrolled through the gateway", () => {
     JSON.parse(firstSent().body) as { descriptor: WalletDescriptor; request: { ciphertext: string } };
 
   beforeAll(async () => {
-    const tvc = createLocalTvcClient({
+    const tvc = createLocalSprEmbeddedWallet({
       network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(privateWallet) },
       solanaAddress: ownerAddress,
@@ -186,7 +186,7 @@ describe("a wallet enrolled through the gateway", () => {
   });
 
   it("answers TransactionKeys for the bootstrapped wallet over the same session", async () => {
-    type Request = Parameters<TvcKeys["transactionKeys"]>[0][number];
+    type Request = Parameters<SprEmbeddedWalletKeys["transactionKeys"]>[0][number];
     const firstNullifier = new Uint8Array(32);
     firstNullifier[31] = 1;
     const [viewingPublicKey] = keys.viewingPublicKeys();
@@ -253,7 +253,7 @@ describe("a descriptor that expired", () => {
   });
 
   it("is refused by the enclave, which says so to the client", async () => {
-    const tvc = createLocalTvcClient({
+    const tvc = createLocalSprEmbeddedWallet({
       network: "devnet",
       backend: { kind: "enclave", endpoint: new URL(enclaveUrl) },
       solanaAddress: ownerAddress,
@@ -275,7 +275,7 @@ function turnkeySession() {
     return publicKey;
   };
   login();
-  const turnkey: TvcTurnkey = {
+  const turnkey: SprEmbeddedWalletTurnkey = {
     getSession: async () => ({ publicKey, organizationId: ORGANIZATION_ID }),
     async signWithApiKey({ message, publicKey: key }) {
       signed.push(message);
@@ -297,7 +297,7 @@ function turnkeySession() {
 
 describe("a Turnkey session key as the client key", () => {
   const sent: { path: string; body: string }[] = [];
-  const transport: TvcTransport = {
+  const transport: SprEmbeddedWalletTransport = {
     async fetch(url, init) {
       sent.push({ path: url.pathname, body: String(init?.body ?? "") });
       return fetch(url, { ...init, headers: gatekeeperHeaders() });
@@ -305,13 +305,13 @@ describe("a Turnkey session key as the client key", () => {
   };
   const paths = () => sent.map(({ path }) => path.replace("/v1/private-wallet", ""));
   const { turnkey, login, signed } = turnkeySession();
-  const tvc = createLocalTvcClient({
+  const tvc = createLocalSprEmbeddedWallet({
     network: "devnet",
     backend: { kind: "gateway", endpoint: new URL(privateWallet) },
     turnkey,
     transport,
   });
-  let keys: TvcKeys;
+  let keys: SprEmbeddedWalletKeys;
 
   it("is enrolled through the gateway on first use and signs the bootstrap", async () => {
     keys = await tvc.open();
@@ -330,7 +330,7 @@ describe("a Turnkey session key as the client key", () => {
     expect(sent).toEqual([]);
     const firstNullifier = new Uint8Array(32);
     firstNullifier[31] = 2;
-    type Request = Parameters<TvcKeys["transactionKeys"]>[0][number];
+    type Request = Parameters<SprEmbeddedWalletKeys["transactionKeys"]>[0][number];
     const [viewingPublicKey] = reopened.viewingPublicKeys();
     const request = [{ viewingPublicKey: viewingPublicKey!, firstNullifier: firstNullifier as Request["firstNullifier"] }];
     // The enclave opens the seed sealed at the first key's bootstrap under
@@ -369,7 +369,7 @@ describe("a direct caller with a Helius API key", () => {
 
   it("connects and bootstraps with the key in the endpoint's query", async () => {
     const { descriptor } = (await postDirect("/enroll", enrollment(), { "x-api-key": apiKey })).body;
-    const tvc = createLocalTvcClient({
+    const tvc = createLocalSprEmbeddedWallet({
       network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(`${privateWallet}?api-key=${apiKey}`) },
       solanaAddress: ownerAddress,
@@ -424,7 +424,7 @@ describe("a release the release script signs for the testkit", () => {
     const { turnkey, signed } = turnkeySession();
     const signMessage = vi.spyOn(turnkey, "signMessage");
     const client = (network: Network) =>
-      createTestTvcClient({
+      createTestSprEmbeddedWallet({
         network,
         backend: { kind: "gateway", endpoint: new URL(privateWallet) },
         release,

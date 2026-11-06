@@ -9,20 +9,20 @@ import {
 } from "../client/http.js";
 import type { OperationsConfig } from "../client/operation-executor.js";
 import { awaitWithSignal } from "../client/request.js";
-import type { TvcTransport } from "../client/transport.js";
-import { createTvcRequestSigner } from "../platform/signer.js";
+import type { SprEmbeddedWalletTransport } from "../client/transport.js";
+import { createSprRequestSigner } from "../platform/signer.js";
 import { API_VERSION } from "../protocol/constants.js";
 import { decodeDecimalU64 } from "../protocol/decimal.js";
 import { clientKeyIdFor } from "../protocol/digest.js";
 import { ENROLLMENT_DOMAINS, walletEnrollmentMessage } from "../protocol/enrollment.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import { parseStrictJson } from "../protocol/json.js";
 import type { Network, WalletDescriptor } from "../protocol/types.js";
-import type { TvcClientKey, TvcClientKeys } from "./client-keys.js";
+import type { SprEmbeddedWalletClientKey, SprEmbeddedWalletClientKeys } from "./client-keys.js";
 
 /** The active Turnkey session, as `getSession` answers it. */
-export type TvcTurnkeySession = {
+export type SprEmbeddedWalletTurnkeySession = {
   /**
    * The session's P-256 public key, compressed SEC1 hex. It is the client key:
    * it signs every request, and the client enrolls it with the gateway.
@@ -33,7 +33,7 @@ export type TvcTurnkeySession = {
 };
 
 /** A wallet account, as `fetchWallets` lists it. */
-export type TvcTurnkeyWalletAccount = {
+export type SprEmbeddedWalletTurnkeyWalletAccount = {
   readonly address: string;
   readonly addressFormat: string;
   /** `connected` for an external wallet, such as a browser extension, which cannot be enrolled. */
@@ -41,7 +41,7 @@ export type TvcTurnkeyWalletAccount = {
 };
 
 /** A wallet and its accounts, as `fetchWallets` lists it. */
-export type TvcTurnkeyWallet<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = {
+export type SprEmbeddedWalletTurnkeyWallet<Account extends SprEmbeddedWalletTurnkeyWalletAccount = SprEmbeddedWalletTurnkeyWalletAccount> = {
   readonly walletId: string;
   readonly accounts: readonly Account[];
 };
@@ -53,16 +53,16 @@ export type TvcTurnkeyWallet<Account extends TvcTurnkeyWalletAccount = TvcTurnke
  * over an API key: the session key is the API key, `signWithApiKey` signs with
  * its private half, and `signMessage` is `signRawPayload`.
  */
-export type TvcTurnkey<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalletAccount> = {
+export type SprEmbeddedWalletTurnkey<Account extends SprEmbeddedWalletTurnkeyWalletAccount = SprEmbeddedWalletTurnkeyWalletAccount> = {
   /** The active session, or `undefined` when nobody is logged in. */
-  getSession(): Promise<TvcTurnkeySession | undefined>;
+  getSession(): Promise<SprEmbeddedWalletTurnkeySession | undefined>;
   /**
    * ECDSA P-256 over SHA-256 of `message`'s UTF-8 bytes, with the session key
    * `publicKey` names, as compact `r || s` hex.
    */
   signWithApiKey(params: { message: string; publicKey: string }): Promise<string>;
   /** The session organization's wallets and their accounts. */
-  fetchWallets(): Promise<readonly TvcTurnkeyWallet<Account>[]>;
+  fetchWallets(): Promise<readonly SprEmbeddedWalletTurnkeyWallet<Account>[]>;
   /**
    * The wallet account's Ed25519 signature over `message`'s UTF-8 bytes,
    * unhashed. `walletAccount` is one `fetchWallets` listed.
@@ -75,14 +75,14 @@ export type TvcTurnkey<Account extends TvcTurnkeyWalletAccount = TvcTurnkeyWalle
   }): Promise<{ readonly r: string; readonly s: string }>;
 };
 
-export type TurnkeyClientKeysConfig<Account extends TvcTurnkeyWalletAccount> = {
-  readonly turnkey: TvcTurnkey<Account>;
+export type TurnkeyClientKeysConfig<Account extends SprEmbeddedWalletTurnkeyWalletAccount> = {
+  readonly turnkey: SprEmbeddedWalletTurnkey<Account>;
   readonly network: Network;
   /** The tvc-gateway; the owner signs the enrollment for its host. */
   readonly endpoint: URL;
   /** Names the wallet account when the organization holds more than one Solana account. */
   readonly solanaAddress?: string;
-  readonly transport: TvcTransport;
+  readonly transport: SprEmbeddedWalletTransport;
   readonly nowMs: () => bigint;
 };
 
@@ -134,7 +134,7 @@ function uncompressedSessionKey(publicKey: string): Uint8Array {
   try {
     return p256.ProjectivePoint.fromHex(publicKey).toRawBytes(false);
   } catch {
-    throw new TvcError("InvalidPublicKey", "the Turnkey session key is not a P-256 public key");
+    throw new SprEmbeddedWalletError("InvalidPublicKey", "the Turnkey session key is not a P-256 public key");
   }
 }
 
@@ -142,13 +142,13 @@ function hexSignature(value: string): Uint8Array {
   try {
     return decodeLowerHex(value.replace(/^0x/u, "").toLowerCase());
   } catch {
-    throw new TvcError("InvalidSignatureEncoding");
+    throw new SprEmbeddedWalletError("InvalidSignatureEncoding");
   }
 }
 
 /** The wallet account to enroll: the one named, or the organization's only embedded Solana account. */
-async function walletAccount<Account extends TvcTurnkeyWalletAccount>(
-  turnkey: TvcTurnkey<Account>,
+async function walletAccount<Account extends SprEmbeddedWalletTurnkeyWalletAccount>(
+  turnkey: SprEmbeddedWalletTurnkey<Account>,
   solanaAddress: string | undefined,
   signal?: AbortSignal,
 ): Promise<{ readonly walletId: string; readonly account: Account }> {
@@ -161,7 +161,7 @@ async function walletAccount<Account extends TvcTurnkeyWalletAccount>(
   );
   const [only, ...others] = candidates;
   if (only === undefined) {
-    throw new TvcError(
+    throw new SprEmbeddedWalletError(
       "WalletAccountNotFound",
       solanaAddress === undefined
         ? "the Turnkey organization holds no Solana wallet account"
@@ -169,7 +169,7 @@ async function walletAccount<Account extends TvcTurnkeyWalletAccount>(
     );
   }
   if (others.length > 0) {
-    throw new TvcError("WalletAccountAmbiguous", "name the wallet's Solana address with solanaAddress");
+    throw new SprEmbeddedWalletError("WalletAccountAmbiguous", "name the wallet's Solana address with solanaAddress");
   }
   return only;
 }
@@ -190,7 +190,7 @@ function enrolledDescriptor(
   const [grant, ...others] = Array.isArray(descriptor.allowed_clients) ? descriptor.allowed_clients : [];
   assertExactObjectKeys(grant, CLIENT_GRANT_KEYS, "InvalidDescriptor");
   if (typeof descriptor.expires_at_ms !== "string") {
-    throw new TvcError("InvalidDescriptor", "the descriptor names no expiry");
+    throw new SprEmbeddedWalletError("InvalidDescriptor", "the descriptor names no expiry");
   }
   decodeDecimalU64(descriptor.expires_at_ms);
   if (
@@ -202,7 +202,7 @@ function enrolledDescriptor(
     descriptor.address !== expected.address ||
     grant?.client_public_key !== expected.clientPublicKey
   ) {
-    throw new TvcError("InvalidDescriptor", "the gateway answered a descriptor for another wallet or key");
+    throw new SprEmbeddedWalletError("InvalidDescriptor", "the gateway answered a descriptor for another wallet or key");
   }
   return Object.freeze(descriptor);
 }
@@ -213,11 +213,11 @@ function enrolledDescriptor(
  * gateway answers its descriptor, which the client keeps in memory for that
  * key. A new login brings a new session key, which is enrolled in turn.
  */
-export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
+export function turnkeyClientKeys<Account extends SprEmbeddedWalletTurnkeyWalletAccount>(
   config: TurnkeyClientKeysConfig<Account>,
-): TvcClientKeys {
+): SprEmbeddedWalletClientKeys {
   const { turnkey, network, endpoint, solanaAddress, transport, nowMs } = config;
-  const keys = new Map<string, TvcClientKey>();
+  const keys = new Map<string, SprEmbeddedWalletClientKey>();
 
   /**
    * Enrolls `clientPublicKey`. `signal` stops it until the owner has signed;
@@ -249,7 +249,7 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
     const signed = await awaitWithSignal(signing, signal);
     const posting = AbortSignal.timeout(SIGNED_ENROLLMENT_TIMEOUT_MS);
     const ownerSignature = `${signed.r.padStart(64, "0")}${signed.s.padStart(64, "0")}`.toLowerCase();
-    if (!/^[0-9a-f]{128}$/u.test(ownerSignature)) throw new TvcError("InvalidSignatureEncoding");
+    if (!/^[0-9a-f]{128}$/u.test(ownerSignature)) throw new SprEmbeddedWalletError("InvalidSignatureEncoding");
     const response = await fetchWithSignal(transport, gatewayUrl(endpoint, "enroll"), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -265,10 +265,10 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
     });
   }
 
-  function sessionKey(session: { readonly publicKey: string; readonly organizationId: string }): TvcClientKey {
+  function sessionKey(session: { readonly publicKey: string; readonly organizationId: string }): SprEmbeddedWalletClientKey {
     const clientPublicKey = encodeLowerHex(uncompressedSessionKey(session.publicKey));
     const clientKeyId = clientKeyIdFor(decodeLowerHex(clientPublicKey));
-    const signer = createTvcRequestSigner({
+    const signer = createSprRequestSigner({
       clientKeyId,
       sign: async (message) =>
         hexSignature(
@@ -335,7 +335,7 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
       const session = await awaitWithSignal(turnkey.getSession(), signal);
       const publicKey = session?.publicKey;
       if (!session || !publicKey) {
-        throw new TvcError("TurnkeySessionRequired", "no active Turnkey session: log in first");
+        throw new SprEmbeddedWalletError("TurnkeySessionRequired", "no active Turnkey session: log in first");
       }
       let key = keys.get(publicKey);
       if (!key) {

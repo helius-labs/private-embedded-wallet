@@ -2,21 +2,21 @@ import {
   API_VERSION,
   TVC_APP_PROOF_TYPE,
 } from "../protocol/constants.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import type { Network, OperationKind } from "../protocol/types.js";
-import { fetchSession, type TvcBackend } from "./backend.js";
+import { fetchSession, type SprEmbeddedWalletBackend } from "./backend.js";
 import {
   parseServiceInfo,
   qosPingChallenge,
   verifyQosPingAnswer,
   type ConnectedTvcRuntime,
 } from "./connection.js";
-import { createDefaultTransport, type TvcTransport } from "./transport.js";
+import { createDefaultTransport, type SprEmbeddedWalletTransport } from "./transport.js";
 
 export type LocalUnattestedConnectionConfig = {
   /** The network the testkit was built for. */
   readonly network: Network;
-  readonly backend: TvcBackend;
+  readonly backend: SprEmbeddedWalletBackend;
   readonly expectedReleaseId: string;
   readonly expectedSecurityDomainId: string;
   readonly expectedManifestDigest: string;
@@ -26,7 +26,7 @@ export type LocalUnattestedConnectionConfig = {
   readonly expectedEphemeralPublicKey: string;
   readonly expectedOperations: readonly OperationKind[];
   readonly nowMs?: () => bigint;
-  readonly transport?: TvcTransport;
+  readonly transport?: SprEmbeddedWalletTransport;
 };
 
 /** Internal connection path reachable only from the package's testkit entry. */
@@ -39,7 +39,7 @@ export async function connectLocalUnattestedTvc(
     endpoint.protocol !== "http:" ||
     !["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname)
   ) {
-    throw new TvcError("DiscoveryUntrusted", "local testkit must use a loopback HTTP endpoint");
+    throw new SprEmbeddedWalletError("DiscoveryUntrusted", "local testkit must use a loopback HTTP endpoint");
   }
   const transport = config.transport ?? createDefaultTransport();
   const challenge = qosPingChallenge(config.expectedQuorumPublicKey);
@@ -62,12 +62,12 @@ export async function connectLocalUnattestedTvc(
       (operation, index) => info.supported_operations[index] !== operation,
     )
   ) {
-    throw new TvcError("DiscoveryUntrusted", "local testkit identity does not match");
+    throw new SprEmbeddedWalletError("DiscoveryUntrusted", "local testkit identity does not match");
   }
 
   const appProof = verifyQosPingAnswer(session.pingText, challenge);
   if (appProof.publicKey !== config.expectedEphemeralPublicKey) {
-    throw new TvcError("DiscoveryUntrusted", "local ping used another key");
+    throw new SprEmbeddedWalletError("DiscoveryUntrusted", "local ping used another key");
   }
   const nowMs = config.nowMs ?? (() => BigInt(Date.now()));
   return {
@@ -80,7 +80,7 @@ export async function connectLocalUnattestedTvc(
     trustVerifier: Object.freeze({
       async verifyOperationAppProof(proof) {
         if (proof.publicKey !== config.expectedEphemeralPublicKey) {
-          throw new TvcError("TurnkeyEvidenceInvalid");
+          throw new SprEmbeddedWalletError("TurnkeyEvidenceInvalid");
         }
       },
     }),

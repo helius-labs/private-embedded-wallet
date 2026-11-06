@@ -2,7 +2,7 @@ import { signP256Prehash } from "../crypto/p256.js";
 import { encodeDecimalU64 } from "./decimal.js";
 import { API_VERSION } from "./constants.js";
 import { descriptorDigest, walletGrantDigest } from "./digest.js";
-import { TvcError } from "./error.js";
+import { SprEmbeddedWalletError } from "./error.js";
 import { encodeLowerHex } from "./hex.js";
 import type { WalletDescriptor, WalletGrant } from "./types.js";
 
@@ -24,7 +24,7 @@ export type WalletGrantInput = {
  */
 export function signWalletGrant(input: WalletGrantInput, secret: Uint8Array): WalletGrant {
   if (input.lifetimeMs <= 0n || input.lifetimeMs > MAX_WALLET_GRANT_LIFETIME_MS) {
-    throw new TvcError("InvalidDescriptor", "grant lifetime must be positive and at most one hour");
+    throw new SprEmbeddedWalletError("InvalidDescriptor", "grant lifetime must be positive and at most one hour");
   }
   const unsigned: WalletGrant = {
     version: API_VERSION,

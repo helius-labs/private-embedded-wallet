@@ -77,10 +77,10 @@ run twice. Next.js serves this route next to wallet-kit's
 
 ```ts
 import { useTurnkey } from "@turnkey/react-wallet-kit";
-import { createTvcClient } from "@heliuslabs/spr-embedded-wallet";
+import { createSprEmbeddedWallet } from "@heliuslabs/spr-embedded-wallet";
 
 const turnkey = useTurnkey(); // inside HeliusWalletProvider
-const tvc = createTvcClient({
+const tvc = createSprEmbeddedWallet({
   network: "devnet",
   endpoint: new URL("/api/helius/v1/private-wallet", location.origin),
   prover: new URL("/api/helius/v1/spr", location.origin),
@@ -162,22 +162,22 @@ user, and out of logs, analytics, crash reports and shared backups.
 
 ### Errors
 
-The client's errors are `TvcError`s, exported from
+The client's errors are `SprEmbeddedWalletError`s, exported from
 `@heliuslabs/spr-embedded-wallet/protocol`, with a stable `code`. Compare
 `code`, not the message.
 
-- `TvcOperationError`: an operation ran and failed. `operation` names it and
+- `SprEmbeddedWalletOperationError`: an operation ran and failed. `operation` names it and
   `stage` says where: `Prover` when the enclave refused the prover's policy
   or attestation, after one fresh attempt; `TurnkeySigning` when Turnkey
   declined to sign the bootstrap message.
-- `TvcHttpError`: an HTTP failure, with `status` and the raw `retryAfter`
+- `SprEmbeddedWalletHttpError`: an HTTP failure, with `status` and the raw `retryAfter`
   header. On `429`, retry after `retryAfter`. The client does not repeat an
   operation, and a `5xx` does not prove that the operation did not run.
   `EnrollmentRejected` is the gateway refusing to enroll the session key,
   for example when the wallet's sub-organization is not named after the
   project.
 - `TurnkeySessionRequired`: nobody is logged in to Turnkey.
-- `ReleaseNotPinned`: `createTvcClient` was given a network this version
+- `ReleaseNotPinned`: `createSprEmbeddedWallet` was given a network this version
   pins no release for. This version pins devnet only.
 
 ### Limits
@@ -193,7 +193,7 @@ The client's errors are `TvcError`s, exported from
 
 ## Reference
 
-`createTvcClient({ network, endpoint, turnkey, solanaAddress?, prover?, nowMs?, transport?, requestTimeoutMs? })`:
+`createSprEmbeddedWallet({ network, endpoint, turnkey, solanaAddress?, prover?, nowMs?, transport?, requestTimeoutMs? })`:
 
 - `endpoint` is the network's tvc-gateway: a route on the application's own
   origin that forwards to `https://<network>.helius-rpc.com/v1/private-wallet`
@@ -202,7 +202,7 @@ The client's errors are `TvcError`s, exported from
 - `turnkey` is the application's Turnkey client with a logged-in session:
   `@turnkey/core`'s `TurnkeyClient`, or what `useTurnkey()` returns in
   `@turnkey/react-wallet-kit`, as it is. The client uses four of its methods,
-  typed as `TvcTurnkey`: `getSession`, `signWithApiKey`, `fetchWallets` and
+  typed as `SprEmbeddedWalletTurnkey`: `getSession`, `signWithApiKey`, `fetchWallets` and
   `signMessage`. A server implements them over a Turnkey API key; see
   [the example](../../examples/typescript-client/src/lib.ts).
 - `solanaAddress` names the wallet when the session's organization holds more
@@ -213,7 +213,7 @@ The client's errors are `TvcError`s, exported from
 - `transport` carries every HTTP request the client makes: the gateway, the
   prover and the prover's policy file.
 
-`tvc.open(stored?, { approve?, signal?, timeoutMs? })` returns `TvcKeys`, the
+`tvc.open(stored?, { approve?, signal?, timeoutMs? })` returns `SprEmbeddedWalletKeys`, the
 SDK's `WalletKeys`, with `keys.stored` to persist.
 
 `keys.stored` is sensitive. Its sealed seed opens the wallet's privacy keys
@@ -258,7 +258,7 @@ discovery. It does not repeat the failed operation. It also verifies again
 when the Turnkey session key changes.
 
 The enclave's five operations, specified in
-[`crates/protocol`](../../crates/protocol/README.md), stay behind `TvcKeys`
+[`crates/protocol`](../../crates/protocol/README.md), stay behind `SprEmbeddedWalletKeys`
 and `open`. No operation returns a long-lived secret, none signs a Solana
 transaction, and none takes a caller-selected network origin.
 
@@ -270,8 +270,8 @@ client is for that network only:
 - The release it verifies the enclave against is this package's
   `src/releases/<network>.json`, which `scripts/release.mjs` writes and
   tvc-gateway reads. A file that is `null` pins no release, and
-  `createTvcClient` throws `ReleaseNotPinned` for its network.
-  `createTestTvcClient` in `./testing` takes another release for a test
+  `createSprEmbeddedWallet` throws `ReleaseNotPinned` for its network.
+  `createTestSprEmbeddedWallet` in `./testing` takes another release for a test
   deployment.
 - The signed policy names its network, and verification refuses a policy, or
   a `/v1/info`, for another (`NetworkMismatch`). Operations refuse a wallet
@@ -279,7 +279,7 @@ client is for that network only:
 - Proofs go under the network's signed prover policy file.
 - `walletEnrollmentMessage` signs for the gateway's network as its chain.
 
-`TvcKeys` is the same surface as the SDK's `WalletKeys`. It splits the items
+`SprEmbeddedWalletKeys` is the same surface as the SDK's `WalletKeys`. It splits the items
 of one SDK call into batches of at most 256, splits further when the full
 serialized HTTP envelope exceeds the advertised request byte limit, and forwards the SDK's
 `RequestContext` (abort signal and timeout) to every batch, so a cancelled
@@ -291,14 +291,14 @@ A proof is at most three calls after the policy file. The client downloads
 the network's signed policy file and holds it for its `max_age_secs`, for
 every wallet it opens; the enclave, not the client, checks its signatures and
 versions. Concurrent callers share one download, and each can abandon its own
-wait. `TvcKeys`
+wait. `SprEmbeddedWalletKeys`
 fetches the prover's attestation for a fresh nonce (`GET <url>/attestation`)
 and reuses it for the same `max_age_secs`, asks the enclave to complete the
 request and seal it to the attested key under that file, and posts the sealed
 request to `<url path>/prove/<key>` with the URL's query, such as its API key.
 It opens the answer with the response key the enclave returned, which opens
 nothing else. When the enclave refuses the policy or attestation (a
-`TvcOperationError` with `stage: "Prover"`), or the prover answers
+`SprEmbeddedWalletOperationError` with `stage: "Prover"`), or the prover answers
 `tee_decryption_failed`, the client downloads the policy again, attests again
 and seals once more. Neither the client nor any proxy in front of
 the prover holds the witness in plaintext.
@@ -308,7 +308,7 @@ The enclave binds a sealed request to its route below the prover's URL,
 forward the request with its `Spr-Tee` headers and body unchanged.
 
 Prover failures, including encrypted failures, retain their status and
-`Retry-After` as `TvcHttpError`. They are returned without automatically
+`Retry-After` as `SprEmbeddedWalletHttpError`. They are returned without automatically
 repeating the proof; only the explicit key-loss response triggers the bounded
 reattestation flow. Configure the proxy to disable unsafe-method retries
 (`disableUnsafeRetries: true` in Gatekeeper). A 5xx can follow execution and
@@ -320,7 +320,7 @@ key the enclave mints under a context no transaction can have, so a sealed
 wallet snapshot persists at rest and reopens on any device that can drive this
 wallet's enclave operations.
 
-`open` takes `{ signal, timeoutMs }`, and `TvcKeys` forwards the SDK's
+`open` takes `{ signal, timeoutMs }`, and `SprEmbeddedWalletKeys` forwards the SDK's
 `RequestContext`. Each bounds the verification and the operation, each
 defaulting to two minutes, including request signing, reading the response,
 and Boot Proof lookup. Set `requestTimeoutMs` in the client configuration to
@@ -329,9 +329,9 @@ does not cancel another. When all callers leave, the verification stops and a
 late response cannot replace a newer one.
 
 Snapshot loading accepts the SDK's `RequestContext` and destroys temporary key
-material on success, failure, or cancellation. HTTP failures are `TvcHttpError`
+material on success, failure, or cancellation. HTTP failures are `SprEmbeddedWalletHttpError`
 instances with `status` and the raw `retryAfter` header. An operation that ran and
-failed at a named stage is a `TvcOperationError` with its `operation` and `stage`
+failed at a named stage is a `SprEmbeddedWalletOperationError` with its `operation` and `stage`
 (`Prover`, or `TurnkeySigning` when Turnkey declined the bootstrap signature).
 The client does not retry a failed operation automatically.
 
@@ -363,7 +363,7 @@ so the owner never signs twice for one key. A descriptor lives a day (the
 gateway's `descriptor_ttl_secs`) from the enrollment: the client enrolls the
 key again before a request once its descriptor expires within five minutes,
 and once more, repeating the request, when the gateway or the enclave refuses
-it as expired (`DescriptorExpired`, a `TvcHttpError` with status 403 if it
+it as expired (`DescriptorExpired`, a `SprEmbeddedWalletHttpError` with status 403 if it
 persists). A new login, or
 `refreshSession` without the current public key, brings a new session key:
 the client enrolls it before the next request and verifies the enclave again.
@@ -379,17 +379,17 @@ sub-organization must be named after the API key's Helius project. See
 
 ## Entry points
 
-- `@heliuslabs/spr-embedded-wallet`: `createTvcClient`, `TvcTurnkey`,
-  `TvcKeys`, `parseStoredWallet` and `snapshotCipher`.
-- `@heliuslabs/spr-embedded-wallet/protocol`: wire types, `TvcError`, hex codecs,
+- `@heliuslabs/spr-embedded-wallet`: `createSprEmbeddedWallet`, `SprEmbeddedWalletTurnkey`,
+  `SprEmbeddedWalletKeys`, `parseStoredWallet` and `snapshotCipher`.
+- `@heliuslabs/spr-embedded-wallet/protocol`: wire types, `SprEmbeddedWalletError`, hex codecs,
   `clientKeyIdFor`, and `walletEnrollmentMessage`, the Sign-In With Solana
   message the wallet signs to enroll a key with tvc-gateway.
-- `@heliuslabs/spr-embedded-wallet/testing`: `createTestTvcClient`, which
-  verifies an enclave as `createTvcClient` does against a release and backend
+- `@heliuslabs/spr-embedded-wallet/testing`: `createTestSprEmbeddedWallet`, which
+  verifies an enclave as `createSprEmbeddedWallet` does against a release and backend
   the caller names (a gateway, or the enclave itself with
   `{ kind: "enclave", endpoint, resolveBootProof, walletGrant }`), with the
   Turnkey session or a descriptor and the signer of its key
-  (`createTvcRequestSigner`), `createLocalTvcClient`, the loopback-only
+  (`createSprRequestSigner`), `createLocalSprEmbeddedWallet`, the loopback-only
   unattested testkit client for the network the testkit was built for, and
   `verifyLiveReplica`, which `scripts/release.mjs` runs on a live replica
   before it signs that replica's release policy. The build fails if testkit

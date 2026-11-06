@@ -231,7 +231,7 @@ it("retains HTTP 429 and Retry-After without retrying or reading the rejected bo
   const cancel = vi.fn();
   fetch.mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status: 429, headers: { "retry-after": "3" } }));
   await expect(executeOperation(context, { type: "Decrypt", items: [item] })).rejects.toMatchObject({
-    name: "TvcHttpError", code: "OperationRejected", status: 429, retryAfter: "3",
+    name: "SprEmbeddedWalletHttpError", code: "OperationRejected", status: 429, retryAfter: "3",
   });
   expect(fetch).toHaveBeenCalledOnce();
   expect(cancel).toHaveBeenCalledOnce();

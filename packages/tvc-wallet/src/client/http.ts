@@ -1,6 +1,6 @@
 import { awaitWithSignal } from "./request.js";
-import type { TvcTransport } from "./transport.js";
-import { TvcError, TvcHttpError } from "../protocol/error.js";
+import type { SprEmbeddedWalletTransport } from "./transport.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletHttpError } from "../protocol/error.js";
 
 const td = new TextDecoder("utf-8", { fatal: true });
 
@@ -27,7 +27,7 @@ export async function readBoundedText(response: Response, maxBytes: bigint, sign
   try {
     return td.decode(body);
   } catch {
-    throw new TvcError("InvalidCanonicalJson");
+    throw new SprEmbeddedWalletError("InvalidCanonicalJson");
   }
 }
 
@@ -39,12 +39,12 @@ export async function readBoundedBytes(
 ): Promise<Uint8Array> {
   signal?.throwIfAborted();
   if (maxBytes <= 0n || maxBytes > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new TvcError("ResponseTooLarge");
+    throw new SprEmbeddedWalletError("ResponseTooLarge");
   }
   const limit = Number(maxBytes);
   if (!response.body) {
     const body = new Uint8Array(await awaitWithSignal(response.arrayBuffer(), signal));
-    if (body.length > limit) throw new TvcError("ResponseTooLarge");
+    if (body.length > limit) throw new SprEmbeddedWalletError("ResponseTooLarge");
     return body;
   }
   const reader = response.body.getReader();
@@ -55,7 +55,7 @@ export async function readBoundedBytes(
       const { done, value } = await awaitWithSignal(reader.read(), signal);
       if (done) break;
       total += value.length;
-      if (total > limit) throw new TvcError("ResponseTooLarge");
+      if (total > limit) throw new SprEmbeddedWalletError("ResponseTooLarge");
       chunks.push(value);
     }
   } finally {
@@ -82,20 +82,20 @@ export function assertExactObjectKeys(
   invalidObjectCode: string,
 ): void {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TvcError(invalidObjectCode);
+    throw new SprEmbeddedWalletError(invalidObjectCode);
   }
   const keys = Object.keys(value);
   for (const key of keys) {
-    if (!expected.includes(key)) throw new TvcError("UnknownJsonField");
+    if (!expected.includes(key)) throw new SprEmbeddedWalletError("UnknownJsonField");
   }
   // serde surfaces a missing required field as a plain deserialization
   // failure, which the Rust protocol maps to InvalidCanonicalJson.
-  if (keys.length !== expected.length) throw new TvcError("InvalidCanonicalJson");
+  if (keys.length !== expected.length) throw new SprEmbeddedWalletError("InvalidCanonicalJson");
 }
 
 /** Cancel a late custom-transport response as well as native fetch. */
 export async function fetchWithSignal(
-  transport: TvcTransport, url: URL, init?: RequestInit, signal?: AbortSignal,
+  transport: SprEmbeddedWalletTransport, url: URL, init?: RequestInit, signal?: AbortSignal,
 ): Promise<Response> {
   signal?.throwIfAborted();
   const work = transport.fetch(url, { ...init, ...(signal ? { signal } : {}) });
@@ -106,7 +106,7 @@ export async function fetchWithSignal(
   }
 }
 
-export function httpError(response: Response, code: string): TvcHttpError {
+export function httpError(response: Response, code: string): SprEmbeddedWalletHttpError {
   void response.body?.cancel().catch(() => undefined);
-  return new TvcHttpError(code, response.status, response.headers.get("retry-after"));
+  return new SprEmbeddedWalletHttpError(code, response.status, response.headers.get("retry-after"));
 }

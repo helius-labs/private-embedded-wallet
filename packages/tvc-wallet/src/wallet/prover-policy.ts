@@ -1,7 +1,7 @@
 import { fetchWithSignal, httpError, readBoundedText } from "../client/http.js";
 import { awaitWithSignal } from "../client/request.js";
-import { createDefaultTransport, type TvcTransport } from "../client/transport.js";
-import { TvcError } from "../protocol/error.js";
+import { createDefaultTransport, type SprEmbeddedWalletTransport } from "../client/transport.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import { decodeLowerHex } from "../protocol/hex.js";
 import { requireNetwork } from "../protocol/network.js";
 import type { Network, SignedProverPolicyFile, SignedProverPolicyPart } from "../protocol/types.js";
@@ -48,20 +48,20 @@ type Download = {
  * the enclave refused it. A failed download keeps a file until either part
  * expires.
  */
-export class TvcProverPolicy {
+export class SprEmbeddedWalletProverPolicy {
   readonly #url: URL;
-  readonly #transport: TvcTransport | undefined;
+  readonly #transport: SprEmbeddedWalletTransport | undefined;
   #held: HeldProverPolicy | undefined;
   #download: Download | undefined;
 
-  constructor(url: string | URL, transport?: TvcTransport) {
+  constructor(url: string | URL, transport?: SprEmbeddedWalletTransport) {
     this.#url = new URL(url);
     this.#transport = transport;
   }
 
   /** The policy file `network` publishes. */
-  static forNetwork(network: Network, transport?: TvcTransport): TvcProverPolicy {
-    return new TvcProverPolicy(PROVER_POLICY_URLS[requireNetwork(network)], transport);
+  static forNetwork(network: Network, transport?: SprEmbeddedWalletTransport): SprEmbeddedWalletProverPolicy {
+    return new SprEmbeddedWalletProverPolicy(PROVER_POLICY_URLS[requireNetwork(network)], transport);
   }
 
   /**
@@ -125,8 +125,8 @@ export class TvcProverPolicy {
     try {
       return JSON.parse(await readBoundedText(response, MAX_POLICY_BYTES, signal));
     } catch (error) {
-      if (error instanceof TvcError && error.code === "ResponseTooLarge") throw error;
-      throw new TvcError("ProverPolicyInvalid");
+      if (error instanceof SprEmbeddedWalletError && error.code === "ResponseTooLarge") throw error;
+      throw new SprEmbeddedWalletError("ProverPolicyInvalid");
     }
   }
 }
@@ -147,7 +147,7 @@ function expired(held: HeldProverPolicy, nowMs: number): boolean {
 
 /** The file's shape and the payload fields the client schedules by. */
 function readPolicy(file: unknown): HeldProverPolicy {
-  const invalid = (): TvcError => new TvcError("ProverPolicyInvalid");
+  const invalid = (): SprEmbeddedWalletError => new SprEmbeddedWalletError("ProverPolicyInvalid");
   if (!isRecord(file)) throw invalid();
   const { release, freshness, ...rest } = file;
   if (Object.keys(rest).length > 0) throw invalid();
@@ -163,7 +163,7 @@ function readPolicy(file: unknown): HeldProverPolicy {
   }
   if (!isInteger(issuedAt) || (issuedAt as number) >= (freshUntil as number)) throw invalid();
   const expiresAt = Math.min(releaseExpiresAt as number, freshUntil as number);
-  if (Date.now() >= expiresAt * 1_000) throw new TvcError("ProverPolicyExpired");
+  if (Date.now() >= expiresAt * 1_000) throw new SprEmbeddedWalletError("ProverPolicyExpired");
   return {
     file: { release: releasePart, freshness: freshnessPart },
     version: version as number,
@@ -174,7 +174,7 @@ function readPolicy(file: unknown): HeldProverPolicy {
   };
 }
 
-function readPart(part: unknown, invalid: () => TvcError): SignedProverPolicyPart {
+function readPart(part: unknown, invalid: () => SprEmbeddedWalletError): SignedProverPolicyPart {
   if (!isRecord(part)) throw invalid();
   const { payload, signatures, ...rest } = part;
   if (Object.keys(rest).length > 0 || typeof payload !== "string" || !LOWER_HEX.test(payload)) throw invalid();
@@ -193,7 +193,7 @@ function readPart(part: unknown, invalid: () => TvcError): SignedProverPolicyPar
   return { payload, signatures: signatures as SignedProverPolicyPart["signatures"] };
 }
 
-function readPayload(payload: string, invalid: () => TvcError): Record<string, unknown> {
+function readPayload(payload: string, invalid: () => SprEmbeddedWalletError): Record<string, unknown> {
   let decoded: unknown;
   try {
     decoded = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(decodeLowerHex(payload)));

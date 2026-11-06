@@ -9,7 +9,7 @@ import {
   QOS_P256_PUBLIC_LEN,
   SEC1_UNCOMPRESSED_LEN,
 } from "../protocol/constants.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import { parseUncompressedSec1 } from "./p256.js";
 
 const te = new TextEncoder();
@@ -22,7 +22,7 @@ type QosP256Public = {
 
 export function parseQosP256Public(bytes: Uint8Array): QosP256Public {
   if (bytes.length !== QOS_P256_PUBLIC_LEN) {
-    throw new TvcError("InvalidPublicKey");
+    throw new SprEmbeddedWalletError("InvalidPublicKey");
   }
   const encryption = parseUncompressedSec1(
     bytes.slice(0, SEC1_UNCOMPRESSED_LEN)
@@ -81,7 +81,7 @@ function decodeU32Le(bytes: Uint8Array, offset: number): number {
   // length first -- so this guards the function's own contract against a future
   // caller or a weakened guard, and no test exercises it through the envelope.
   if (offset < 0 || bytes.length - offset < 4) {
-    throw new TvcError("InvalidEncryptedEnvelope");
+    throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
   }
   return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(
     0,
@@ -95,7 +95,7 @@ function encodeQosEnvelope(
   encryptedMessage: Uint8Array
 ): Uint8Array {
   if (nonce.length !== AES_GCM_NONCE_LEN || ephemeralPublic.length !== SEC1_UNCOMPRESSED_LEN) {
-    throw new TvcError("InvalidEncryptedEnvelope");
+    throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
   }
   const out = new Uint8Array(ENVELOPE_HEADER_LEN + encryptedMessage.length);
   out.set(nonce, 0);
@@ -110,15 +110,15 @@ function decodeQosEnvelope(bytes: Uint8Array): {
   ephemeralSenderPublic: Uint8Array;
   encryptedMessage: Uint8Array;
 } {
-  if (bytes.length < ENVELOPE_HEADER_LEN) throw new TvcError("InvalidEncryptedEnvelope");
+  if (bytes.length < ENVELOPE_HEADER_LEN) throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
   const nonce = bytes.slice(0, AES_GCM_NONCE_LEN);
   const ephemeralSenderPublic = bytes.slice(AES_GCM_NONCE_LEN, ENVELOPE_HEADER_LEN - 4);
   const messageLen = decodeU32Le(bytes, ENVELOPE_HEADER_LEN - 4);
   if (bytes.length !== ENVELOPE_HEADER_LEN + messageLen)
-    throw new TvcError("InvalidEncryptedEnvelope");
+    throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
   const encryptedMessage = bytes.slice(ENVELOPE_HEADER_LEN);
   if (encryptedMessage.length < AES_GCM_TAG_LEN) {
-    throw new TvcError("InvalidEncryptedEnvelope");
+    throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
   }
   return { nonce, ephemeralSenderPublic, encryptedMessage };
 }
@@ -130,7 +130,7 @@ export function qosEncryptWith(
   nonce: Uint8Array
 ): Uint8Array {
   if (nonce.length !== AES_GCM_NONCE_LEN) {
-    throw new TvcError("InvalidEncryptedEnvelope");
+    throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
   }
   const receiver = parseUncompressedSec1(receiverEncryptionSec1);
   const ephemeralPublic = p256.getPublicKey(ephemeralSecret, false);
@@ -169,6 +169,6 @@ export function qosDecrypt(
       envelope.encryptedMessage
     );
   } catch {
-    throw new TvcError("InvalidEncryptedEnvelope");
+    throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
   }
 }

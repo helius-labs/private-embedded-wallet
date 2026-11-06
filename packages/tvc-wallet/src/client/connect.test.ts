@@ -15,9 +15,9 @@ import type {
   SignedReleasePolicy,
 } from "../protocol/types.js";
 import { policySigningDigest } from "../verify/release-policy.js";
-import { verifyLiveReplica, type TvcConnectionConfig } from "./connection.js";
-import type { TvcRequestOptions } from "./request.js";
-import { createTvcSession } from "./session.js";
+import { verifyLiveReplica, type SprEmbeddedWalletConnectionConfig } from "./connection.js";
+import type { SprEmbeddedWalletRequestOptions } from "./request.js";
+import { createSprEmbeddedWalletSession } from "./session.js";
 
 const verifyBootProofMock = vi.hoisted(() => vi.fn());
 
@@ -27,8 +27,8 @@ vi.mock("../verify/index.js", async (importOriginal) => ({
 }));
 
 /** What the client verifies on first use: a fresh session's connection. */
-function verify(config: TvcConnectionConfig, options?: TvcRequestOptions) {
-  return createTvcSession(config).context(options);
+function verify(config: SprEmbeddedWalletConnectionConfig, options?: SprEmbeddedWalletRequestOptions) {
+  return createSprEmbeddedWalletSession(config).context(options);
 }
 
 function secret(label: string): Uint8Array {
@@ -213,7 +213,7 @@ describe("verification", () => {
       pingAnswer,
     } = connectFixture();
     const resolveBootProof = vi.fn().mockResolvedValue(bootProof);
-    const config: TvcConnectionConfig = {
+    const config: SprEmbeddedWalletConnectionConfig = {
       backend: {
         kind: "enclave",
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),

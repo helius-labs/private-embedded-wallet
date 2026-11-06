@@ -1,8 +1,8 @@
-import { awaitWithSignal, requestScope, type TvcRequestOptions } from "./request.js";
+import { awaitWithSignal, requestScope, type SprEmbeddedWalletRequestOptions } from "./request.js";
 import {
   connectAndVerifyTvc,
   type ConnectedTvcRuntime,
-  type TvcConnectionConfig,
+  type SprEmbeddedWalletConnectionConfig,
 } from "./connection.js";
 
 /**
@@ -10,9 +10,9 @@ import {
  * again once the release policy's validity window no longer holds, and after
  * `forget` or `reset`; nothing else replaces it.
  */
-export type TvcSession = {
+export type SprEmbeddedWalletSession = {
   /** The verified connection, verifying first when there is none or it no longer holds. */
-  context(options?: TvcRequestOptions): Promise<ConnectedTvcRuntime>;
+  context(options?: SprEmbeddedWalletRequestOptions): Promise<ConnectedTvcRuntime>;
   /** Drops `context` if it is still the current one, so the next call verifies again. */
   forget(context: ConnectedTvcRuntime): void;
   /** Drops the current connection and any verification in flight, so the next call verifies anew. */
@@ -28,7 +28,7 @@ function holds(context: ConnectedTvcRuntime): boolean {
 export function sessionFromConnector(
   connect: (signal: AbortSignal) => Promise<ConnectedTvcRuntime>,
   requestTimeoutMs?: number,
-): TvcSession {
+): SprEmbeddedWalletSession {
   let active: ConnectedTvcRuntime | null = null;
   type Flight = { controller: AbortController; promise: Promise<ConnectedTvcRuntime>; users: number };
   let pending: Flight | null = null;
@@ -78,7 +78,7 @@ export function sessionFromConnector(
   };
 }
 
-export function createTvcSession(config: TvcConnectionConfig): TvcSession {
+export function createSprEmbeddedWalletSession(config: SprEmbeddedWalletConnectionConfig): SprEmbeddedWalletSession {
   // Single-flighted: concurrent first calls share one verification.
   return sessionFromConnector((signal) => connectAndVerifyTvc(config, signal), config.requestTimeoutMs);
 }

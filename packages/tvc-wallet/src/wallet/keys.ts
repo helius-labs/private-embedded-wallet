@@ -19,7 +19,7 @@ import type { X25519PublicKey } from "@heliuslabs/spr/keypair";
 import type { TransactionKeyRequest } from "@heliuslabs/spr/transaction";
 
 import { encodeDecimalU64 } from "../protocol/decimal.js";
-import { TvcError, TvcOperationError } from "../protocol/error.js";
+import { SprEmbeddedWalletError, SprEmbeddedWalletOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type {
   SealedSeed,
@@ -39,7 +39,7 @@ import {
   sealingFor,
   submitSealed,
   type ProverAttestation,
-  type TvcProver,
+  type SprEmbeddedWalletProver,
 } from "./prover.js";
 import { attestationReuseMs, type HeldProverPolicy } from "./prover-policy.js";
 
@@ -48,7 +48,7 @@ import { attestationReuseMs, type HeldProverPolicy } from "./prover-policy.js";
  * the wire's terms. Each presents the sealed seed; the enclave cannot use it
  * for another wallet or past a Quorum key rotation.
  */
-export type TvcEnclave = {
+export type SprEmbeddedWalletEnclave = {
   /** Opens each ciphertext with the wallet's viewing key; one plaintext per item. */
   decrypt(
     sealedSeed: SealedSeed,
@@ -79,12 +79,12 @@ export type TvcEnclave = {
   ): Promise<SealedProverRequest>;
 };
 
-export type TvcKeysInput = {
-  readonly enclave: TvcEnclave;
+export type SprEmbeddedWalletKeysInput = {
+  readonly enclave: SprEmbeddedWalletEnclave;
   readonly sealedSeed: SealedSeed;
   readonly identity: ShieldedIdentity;
   /** The attested prover proofs are sealed to and posted at, under its policy. */
-  readonly prover: TvcProver;
+  readonly prover: SprEmbeddedWalletProver;
 };
 
 const LABELS: Record<DecryptRequest["label"], DecryptLabel> = {
@@ -114,21 +114,21 @@ function operationOptions(context: RequestContext | undefined): OperationOptions
  * client posts the sealed request and never sees the secret. Nothing here
  * signs; the application's Solana signer does.
  */
-export interface TvcKeys extends WalletKeys {
+export interface SprEmbeddedWalletKeys extends WalletKeys {
   /** What to persist and hand to `open` next time. */
   readonly stored: Required<StoredWallet>;
 }
 
-/** `TvcKeys` over a client's enclave operations and prover. */
-export class EnclaveKeys implements TvcKeys {
+/** `SprEmbeddedWalletKeys` over a client's enclave operations and prover. */
+export class EnclaveKeys implements SprEmbeddedWalletKeys {
   readonly stored: Required<StoredWallet>;
-  readonly #enclave: TvcEnclave;
+  readonly #enclave: SprEmbeddedWalletEnclave;
   readonly #sealedSeed: SealedSeed;
   readonly #address: ShieldedAddress;
-  readonly #prover: TvcProver;
+  readonly #prover: SprEmbeddedWalletProver;
   #attested: ProverAttestation | undefined;
 
-  constructor(input: TvcKeysInput) {
+  constructor(input: SprEmbeddedWalletKeysInput) {
     this.#enclave = input.enclave;
     this.#sealedSeed = input.sealedSeed;
     this.#address = shieldedAddressOf(input.identity);
@@ -270,7 +270,7 @@ export class EnclaveKeys implements TvcKeys {
       const answer = await submitSealed(this.#prover, sealed, options.signal);
       if (answer.kind === "proof") return answer.body;
       this.#forgetProver();
-      if (attempt > 0) throw new TvcError("ProverKeyLost");
+      if (attempt > 0) throw new SprEmbeddedWalletError("ProverKeyLost");
       fresh = true;
     }
   }
@@ -312,7 +312,7 @@ export class EnclaveKeys implements TvcKeys {
       } catch (error) {
         // RequestTooLarge is raised locally before signing or sending. A
         // single item that cannot fit must fail rather than retry forever.
-        if (!(error instanceof TvcError) || error.code !== "RequestTooLarge" || batch.length < 2) {
+        if (!(error instanceof SprEmbeddedWalletError) || error.code !== "RequestTooLarge" || batch.length < 2) {
           throw error;
         }
         const middle = Math.floor(batch.length / 2);
@@ -332,5 +332,5 @@ export class EnclaveKeys implements TvcKeys {
 
 /** The enclave refused the prover's policy or attestation. */
 function isProverStage(error: unknown): boolean {
-  return error instanceof TvcOperationError && error.stage === "Prover";
+  return error instanceof SprEmbeddedWalletOperationError && error.stage === "Prover";
 }

@@ -191,7 +191,7 @@ describe("result checks", () => {
   it("surfaces an enclave failure stage and refuses a result for another operation", async () => {
     answer({ type: "Failure", operation: "Prove", stage: "Prover" });
     await expect(executeOperation(context, prove, sealedSeed)).rejects.toMatchObject({
-      name: "TvcOperationError",
+      name: "SprEmbeddedWalletOperationError",
       code: "OperationFailed",
       operation: "Prove",
       stage: "Prover",

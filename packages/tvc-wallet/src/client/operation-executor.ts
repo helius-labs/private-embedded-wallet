@@ -10,7 +10,7 @@ import {
   resultDigest,
 } from "../protocol/digest.js";
 import { encodeDecimalU64 } from "../protocol/decimal.js";
-import { TvcError } from "../protocol/error.js";
+import { SprEmbeddedWalletError } from "../protocol/error.js";
 import { bytesEqual, decodeLowerHex, encodeLowerHex, requireHex } from "../protocol/hex.js";
 import { canonicalizeJsonValue, isRfc8785 } from "../protocol/jcs.js";
 import { parseStrictJson } from "../protocol/json.js";
@@ -105,10 +105,10 @@ export type SignTvcRequestInput = {
 
 /**
  * Signs the client's requests with the P-256 client key a wallet descriptor
- * lists: the Turnkey session key, or in tests a key `createTvcRequestSigner`
+ * lists: the Turnkey session key, or in tests a key `createSprRequestSigner`
  * wraps.
  */
-export type TvcRequestSigner = {
+export type SprRequestSigner = {
   /** `clientKeyIdFor` of the uncompressed P-256 public key the descriptor lists. */
   readonly clientKeyId: string;
   /** The 64-byte low-S `r||s` signature of `input.clientAuthDigest`, after checking it is this request's. */
@@ -118,7 +118,7 @@ export type TvcRequestSigner = {
 /** The wallet the operations act on and the key that signs them. */
 export type OperationsConfig = {
   readonly descriptor: WalletDescriptor;
-  readonly signer: TvcRequestSigner;
+  readonly signer: SprRequestSigner;
 };
 
 /** A verified connection and the wallet and key one operation runs with. */
@@ -134,7 +134,7 @@ export function requireCurrentReleasePolicy(
   nowMs: bigint,
 ): void {
   if (nowMs < window.releasePolicyValidFromMs || nowMs > window.releasePolicyExpiresAtMs) {
-    throw new TvcError("ExpiredRequest");
+    throw new SprEmbeddedWalletError("ExpiredRequest");
   }
 }
 
@@ -159,7 +159,7 @@ function matchingGrant(
     (candidate) => clientKeyIdFor(decodeLowerHex(candidate.client_public_key)) === clientKeyId,
   );
   if (!grant || !grant.allowed_operations.includes(operation)) {
-    throw new TvcError("OperationNotAllowed");
+    throw new SprEmbeddedWalletError("OperationNotAllowed");
   }
   return grant;
 }
@@ -188,7 +188,7 @@ function enclaveRequestBytes(context: OperationExecutionContext, request: Encryp
 /** The advertised request ceiling covers the entire UTF-8 HTTP body. */
 function checkRequestSize(info: ServiceInfo, bytes: number): void {
   if (BigInt(bytes) > BigInt(info.max_encrypted_request_bytes)) {
-    throw new TvcError("RequestTooLarge");
+    throw new SprEmbeddedWalletError("RequestTooLarge");
   }
 }
 
@@ -203,11 +203,11 @@ async function prepareRequest(
   signal?.throwIfAborted();
   const kind = operation.type;
   if (!context.info.supported_operations.includes(kind)) {
-    throw new TvcError("OperationNotAllowed");
+    throw new SprEmbeddedWalletError("OperationNotAllowed");
   }
   // The enclave refuses a descriptor for another network; say so before signing.
   if (context.operations.descriptor.network !== context.info.network) {
-    throw new TvcError("NetworkMismatch", "the wallet descriptor is for another network");
+    throw new SprEmbeddedWalletError("NetworkMismatch", "the wallet descriptor is for another network");
   }
   const grant = matchingGrant(
     context.operations.descriptor,
@@ -240,7 +240,7 @@ async function prepareRequest(
       },
     };
     // A raw P-256 signature has a fixed width. Account for it before asking the
-    // signer to sign, so TvcKeys can split an oversized batch locally.
+    // signer to sign, so SprEmbeddedWalletKeys can split an oversized batch locally.
     const signedBytes = te.encode(canonicalizeJsonValue({
       ...request,
       authorization: { ...request.authorization, signature: "00".repeat(RAW_P256_SIGNATURE_LEN) },
@@ -290,7 +290,7 @@ async function verifyOperationProof(
   assertExactObjectKeys(response.tvc_app_proof, TVC_APP_PROOF_KEYS, "InvalidCanonicalJson");
   const proof = response.tvc_app_proof;
   if (proof.scheme !== TVC_APP_PROOF_SCHEME || !isRfc8785(proof.proof_payload)) {
-    throw new TvcError("TurnkeyEvidenceInvalid");
+    throw new SprEmbeddedWalletError("TurnkeyEvidenceInvalid");
   }
   const proofPublic = parseQosP256Public(requireHex(proof.public_key, QOS_P256_PUBLIC_LEN));
   verifyP256Message(
@@ -314,7 +314,7 @@ async function verifyOperationProof(
     payload.result_digest !== encodeLowerHex(resultDigest(requireHex(response.encrypted_result))) ||
     payload.operation !== request.operation.type
   ) {
-    throw new TvcError("ReleaseBindingMismatch");
+    throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   return payload;
 }
@@ -359,20 +359,20 @@ export async function executeOperationEnvelope(
         requireHex(request.request_id, SHA256_LEN),
       )
     ) {
-      throw new TvcError("ReleaseBindingMismatch");
+      throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
     }
     const encryptedResult = requireHex(response.encrypted_result);
     if (BigInt(encryptedResult.length) > maxResponseBytes) {
-      throw new TvcError("ResponseTooLarge");
+      throw new SprEmbeddedWalletError("ResponseTooLarge");
     }
     const proof = await verifyOperationProof(context, request, response, bootProof, signal);
     let plaintext: string;
     try {
       plaintext = td.decode(qosDecrypt(responseSecret, encryptedResult));
     } catch {
-      throw new TvcError("InvalidEncryptedEnvelope");
+      throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
     }
-    if (!isRfc8785(plaintext)) throw new TvcError("InvalidCanonicalJson");
+    if (!isRfc8785(plaintext)) throw new SprEmbeddedWalletError("InvalidCanonicalJson");
     return { plaintext, sealedSeedDigest: proof.sealed_seed_digest };
   } finally {
     responseSecret.fill(0);

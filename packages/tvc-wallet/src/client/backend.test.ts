@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import type { WalletDescriptor } from "../protocol/types.js";
-import { sendOperation, type TvcBackend } from "./backend.js";
+import { sendOperation, type SprEmbeddedWalletBackend } from "./backend.js";
 
 const endpoint = new URL("https://devnet.helius-rpc.com/v1/private-wallet?api-key=key");
 const request = { version: 1, quorum_key_id: "quorum", quorum_key_epoch: "1", ciphertext: "abcd" };
 const descriptor = { address: "11111111111111111111111111111111" } as WalletDescriptor;
-const backends: TvcBackend[] = [
+const backends: SprEmbeddedWalletBackend[] = [
   { kind: "gateway", endpoint },
   { kind: "enclave", endpoint: new URL("https://enclave.example") },
 ];
 
-function send(backend: TvcBackend, status: number, body: string) {
+function send(backend: SprEmbeddedWalletBackend, status: number, body: string) {
   const transport = { fetch: async () => new Response(body, { status }) };
   return sendOperation(backend, request, descriptor, transport, 1_024n);
 }
@@ -27,7 +27,7 @@ describe("a refused operation", () => {
   });
 
   it("is rejected or unavailable otherwise", async () => {
-    const [gateway] = backends as [TvcBackend];
+    const [gateway] = backends as [SprEmbeddedWalletBackend];
     for (const [status, body, code] of [
       [403, JSON.stringify({ code: "InvalidDescriptor" }), "OperationRejected"],
       [403, "not json", "OperationRejected"],
