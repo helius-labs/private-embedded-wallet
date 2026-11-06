@@ -20,7 +20,9 @@ use zolana_tvc_protocol::constants::{
     TVC_APP_PROOF_SCHEME, TVC_APP_PROOF_TYPE,
 };
 use zolana_tvc_protocol::crypto::{parse_uncompressed_sec1, qos_encrypt, verify_p256_prehash};
-use zolana_tvc_protocol::digest::{descriptor_digest, request_digest, result_digest};
+use zolana_tvc_protocol::digest::{
+    descriptor_digest, request_digest, result_digest, sealed_seed_digest,
+};
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
     parse_encrypted_request, parse_operation_request, AppProof, EncryptedResponse, FailureStage,
@@ -31,7 +33,7 @@ use zolana_tvc_protocol::{client_key_id, verify_wallet_grant};
 use self::bindings::{check_encrypted_request_bindings, check_request_bindings};
 use crate::custody::{CustodyError, WalletKey};
 use crate::http::{self, PublicError};
-use crate::{sign_ephemeral_low_s, AppState};
+use crate::{sign_ephemeral_low_s, AppState, Runtime};
 
 mod bindings;
 mod bootstrap;
@@ -54,7 +56,10 @@ pub const OPERATIONS: [OperationKind; 5] = [
     OperationKind::Prove,
 ];
 
-const DERIVATION_SUITE: &str = "zolana-ed25519-role-expansion-v1";
+const DERIVATION_SUITE: &str = "spr-ed25519-role-expansion-v1";
+/// What an App Proof names as the sealed seed when the request presented none
+/// and the operation produced none: a Bootstrap that failed at a stage.
+const NO_SEALED_SEED: [u8; 32] = [0; 32];
 /// Leave time to respond before the proxy deadline; request expiry may shorten this.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(75);
 
@@ -83,6 +88,7 @@ pub(crate) async fn handle(state: &AppState, body: &[u8]) -> Response<Body> {
     match execute(state, body).await {
         Ok(response) => http::ok(response),
         Err(Failure::Invalid) => PublicError::InvalidRequest.into_response(),
+        // `execute` answers a stage failure inside the result.
         Err(Failure::Unavailable | Failure::Stage(_)) => PublicError::Unavailable.into_response(),
     }
 }
@@ -119,51 +125,21 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
 
     // Every result carries the digest of the sealed seed it was computed
     // against, so the App Proof binds the answer to one seed, not merely
-    // to the request.
-    let (result, proof_seed_digest) = match &request.operation {
-        Operation::Bootstrap => {
-            let until_expiry =
-                Duration::from_millis(request.expires_at_ms.saturating_sub(now_ms()?));
-            tokio::time::timeout(
-                OPERATION_TIMEOUT.min(until_expiry),
-                bootstrap::run(&request, &wallet, runtime),
-            )
-            .await
-            .map_err(|_| Failure::Unavailable)??
-        }
-        Operation::Decrypt { items } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            (keys::decrypt(&roles, items)?, digest)
-        }
-        Operation::Derive { items } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            (keys::derive(&roles, items)?, digest)
-        }
-        Operation::TransactionKeys { items } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            (keys::transaction_keys(&roles, items)?, digest)
-        }
-        Operation::Prove {
-            request: body,
-            prover,
-        } => {
-            let (roles, digest) = sealed::unseal(&request, runtime)?;
-            let result = match prove::seal(
-                body,
-                roles.nullifier_key.secret().as_slice(),
-                prover,
-                &runtime.prover,
-                now_ms()?,
-            ) {
-                Ok(sealed) => OperationResult::Prove { sealed },
-                Err(Failure::Stage(stage)) => OperationResult::Failure {
-                    operation: OperationKind::Prove,
-                    stage,
-                },
-                Err(failure) => return Err(failure),
-            };
-            (result, digest)
-        }
+    // to the request. An operation that failed at a named stage answers
+    // inside the result, under the seed the request presented.
+    let (result, proof_seed_digest) = match run(&request, &wallet, runtime).await {
+        Ok(answer) => answer,
+        Err(Failure::Stage(stage)) => (
+            OperationResult::Failure {
+                operation: request.operation.kind(),
+                stage,
+            },
+            request
+                .sealed_seed
+                .as_deref()
+                .map_or(NO_SEALED_SEED, sealed_seed_digest),
+        ),
+        Err(failure) => return Err(failure),
     };
 
     let result_plaintext =
@@ -201,6 +177,53 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
         },
     })
     .map_err(|_| Failure::Unavailable)
+}
+
+/// Runs a validated request's operation. Returns its result and the digest of
+/// the sealed seed it was computed against.
+async fn run(
+    request: &OperationRequest,
+    wallet: &WalletKey<'_>,
+    runtime: &Runtime,
+) -> Result<(OperationResult, [u8; 32]), Failure> {
+    match &request.operation {
+        Operation::Bootstrap => {
+            let until_expiry =
+                Duration::from_millis(request.expires_at_ms.saturating_sub(now_ms()?));
+            tokio::time::timeout(
+                OPERATION_TIMEOUT.min(until_expiry),
+                bootstrap::run(request, wallet, runtime),
+            )
+            .await
+            .map_err(|_| Failure::Unavailable)?
+        }
+        Operation::Decrypt { items } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            Ok((keys::decrypt(&roles, items)?, digest))
+        }
+        Operation::Derive { items } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            Ok((keys::derive(&roles, items)?, digest))
+        }
+        Operation::TransactionKeys { items } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            Ok((keys::transaction_keys(&roles, items)?, digest))
+        }
+        Operation::Prove {
+            request: body,
+            prover,
+        } => {
+            let (roles, digest) = sealed::unseal(request, runtime)?;
+            let sealed = prove::seal(
+                body,
+                roles.nullifier_key.secret().as_slice(),
+                prover,
+                &runtime.prover,
+                now_ms()?,
+            )?;
+            Ok((OperationResult::Prove { sealed }, digest))
+        }
+    }
 }
 
 /// Binds the request to this release, checks its freshness, verifies the

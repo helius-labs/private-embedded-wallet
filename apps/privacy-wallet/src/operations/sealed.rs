@@ -56,15 +56,14 @@ impl Roles {
 }
 
 /// Borsh contents of the sealed seed. The seed is the only secret; every other
-/// field pins the blob to one descriptor, wallet, and Quorum key epoch.
+/// field pins the blob to one descriptor and Quorum key epoch. The descriptor
+/// digest covers the Turnkey wallet and its address, so it pins the wallet too.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub(super) struct UnsealedSeed {
     pub version: u8,
     pub quorum_key_id: String,
     pub quorum_key_epoch: u64,
-    pub wallet_id: String,
     pub descriptor_digest: [u8; 32],
-    pub ed25519_public_key: [u8; 32],
     pub derivation_suite: String,
     pub derivation_seed: [u8; 64],
 }
@@ -80,26 +79,23 @@ impl Drop for UnsealedSeed {
 pub(super) fn seal(
     request: &OperationRequest,
     runtime: &Runtime,
-    ed25519_public_key: [u8; 32],
-    seed: [u8; 64],
+    seed: &[u8; 64],
 ) -> Result<(Vec<u8>, [u8; 32]), Failure> {
     let contents = UnsealedSeed {
         version: API_VERSION,
         quorum_key_id: request.quorum_key_id.clone(),
         quorum_key_epoch: request.quorum_key_epoch,
-        wallet_id: request.wallet_descriptor.wallet_id(),
         descriptor_digest: descriptor_digest(&request.wallet_descriptor)
             .map_err(|_| Failure::Invalid)?,
-        ed25519_public_key,
         derivation_suite: DERIVATION_SUITE.to_owned(),
-        derivation_seed: seed,
+        derivation_seed: *seed,
     };
     let plaintext = Zeroizing::new(borsh::to_vec(&contents).map_err(|_| Failure::Unavailable)?);
     let sealed = SealedSeed {
         version: API_VERSION,
         quorum_key_id: contents.quorum_key_id.clone(),
         quorum_key_epoch: contents.quorum_key_epoch,
-        wallet_id_hash: wallet_id_hash(&contents.wallet_id),
+        wallet_id_hash: wallet_id_hash(&request.wallet_descriptor.wallet_id()),
         ciphertext: runtime
             .quorum
             .public_key()
@@ -136,18 +132,16 @@ pub(super) fn unseal(
             .map_err(|_| Failure::Invalid)?,
     );
     let contents = UnsealedSeed::try_from_slice(&plaintext).map_err(|_| Failure::Invalid)?;
-    let expected_owner = Pubkey::from_str(&descriptor.address).map_err(|_| Failure::Invalid)?;
+    let owner = Pubkey::from_str(&descriptor.address).map_err(|_| Failure::Invalid)?;
     if contents.version != API_VERSION
         || contents.quorum_key_id != sealed.quorum_key_id
         || contents.quorum_key_epoch != sealed.quorum_key_epoch
-        || contents.wallet_id != descriptor.wallet_id()
         || contents.descriptor_digest
             != descriptor_digest(descriptor).map_err(|_| Failure::Invalid)?
-        || contents.ed25519_public_key != expected_owner.to_bytes()
         || contents.derivation_suite != DERIVATION_SUITE
     {
         return Err(Failure::Invalid);
     }
-    let roles = Roles::from_seed(&contents.ed25519_public_key, &contents.derivation_seed)?;
+    let roles = Roles::from_seed(&owner.to_bytes(), &contents.derivation_seed)?;
     Ok((roles, sealed_seed_digest(bytes)))
 }

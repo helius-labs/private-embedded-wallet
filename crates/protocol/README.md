@@ -80,9 +80,13 @@ A batch takes up to 256 items. The pool cipher is unauthenticated, so
 `Decrypt` cannot tell whose ciphertext it opened; the SDK adopts a UTXO only
 when its commitment equals the indexed one. `Prove` does not check who owns the
 inputs: a slot filled for another wallet's UTXO gives a witness the circuit
-rejects, and a proof reveals nothing about the secret either way. Failures
-surface only inside the encrypted result as a closed stage marker (`Prover`,
-`TurnkeySigning`); public HTTP errors are generic.
+rejects, and a proof reveals nothing about the secret either way. An
+operation that ran and failed at a named stage answers inside the encrypted
+result with `Failure { operation, stage }`, a closed marker: `Prover` when a
+prover's policy or attestation is refused, `TurnkeySigning` when Turnkey
+declines to sign the bootstrap message. Its App Proof names the sealed seed
+the request presented, or 32 zero bytes when it presented none. Every other
+failure is a generic public HTTP error.
 
 `/v1/info` names the network the enclave serves, fixed when its image is
 built, and the enclave refuses a descriptor for any other network.
@@ -130,8 +134,9 @@ descriptor names public keys and identifiers only; it is not a secret.
 
 The sealed seed is the derivation seed encrypted to the Quorum key. Its
 envelope names the Quorum key id and epoch and the wallet id hash; its
-contents repeat them and add the descriptor digest, the derivation suite, and
-the seed. `Bootstrap` returns it; every other operation presents it, and the
+contents repeat the Quorum key id and epoch and add the descriptor digest,
+which pins the wallet and its address, the derivation suite
+(`spr-ed25519-role-expansion-v1`), and the seed. `Bootstrap` returns it; every other operation presents it, and the
 enclave accepts it only under the descriptor and Quorum key epoch it was
 issued for. It contains nothing the Turnkey wallet cannot reproduce, so
 losing it costs one more `Bootstrap`.

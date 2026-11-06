@@ -12,6 +12,7 @@ use ed25519_dalek::{Signer as _, SigningKey};
 use qos_p256::P256Pair;
 use serde::Deserialize;
 use spr_prover_tee::{Anchors, PolicySigners};
+use zeroize::Zeroizing;
 use zolana_tvc_protocol::digest::sha256;
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
 use zolana_tvc_protocol::types::OperationKind;
@@ -189,7 +190,7 @@ impl Custody for LocalCustody {
     ) -> Result<RawSignature, CustodyError> {
         self.own(wallet)?;
         Ok(RawSignature {
-            signature: self.signing_key.sign(payload).to_bytes(),
+            signature: Zeroizing::new(self.signing_key.sign(payload).to_bytes()),
             activity_id: "local-custody-bootstrap".to_owned(),
         })
     }

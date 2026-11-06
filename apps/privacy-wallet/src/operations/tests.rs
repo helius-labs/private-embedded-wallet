@@ -198,7 +198,7 @@ fn sealed_request(
     operation: Operation,
 ) -> OperationRequest {
     let mut request = request(operation, descriptor(wallet.public_key));
-    let (bytes, _) = seal(&request, runtime, wallet.public_key, wallet.seed).expect("seal");
+    let (bytes, _) = seal(&request, runtime, &wallet.seed).expect("seal");
     request.sealed_seed = Some(bytes);
     request
 }
@@ -252,6 +252,12 @@ fn sealed_seed_hides_the_seed_and_is_bound_to_descriptor_and_epoch() {
         failure(unseal(&other_descriptor, &runtime)),
         Failure::Invalid
     );
+
+    // The descriptor digest pins the wallet's address too.
+    let mut other_address = request.clone();
+    other_address.wallet_descriptor.address =
+        Pubkey::new_from_array(test_wallet().public_key).to_string();
+    assert_eq!(failure(unseal(&other_address, &runtime)), Failure::Invalid);
 
     let mut other_grant = request.clone();
     other_grant.wallet_descriptor.allowed_clients[0].client_public_key = vec![0x05; 65];
@@ -1265,6 +1271,23 @@ mod local {
             OperationResult::Failure {
                 operation: OperationKind::Prove,
                 stage: FailureStage::Prover,
+            }
+        );
+    }
+
+    /// A wallet the custodian declines to sign for gets the `TurnkeySigning`
+    /// stage inside a proven result, not a generic outage.
+    #[tokio::test]
+    async fn a_declined_signature_is_a_failure_stage_inside_the_result() {
+        let mut harness = Harness::new(LocalProverTrust::StandIn(Anchors::PRODUCTION));
+        // The local custodian holds the first wallet's key only.
+        harness.wallet = test_wallet();
+        let bootstrap = harness.request(Operation::Bootstrap, None);
+        assert_eq!(
+            harness.call(&bootstrap).await.expect("answered"),
+            OperationResult::Failure {
+                operation: OperationKind::Bootstrap,
+                stage: FailureStage::TurnkeySigning,
             }
         );
     }

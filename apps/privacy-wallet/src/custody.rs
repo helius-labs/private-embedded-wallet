@@ -17,6 +17,7 @@ use turnkey_client::generated::services::coordinator::public::v1::{
     ActivityResponse, GetActivityRequest,
 };
 use turnkey_client::{ActivityResult, TurnkeyClient, TurnkeyClientError};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::turnkey::QosTurnkeyStamper;
 
@@ -37,7 +38,9 @@ pub(crate) enum CustodyError {
 }
 
 pub(crate) struct RawSignature {
-    pub signature: [u8; 64],
+    /// The signature over the bootstrap message, which is the wallet's
+    /// derivation seed.
+    pub signature: Zeroizing<[u8; 64]>,
     /// The Turnkey activity that signed.
     pub activity_id: String,
 }
@@ -69,8 +72,10 @@ impl TurnkeyCustody {
     }
 }
 
-fn decode_hex(value: &str) -> Result<Vec<u8>, CustodyError> {
-    hex::decode(value.strip_prefix("0x").unwrap_or(value)).map_err(|_| CustodyError::Unavailable)
+fn decode_hex(value: &str) -> Result<Zeroizing<Vec<u8>>, CustodyError> {
+    hex::decode(value.strip_prefix("0x").unwrap_or(value))
+        .map(Zeroizing::new)
+        .map_err(|_| CustodyError::Unavailable)
 }
 
 #[async_trait]
@@ -81,7 +86,7 @@ impl Custody for TurnkeyCustody {
         payload: &[u8],
         timestamp_ms: u64,
     ) -> Result<RawSignature, CustodyError> {
-        let activity = sign_with_approval(
+        let mut activity = sign_with_approval(
             &self.client()?,
             wallet.organization_id,
             timestamp_ms,
@@ -93,14 +98,17 @@ impl Custody for TurnkeyCustody {
             },
         )
         .await?;
-        let (r, s) = (
-            decode_hex(&activity.result.r)?,
-            decode_hex(&activity.result.s)?,
+        let decoded = (
+            decode_hex(&activity.result.r),
+            decode_hex(&activity.result.s),
         );
+        activity.result.r.zeroize();
+        activity.result.s.zeroize();
+        let (r, s) = (decoded.0?, decoded.1?);
         if r.len() != 32 || s.len() != 32 {
             return Err(CustodyError::Unavailable);
         }
-        let mut signature = [0u8; 64];
+        let mut signature = Zeroizing::new([0u8; 64]);
         signature[..32].copy_from_slice(&r);
         signature[32..].copy_from_slice(&s);
         Ok(RawSignature {

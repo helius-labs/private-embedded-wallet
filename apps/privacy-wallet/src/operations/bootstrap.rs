@@ -2,7 +2,6 @@
 //! wallet's derivation message and seals the seed to the Quorum key.
 
 use spr_keypair::derivation;
-use zeroize::Zeroizing;
 use zolana_tvc_protocol::types::{OperationRequest, OperationResult};
 
 use super::sealed::{seal, Roles};
@@ -20,10 +19,10 @@ pub(super) async fn run(
         .custody
         .sign_raw(wallet, &message, request.issued_at_ms)
         .await?;
-    let seed = Zeroizing::new(signed.signature);
-    let roles = Roles::from_seed(&wallet.public_key, &seed).map_err(|_| Failure::Unavailable)?;
+    let roles = Roles::from_seed(&wallet.public_key, &signed.signature)
+        .map_err(|_| Failure::Unavailable)?;
     let address = roles.address()?;
-    let (sealed_seed, digest) = seal(request, runtime, wallet.public_key, *seed)?;
+    let (sealed_seed, digest) = seal(request, runtime, &signed.signature)?;
     Ok((
         OperationResult::Bootstrap {
             solana_address: wallet.sign_with.to_owned(),
