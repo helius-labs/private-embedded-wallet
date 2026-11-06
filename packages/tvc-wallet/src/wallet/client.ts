@@ -418,10 +418,17 @@ export function createClient<Account extends TvcTurnkeyWalletAccount>(
 export function createTvcClient<Account extends TvcTurnkeyWalletAccount>(
   config: TvcClientConfig<Account>,
 ): TvcClient {
-  const { endpoint, prover, ...rest } = config;
+  // Only the fields above: a caller's `release`, `backend` or descriptor must
+  // not reach `createClient`, which would trust them in place of the pin.
+  const { network, endpoint, turnkey, solanaAddress, prover, nowMs, transport, requestTimeoutMs } = config;
   return createClient<Account>({
-    ...rest,
+    network,
     backend: { kind: "gateway", endpoint },
+    turnkey,
+    solanaAddress,
     ...(prover === undefined ? {} : { prover: { url: prover.href } }),
+    nowMs,
+    transport,
+    requestTimeoutMs,
   });
 }

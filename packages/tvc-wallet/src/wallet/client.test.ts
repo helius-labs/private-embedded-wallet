@@ -7,13 +7,16 @@ import type { TvcSession } from "../client/session.js";
 import { TvcError, TvcHttpError } from "../protocol/error.js";
 import { encodeLowerHex } from "../protocol/hex.js";
 import type { ReleaseTrust } from "../protocol/releases.js";
-import type { BootstrapResult, WalletDescriptor } from "../protocol/types.js";
+import type { BootstrapResult, ReleasePolicy, WalletDescriptor } from "../protocol/types.js";
+import { signP256Prehash } from "../crypto/p256.js";
+import { policySigningDigest } from "../verify/release-policy.js";
 import {
   clientFromSession,
   createClient,
   createTvcClient,
   proverFor,
   type ShieldedIdentity,
+  type TvcClientConfig,
 } from "./client.js";
 import { fixedClientKeys, type TvcClientKey, type TvcClientKeys } from "./client-keys.js";
 import { TvcProverPolicy } from "./prover-policy.js";
@@ -243,15 +246,48 @@ describe("a client key that changes", () => {
   });
 });
 
-/** A release whose Quorum key signs with `signing`, as far as building a client reads it. */
+/** A devnet release, signed and in force, whose Quorum key signs with `signing`. */
 function releaseSignedBy(signing: Uint8Array): ReleaseTrust {
-  const quorumPublicKey = encodeLowerHex(
-    Uint8Array.from([
-      ...p256.getPublicKey(p256.utils.randomPrivateKey(), false),
-      ...p256.getPublicKey(signing, false),
-    ]),
-  );
-  return { releasePolicy: { policy: { quorumPublicKey } } } as unknown as ReleaseTrust;
+  const authority = p256.utils.randomPrivateKey();
+  const policy: ReleasePolicy = {
+    version: 1,
+    releaseId: "client-test",
+    network: "devnet",
+    tvcApplicationId: "app",
+    securityDomainId: "33".repeat(32),
+    acceptedManifestDigests: ["11".repeat(32)],
+    acceptedExecutableDigests: ["22".repeat(32)],
+    quorumKeyId: "quorum",
+    quorumKeyEpoch: "1",
+    quorumPublicKey: encodeLowerHex(
+      Uint8Array.from([
+        ...p256.getPublicKey(p256.utils.randomPrivateKey(), false),
+        ...p256.getPublicKey(signing, false),
+      ]),
+    ),
+    allowedOperations: ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"],
+    maxEncryptedRequestBytes: 262_144,
+    maxEncryptedResponseBytes: 262_144,
+    turnkeyTrustRootId: "aws-nitro-root-g1",
+    turnkeyProofSchemaVersions: ["turnkey.boot_proof.v1"],
+    validFromMs: "0",
+    expiresAtMs: String(Number.MAX_SAFE_INTEGER),
+    revocationEpoch: "0",
+  };
+  return {
+    releasePolicy: {
+      policy,
+      authoritySetId: "set",
+      signatures: [{ keyId: "authority", signature: encodeLowerHex(signP256Prehash(authority, policySigningDigest(policy))) }],
+    },
+    releaseAuthorities: {
+      authoritySetId: "set",
+      threshold: 1,
+      keys: [{ keyId: "authority", publicKey: encodeLowerHex(p256.getPublicKey(authority, false)) }],
+      minimumRevocationEpoch: "0",
+    },
+    qosIdentityPcrs: { 0: "aa".repeat(48), 1: "bb".repeat(48), 2: "cc".repeat(48), 3: "dd".repeat(48) },
+  };
 }
 
 describe("createTvcClient", () => {
@@ -292,6 +328,26 @@ describe("createTvcClient", () => {
         turnkey,
       }),
     ).toThrowError(/GatewayRequired/);
+  });
+
+  it("takes only its documented fields, so no release, backend or key replaces the pinned ones", async () => {
+    const session = { publicKey: encodeLowerHex(p256.getPublicKey(p256.utils.randomPrivateKey(), true)), organizationId: "org" };
+    const fetch = vi.fn(async (_url: URL, _init?: RequestInit) => new Response("{}", { status: 503 }));
+    const config = {
+      network: "devnet",
+      endpoint,
+      turnkey: { ...turnkey, getSession: () => Promise.resolve(session) },
+      transport: { fetch },
+      release: releaseSignedBy(p256.utils.randomPrivateKey()),
+      backend: { kind: "enclave", endpoint: new URL("https://enclave.example") },
+      descriptor,
+      signer,
+    } as TvcClientConfig;
+    const client = createTvcClient(config);
+    expect(client.servicePublicKey).toBe(encodeLowerHex(p256.getPublicKey(pinnedSigning, true)));
+    await expect(client.open()).rejects.toMatchObject({ code: "DiscoveryUntrusted", status: 503 });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://devnet.helius-rpc.com/v1/private-wallet/session?api-key=key");
   });
 
   it("says so when no Turnkey session is active, before it verifies", async () => {
