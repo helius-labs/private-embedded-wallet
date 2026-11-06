@@ -184,7 +184,10 @@ payload, unhashed), a Sign-In With Solana message for the network's gatekeeper h
 works) whose chain is the network, and posts
 `{organizationId, turnkeyWalletId, solanaAddress, clientPublicKey, issuedAtMs, ownerSignature}`
 to `<endpoint>/enroll`. The gateway answers a descriptor for the key, which
-the client checks and keeps in memory for that key. A new login, or
+the client checks and keeps in memory for that key. Concurrent first calls
+share one enrollment. Cancelling every one of them stops it only until the
+owner has signed; after that the client finishes it and keeps the descriptor,
+so the owner never signs twice for one key. A new login, or
 `refreshSession` without the current public key, brings a new session key:
 the client enrolls it before the next request and verifies the enclave again.
 The sealed seed is bound to the wallet (network, security domain, Turnkey

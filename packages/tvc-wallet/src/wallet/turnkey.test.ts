@@ -244,6 +244,62 @@ describe("the Turnkey session key", () => {
     await expect((await none.current()).operations()).rejects.toMatchObject({ code: "WalletAccountNotFound" });
   });
 
+  it("finishes an enrollment the owner signed, and keeps its descriptor, when every caller left", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => { answer = resolve; });
+    let posted!: (init?: RequestInit) => void;
+    const posting = new Promise<RequestInit | undefined>((resolve) => { posted = resolve; });
+    const respond = gateway.transport.fetch.getMockImplementation()!;
+    gateway.transport.fetch.mockImplementationOnce(async (url: URL, init?: RequestInit) => {
+      posted(init);
+      await answered;
+      return respond(url, init);
+    });
+    const key = await keysOf(turnkey, gateway.transport).current();
+    const caller = new AbortController();
+    const waiting = key.operations(caller.signal);
+    const init = await posting;
+    caller.abort(new Error("the caller left"));
+    await expect(waiting).rejects.toThrow("the caller left");
+    expect(init?.signal?.aborted).toBe(false);
+
+    answer();
+    const enrolled = await key.operations();
+    expect(enrolled.descriptor.allowed_clients[0]?.client_public_key).toBe(gateway.enrollments[0]?.body.clientPublicKey);
+    expect(turnkey.signMessage).toHaveBeenCalledOnce();
+    expect(gateway.transport.fetch).toHaveBeenCalledOnce();
+  });
+
+  it("stops an enrollment when every caller left before the owner signed", async () => {
+    const { turnkey, login } = fakeTurnkey();
+    login();
+    const gateway = fakeGateway();
+    const sign = turnkey.signMessage.getMockImplementation()!;
+    let release!: () => void;
+    const signedLater = new Promise<void>((resolve) => { release = resolve; });
+    turnkey.signMessage.mockImplementationOnce(async (params) => {
+      await signedLater;
+      return sign(params);
+    });
+    const key = await keysOf(turnkey, gateway.transport).current();
+    const caller = new AbortController();
+    const waiting = key.operations(caller.signal);
+    await vi.waitFor(() => expect(turnkey.signMessage).toHaveBeenCalledOnce());
+    caller.abort(new Error("the caller left"));
+    await expect(waiting).rejects.toThrow("the caller left");
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(gateway.transport.fetch).not.toHaveBeenCalled();
+
+    // The next caller asks the owner again.
+    await key.operations();
+    expect(turnkey.signMessage).toHaveBeenCalledTimes(2);
+    expect(gateway.transport.fetch).toHaveBeenCalledOnce();
+  });
+
   it("refuses a refused enrollment or another key's descriptor, and enrolls again next time", async () => {
     const { turnkey, login } = fakeTurnkey();
     login();

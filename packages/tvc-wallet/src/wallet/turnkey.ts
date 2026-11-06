@@ -87,6 +87,8 @@ export type TurnkeyClientKeysConfig<Account extends TvcTurnkeyWalletAccount> = {
 
 const SOLANA = "ADDRESS_FORMAT_SOLANA";
 const MAX_ENROLLMENT_RESPONSE_BYTES = 64n * 1024n;
+/** Bounds `POST /enroll` once the owner signed, when no caller's signal does. */
+const SIGNED_ENROLLMENT_TIMEOUT_MS = 60_000;
 const DESCRIPTOR_KEYS = [
   "version",
   "security_domain_id",
@@ -104,6 +106,8 @@ type Enrollment = {
   readonly controller: AbortController;
   readonly promise: Promise<OperationsConfig>;
   waiters: number;
+  /** The owner signed it: it finishes, and its descriptor is kept, whoever still waits. */
+  signed: boolean;
 };
 
 /** The uncompressed SEC1 form of a Turnkey session key, which descriptors list. */
@@ -192,10 +196,16 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
   const { turnkey, network, endpoint, solanaAddress, transport, nowMs } = config;
   const keys = new Map<string, TvcClientKey>();
 
+  /**
+   * Enrolls `clientPublicKey`. `signal` stops it until the owner has signed;
+   * from `onSigned` on it runs to the end, so the owner's signature is never
+   * wasted.
+   */
   async function enroll(
     session: { readonly publicKey: string; readonly organizationId: string },
     clientPublicKey: string,
     signal: AbortSignal,
+    onSigned: () => void,
   ): Promise<WalletDescriptor> {
     const { walletId, account } = await walletAccount(turnkey, solanaAddress, signal);
     const enrollment = {
@@ -205,24 +215,25 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
       clientPublicKey,
       issuedAtMs: Number(nowMs()),
     };
-    const signed = await awaitWithSignal(
-      turnkey.signMessage({
-        message: walletEnrollmentMessage({ domain: ENROLLMENT_DOMAINS[network], network, ...enrollment }),
-        walletAccount: account,
-        encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
-        hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",
-      }),
-      signal,
-    );
+    const signing = turnkey.signMessage({
+      message: walletEnrollmentMessage({ domain: ENROLLMENT_DOMAINS[network], network, ...enrollment }),
+      walletAccount: account,
+      encoding: "PAYLOAD_ENCODING_TEXT_UTF8",
+      hashFunction: "HASH_FUNCTION_NOT_APPLICABLE",
+    });
+    // Before any other reaction to the signature, so no abort follows it.
+    void signing.then(onSigned, () => undefined);
+    const signed = await awaitWithSignal(signing, signal);
+    const posting = AbortSignal.timeout(SIGNED_ENROLLMENT_TIMEOUT_MS);
     const ownerSignature = `${signed.r.padStart(64, "0")}${signed.s.padStart(64, "0")}`.toLowerCase();
     if (!/^[0-9a-f]{128}$/u.test(ownerSignature)) throw new TvcError("InvalidSignatureEncoding");
     const response = await fetchWithSignal(transport, gatewayUrl(endpoint, "enroll"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...enrollment, ownerSignature }),
-    }, signal);
+    }, posting);
     if (!response.ok) throw httpError(response, "EnrollmentRejected");
-    return enrolledDescriptor(await readBoundedText(response, MAX_ENROLLMENT_RESPONSE_BYTES, signal), {
+    return enrolledDescriptor(await readBoundedText(response, MAX_ENROLLMENT_RESPONSE_BYTES, posting), {
       network,
       organizationId: session.organizationId,
       walletId,
@@ -247,9 +258,12 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
       const flight: Enrollment = {
         controller,
         waiters: 0,
-        promise: enroll(session, clientPublicKey, controller.signal)
+        signed: false,
+        promise: enroll(session, clientPublicKey, controller.signal, () => {
+          flight.signed = true;
+        })
           .then((descriptor) => {
-            // Kept even when every caller left: the owner already signed it.
+            // Kept even when every caller left: the owner signed it.
             enrolled = Object.freeze({ descriptor, signer });
             return enrolled;
           })
@@ -263,7 +277,8 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
     return {
       id: session.publicKey,
       // Concurrent first calls share one enrollment; each caller can abandon
-      // its own wait, and the enrollment stops once nobody waits for it.
+      // its own wait. Once nobody waits the enrollment stops, unless the owner
+      // already signed it: then it finishes, and later callers share it.
       async operations(signal) {
         signal?.throwIfAborted();
         if (enrolled) return enrolled;
@@ -273,7 +288,7 @@ export function turnkeyClientKeys<Account extends TvcTurnkeyWalletAccount>(
           return await awaitWithSignal(flight.promise, signal);
         } finally {
           flight.waiters -= 1;
-          if (flight.waiters === 0 && pending === flight) {
+          if (flight.waiters === 0 && pending === flight && !flight.signed) {
             pending = undefined;
             flight.controller.abort(signal?.reason);
           }
