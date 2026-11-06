@@ -22,10 +22,10 @@ use crate::error::Problem;
 use crate::json::ApiJson;
 use crate::limits::InFlightLimiter;
 use crate::openapi::PingRequest;
-use crate::project::{Caller, ProjectId};
+use crate::project::Caller;
 use crate::provisioner::{self, Provisioner};
 use crate::replay::{Claim, Outcome, ReplayLedger};
-use crate::turnkey::{ClaimedWallet, Turnkey};
+use crate::turnkey::{CallShare, ClaimedWallet, Turnkey};
 use crate::upstream::Enclave;
 use crate::wallet_grant::WalletGrants;
 
@@ -183,7 +183,7 @@ pub(crate) async fn session(
     }
     let boot_proof = state
         .turnkey
-        .boot_proof(&project, &app_proof_key(&ping.body)?)
+        .boot_proof(&app_proof_key(&ping.body)?, CallShare::Project(&project))
         .await?;
     Ok(Json(Session {
         info: raw_json(&info.body)?,
@@ -269,7 +269,7 @@ pub(crate) async fn operations(
     let key = match state.replay.claim(&project, &request.ciphertext).await? {
         Claim::New(key) => key,
         Claim::Answered(outcome) => {
-            let mut response = answer(&state, &project, outcome).await;
+            let mut response = answer(&state, outcome).await;
             response
                 .headers_mut()
                 .insert(IDEMPOTENT_REPLAYED, HeaderValue::from_static("true"));
@@ -296,13 +296,15 @@ pub(crate) async fn operations(
     request.wallet_grant = Some(grant);
     let outcome = state.enclave.operations(&request).await;
     state.replay.record(key, &outcome).await;
-    Ok(answer(&state, &project, outcome).await)
+    Ok(answer(&state, outcome).await)
 }
 
 /// The client's answer to an enclave outcome: a success with the Boot Proof
 /// of the replica that answered, the enclave's refusal as it is, or the
-/// failure.
-async fn answer(state: &AppState, project: &ProjectId, outcome: Outcome) -> Response {
+/// failure. The enclave's work is done, Bootstrap's with the owner's
+/// approval, so the lookup takes no slot of the project's Turnkey share,
+/// only of the shared bound.
+async fn answer(state: &AppState, outcome: Outcome) -> Response {
     let answered = async {
         let forwarded = outcome?;
         if !forwarded.is_success() {
@@ -310,7 +312,7 @@ async fn answer(state: &AppState, project: &ProjectId, outcome: Outcome) -> Resp
         }
         let boot_proof = state
             .turnkey
-            .boot_proof(project, &app_proof_key(&forwarded.body)?)
+            .boot_proof(&app_proof_key(&forwarded.body)?, CallShare::Shared)
             .await?;
         Ok(Json(Operated {
             response: raw_json(&forwarded.body)?,
@@ -369,7 +371,7 @@ mod tests {
 
     use super::*;
     use crate::config::EnclaveConfig;
-    use crate::project::PROJECT_ID_HEADER;
+    use crate::project::{PROJECT_ID_HEADER, ProjectId};
     use crate::replay::LocalLedger;
 
     const ORIGIN_AUTH: &str = "Bearer gatekeeper-test";

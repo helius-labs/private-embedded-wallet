@@ -151,7 +151,7 @@ operations from the next deploy.
 ### Limits
 
 - **Requests in flight:** at most `enclave.max_in_flight_per_project` sessions, enrollments and operations per project (`429`).
-- **Turnkey calls:** at most 8 at once per project and 32 across all projects (`429`); both Turnkey keys are shared.
+- **Turnkey calls:** at most 8 at once per project and 32 across all projects (`429`); both Turnkey keys are shared. The Boot Proof lookup for an operation the enclave already answered counts only toward the 32, so the project's share never wastes finished work. Lookups of one replica's Boot Proof run one at a time and share the answer, which is then cached.
 - **Resends:** the replay ledger keys each `/operations` ciphertext by the digest of the project and the ciphertext, however its JSON is encoded, and keeps answers up to 64 KiB. With `enclave.replay_redis_url` set, every task shares it through Redis, claiming with one `SET key running NX GET EX`, and it survives restarts; an unreachable Redis refuses the request with `424`. Without it, each process keeps its own.
 - **Body size:** `enclave.max_body_bytes`.
 
