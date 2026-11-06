@@ -1,9 +1,12 @@
 /**
- * Explicitly unsafe local TVC testkit.
+ * Clients for tests and local deployments.
  *
- * This entrypoint preserves the encrypted operation protocol and all response
- * binding checks, but replaces Nitro and Turnkey evidence with pinned local
- * process keys. It accepts loopback HTTP only and must never be used for funds.
+ * `createTestTvcClient` verifies an enclave exactly as `createTvcClient` does,
+ * against a release and backend the caller names. `createLocalTvcClient` is
+ * the explicitly unsafe local testkit: it preserves the encrypted operation
+ * protocol and all response binding checks, but replaces Nitro and Turnkey
+ * evidence with pinned local process keys. It accepts loopback HTTP only and
+ * must never be used for funds.
  */
 import { p256 } from "@noble/curves/p256";
 import { sha256 } from "@noble/hashes/sha256";
@@ -12,7 +15,7 @@ import localTestkit from "./local-testkit.json";
 import { createLocalTvcSession } from "./client/local-session.js";
 import type { TvcBackend } from "./client/backend.js";
 import type { TvcTransport } from "./client/transport.js";
-import { createTvcOperationAuthorizer } from "./platform/authorizer.js";
+import { createTvcRequestSigner } from "./platform/signer.js";
 import {
   clientKeyIdFor,
   descriptorDigest,
@@ -22,9 +25,28 @@ import { API_VERSION } from "./protocol/constants.js";
 import { decodeLowerHex, encodeLowerHex } from "./protocol/hex.js";
 import { requireNetwork } from "./protocol/network.js";
 import type { Network, OperationKind, WalletDescriptor } from "./protocol/types.js";
-import { clientFromSession, turnkeyServicePublicKey, type TvcClient } from "./wallet/client.js";
+import {
+  clientFromSession,
+  createClient,
+  proverFor,
+  turnkeyServicePublicKey,
+  type TestTvcClientConfig,
+  type TvcClient,
+} from "./wallet/client.js";
 import type { TvcProverConfig } from "./wallet/prover.js";
 import { TvcProverPolicy } from "./wallet/prover-policy.js";
+
+export type {
+  BootProofResolver,
+  EnclaveBackend,
+  GatewayBackend,
+  ResolveBootProofInput,
+  TvcBackend,
+} from "./client/backend.js";
+export type { ReleaseTrust } from "./protocol/releases.js";
+export type { QosIdentityPcrs } from "./verify/index.js";
+export type { TestTvcClientConfig } from "./wallet/client.js";
+export type { TvcProverConfig } from "./wallet/prover.js";
 
 const te = new TextEncoder();
 if (localTestkit.version !== 1) throw new Error("UnsupportedLocalTestkitFixture");
@@ -45,14 +67,20 @@ export type LocalTvcClientConfig = {
    */
   readonly backend: TvcBackend;
   readonly solanaAddress: string;
+  /**
+   * A descriptor issued elsewhere, such as by a tvc-gateway holding the
+   * testkit's provisioning key. It must grant the testkit client key and name
+   * `solanaAddress`. Absent, the testkit signs its own.
+   */
+  readonly descriptor?: WalletDescriptor;
+  /**
+   * The testkit's stand-in prover (`localProverConfig`), or with
+   * `--live-prover` a TEE prover of the network under its policy. Defaults to
+   * `/v1/spr` beside the backend's endpoint.
+   */
+  readonly prover?: TvcProverConfig;
   readonly nowMs?: () => bigint;
   readonly transport?: TvcTransport;
-  /**
-   * A descriptor issued elsewhere, such as by a provisioning service holding
-   * the testkit's provisioning key. It must grant the testkit client key and
-   * name `solanaAddress`. Absent, the testkit signs its own.
-   */
-  readonly walletDescriptor?: WalletDescriptor;
 };
 
 function localDescriptor(network: Network, solanaAddress: string): WalletDescriptor {
@@ -83,11 +111,21 @@ function localDescriptor(network: Network, solanaAddress: string): WalletDescrip
   });
 }
 
+/**
+ * A client of `config.backend` verified against `config.release`, or the
+ * package's pin for `config.network`, with every check `createTvcClient`
+ * makes: for a test deployment, or to reach an enclave without a gateway.
+ */
+export function createTestTvcClient(config: TestTvcClientConfig): TvcClient {
+  return createClient(config);
+}
+
+/** The unattested testkit's client, for the network the testkit was built for. */
 export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
   const network = requireNetwork(config.network);
-  const descriptor = config.walletDescriptor ?? localDescriptor(network, config.solanaAddress);
+  const descriptor = config.descriptor ?? localDescriptor(network, config.solanaAddress);
   const clientPublic = p256.getPublicKey(LOCAL_CLIENT_SECRET, false);
-  const authorizer = createTvcOperationAuthorizer({
+  const signer = createTvcRequestSigner({
     clientKeyId: clientKeyIdFor(clientPublic),
     async sign(message: Uint8Array) {
       return p256
@@ -123,10 +161,14 @@ export function createLocalTvcClient(config: LocalTvcClientConfig): TvcClient {
       expectedOperations: LOCAL_OPERATIONS,
       ...(config.nowMs === undefined ? {} : { nowMs: config.nowMs }),
       ...(config.transport === undefined ? {} : { transport: config.transport }),
-      operations: { walletDescriptor: descriptor, authorizer },
+      operations: { descriptor, signer },
     }),
-    network,
-    turnkeyServicePublicKey(localTestkit.quorumPublicKey),
+    {
+      network,
+      servicePublicKey: turnkeyServicePublicKey(localTestkit.quorumPublicKey),
+      descriptor,
+      prover: proverFor(network, backend.endpoint, config.prover, config.transport),
+    },
   );
 }
 

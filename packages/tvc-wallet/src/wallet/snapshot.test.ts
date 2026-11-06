@@ -10,14 +10,13 @@ import {
 } from "@heliuslabs/spr";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { VerifiedConnection } from "../client/connection.js";
 import { encodeLowerHex } from "../protocol/hex.js";
 import type { SealedSeed } from "../protocol/types.js";
-import type { ShieldedIdentity, TvcClient } from "./client.js";
-import { TvcKeys } from "./keys.js";
+import type { ShieldedIdentity } from "./client.js";
+import { EnclaveKeys, type TvcEnclave, type TvcKeys } from "./keys.js";
+import { TvcProverPolicy } from "./prover-policy.js";
 import { snapshotCipher } from "./snapshot.js";
 
-const connection = { verified: true } as unknown as VerifiedConnection;
 const sealedSeed: SealedSeed = { sealedSeed: "11".repeat(64) };
 
 function identityOf(address: ShieldedAddress): ShieldedIdentity {
@@ -32,26 +31,21 @@ function identityOf(address: ShieldedAddress): ShieldedIdentity {
 /** An enclave whose every per-transaction key is `secret`. */
 function enclave(secret: Uint8Array) {
   return {
-    network: "devnet",
-    servicePublicKey: "",
-    connectAndVerify: vi.fn(),
-    bootstrap: vi.fn(),
     decrypt: vi.fn(),
     derive: vi.fn(),
-    transactionKeys: vi.fn(async (_c: unknown, _k: unknown, items: readonly unknown[]) =>
+    transactionKeys: vi.fn(async (_k: unknown, items: readonly unknown[]) =>
       items.map(() => encodeLowerHex(secret)),
     ),
     prove: vi.fn(),
-  } satisfies TvcClient;
+  } satisfies TvcEnclave;
 }
 
-function keysFor(address: ShieldedAddress, client: TvcClient): TvcKeys {
-  return new TvcKeys({
-    client,
-    connection,
+function keysFor(address: ShieldedAddress, enclave: TvcEnclave): TvcKeys {
+  return new EnclaveKeys({
+    enclave,
     sealedSeed,
     identity: identityOf(address),
-    prover: { url: "http://prover.invalid" },
+    prover: { url: "http://prover.invalid", policy: new TvcProverPolicy("http://prover.invalid/policy") },
   });
 }
 
@@ -62,7 +56,7 @@ describe("snapshotCipher", () => {
     const address = ShieldedKeypair.generate().shieldedAddress();
     const client = enclave(new Uint8Array(32).fill(5));
     const cipher = await snapshotCipher(keysFor(address, client));
-    expect(client.transactionKeys.mock.calls[0]?.[2]).toEqual([
+    expect(client.transactionKeys.mock.calls[0]?.[1]).toEqual([
       {
         viewing_public_key: encodeLowerHex(address.viewingPublicKey.toBytes()),
         first_nullifier: expect.stringMatching(/^ff[0-9a-f]{62}$/),

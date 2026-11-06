@@ -94,7 +94,8 @@ type OperationProofPayload = {
   sealed_seed_digest: string;
 };
 
-export type AuthorizeTvcRequestInput = {
+/** One request the client built, shown to the signer in full with the bytes it must sign. */
+export type SignTvcRequestInput = {
   readonly operation: Operation;
   readonly request: Readonly<OperationRequest>;
   readonly clientAuthDigest: Uint8Array;
@@ -102,14 +103,22 @@ export type AuthorizeTvcRequestInput = {
   readonly signal?: AbortSignal;
 };
 
-export type TvcOperationAuthorizer = {
+/**
+ * Signs the client's requests with the P-256 client key a wallet descriptor
+ * lists: `createTvcRequestSigner` for a key the caller holds, or the browser's
+ * non-exportable key from `loadOrCreatePersistentBrowserTvcSigner`.
+ */
+export type TvcRequestSigner = {
+  /** `clientKeyIdFor` of the uncompressed P-256 public key the descriptor lists. */
   readonly clientKeyId: string;
-  authorizeTvcRequest(input: AuthorizeTvcRequestInput): Promise<Uint8Array>;
+  /** The 64-byte low-S `r||s` signature of `input.clientAuthDigest`, after checking it is this request's. */
+  signRequest(input: SignTvcRequestInput): Promise<Uint8Array>;
 };
 
+/** The wallet the operations act on and the key that signs them. */
 export type OperationsConfig = {
-  readonly walletDescriptor: WalletDescriptor;
-  readonly authorizer: TvcOperationAuthorizer;
+  readonly descriptor: WalletDescriptor;
+  readonly signer: TvcRequestSigner;
 };
 
 export type OperationExecutionContext = {
@@ -204,12 +213,12 @@ async function prepareRequest(
     throw new TvcError("OperationNotAllowed");
   }
   // The enclave refuses a descriptor for another network; say so before signing.
-  if (context.operations.walletDescriptor.network !== context.info.network) {
+  if (context.operations.descriptor.network !== context.info.network) {
     throw new TvcError("NetworkMismatch", "the wallet descriptor is for another network");
   }
   const grant = matchingGrant(
-    context.operations.walletDescriptor,
-    context.operations.authorizer.clientKeyId,
+    context.operations.descriptor,
+    context.operations.signer.clientKeyId,
     kind,
   );
   const requestGrantFields = await requestGrant(context.backend, signal);
@@ -228,17 +237,17 @@ async function prepareRequest(
       target_executable_digest: context.info.executable_digest,
       quorum_key_id: context.info.quorum_key_id,
       quorum_key_epoch: context.info.quorum_key_epoch,
-      wallet_descriptor: context.operations.walletDescriptor,
+      wallet_descriptor: context.operations.descriptor,
       ...sealedSeedFields(sealedSeed),
       client_response_public_key: encodeLowerHex(responsePublic),
       operation,
       authorization: {
-        client_key_id: context.operations.authorizer.clientKeyId,
+        client_key_id: context.operations.signer.clientKeyId,
         signature: "",
       },
     };
     // A raw P-256 signature has a fixed width. Account for it before asking the
-    // authorizer to sign, so TvcKeys can split an oversized batch locally.
+    // signer to sign, so TvcKeys can split an oversized batch locally.
     const signedBytes = te.encode(canonicalizeJsonValue({
       ...request,
       authorization: { ...request.authorization, signature: "00".repeat(RAW_P256_SIGNATURE_LEN) },
@@ -250,7 +259,7 @@ async function prepareRequest(
     );
     const requestDigestBytes = requestDigest(request);
     const digest = clientAuthDigest(requestDigestBytes);
-    const signature = await awaitWithSignal(context.operations.authorizer.authorizeTvcRequest({
+    const signature = await awaitWithSignal(context.operations.signer.signRequest({
       operation,
       request,
       clientAuthDigest: digest.slice(),
@@ -344,7 +353,7 @@ export async function executeOperationEnvelope(
     const { responseText, bootProof } = await sendOperation(
       context.backend,
       encrypted,
-      context.operations.walletDescriptor,
+      context.operations.descriptor,
       context.transport,
       maxResponseBytes * 2n + RESPONSE_ENVELOPE_SLACK,
       signal,

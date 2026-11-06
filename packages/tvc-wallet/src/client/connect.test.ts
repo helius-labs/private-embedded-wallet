@@ -15,7 +15,10 @@ import type {
   SignedReleasePolicy,
 } from "../protocol/types.js";
 import { policySigningDigest } from "../verify/release-policy.js";
-import { createTvcClient } from "../wallet/client.js";
+import type { TvcConnectionConfig } from "./connection.js";
+import type { OperationsConfig } from "./operation-executor.js";
+import type { TvcRequestOptions } from "./request.js";
+import { createTvcSession } from "./session.js";
 
 const verifyBootProofMock = vi.hoisted(() => vi.fn());
 
@@ -23,6 +26,16 @@ vi.mock("../verify/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../verify/index.js")>()),
   verifyBootProof: verifyBootProofMock,
 }));
+
+const operations = {
+  descriptor: {},
+  signer: { clientKeyId: "unused", signRequest: () => Promise.reject(new Error("unused")) },
+} as unknown as OperationsConfig;
+
+/** What the client verifies on first use: a fresh session's operation context. */
+function verify(config: TvcConnectionConfig, options?: TvcRequestOptions) {
+  return createTvcSession({ ...config, operations }).context(options);
+}
 
 function secret(label: string): Uint8Array {
   return sha256(new TextEncoder().encode(label));
@@ -189,12 +202,12 @@ function connectFixture() {
   };
 }
 
-describe("connectAndVerify", () => {
+describe("verification", () => {
   beforeEach(() =>
     verifyBootProofMock.mockReset().mockResolvedValue(undefined)
   );
 
-  it("runs encrypted QOS ping, resolves the Boot Proof, and returns an opaque connection", async () => {
+  it("runs encrypted QOS ping, resolves the Boot Proof, and holds the verified release", async () => {
     const {
       ephemeralPublicKey,
       manifestDigest,
@@ -206,7 +219,7 @@ describe("connectAndVerify", () => {
       pingAnswer,
     } = connectFixture();
     const resolveBootProof = vi.fn().mockResolvedValue(bootProof);
-    const client = createTvcClient({
+    const config: TvcConnectionConfig = {
       backend: {
         kind: "enclave",
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
@@ -230,11 +243,10 @@ describe("connectAndVerify", () => {
           });
         },
       },
-    });
+    };
 
-    await expect(client.connectAndVerify()).resolves.toMatchObject({
-      releaseId: "connect-poc",
-      network: "devnet",
+    await expect(verify(config)).resolves.toMatchObject({
+      info: { release_id: "connect-poc", network: "devnet" },
     });
     expect(resolveBootProof).toHaveBeenCalledWith(
       expect.objectContaining({ bootProofLookupKey: ephemeralPublicKey })
@@ -253,7 +265,7 @@ describe("connectAndVerify", () => {
     const lookupsBefore = resolveBootProof.mock.calls.length;
     const verificationsBefore = verifyBootProofMock.mock.calls.length;
     resolveBootProof.mockImplementationOnce(() => new Promise((resolve) => { resolveLate = resolve; }));
-    const pending = client.connectAndVerify({ signal: controller.signal });
+    const pending = verify(config, { signal: controller.signal });
     const rejected = expect(pending).rejects.toThrow("cancelled lookup");
     await vi.waitFor(() => expect(resolveBootProof.mock.calls.length).toBe(lookupsBefore + 1));
     const lookupSignal = resolveBootProof.mock.lastCall?.[0].signal;
@@ -265,7 +277,7 @@ describe("connectAndVerify", () => {
     expect(verifyBootProofMock).toHaveBeenCalledTimes(verificationsBefore);
 
     let discoveryPulls = 0;
-    const oversizedDiscoveryClient = createTvcClient({
+    const oversizedDiscovery = verify({
       backend: {
         kind: "enclave",
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
@@ -276,13 +288,13 @@ describe("connectAndVerify", () => {
       nowMs: () => 1_750_000_000_000n,
       transport: { fetch: async () => oversizedResponse(() => (discoveryPulls += 1)) },
     });
-    await expect(oversizedDiscoveryClient.connectAndVerify()).rejects.toThrowError(
+    await expect(oversizedDiscovery).rejects.toThrowError(
       "ResponseTooLarge",
     );
     expect(discoveryPulls).toBeLessThan(4);
 
     let pingPulls = 0;
-    const oversizedPingClient = createTvcClient({
+    const oversizedPing = verify({
       backend: {
         kind: "enclave",
         endpoint: new URL("https://tvc.example.invalid/api/tvc/"),
@@ -298,7 +310,7 @@ describe("connectAndVerify", () => {
             : oversizedResponse(() => (pingPulls += 1)),
       },
     });
-    await expect(oversizedPingClient.connectAndVerify()).rejects.toThrowError(
+    await expect(oversizedPing).rejects.toThrowError(
       "ResponseTooLarge",
     );
     expect(pingPulls).toBeLessThan(4);
@@ -317,7 +329,7 @@ describe("connectAndVerify", () => {
     } = connectFixture();
     const requested: URL[] = [];
     const session = (extra: Record<string, unknown> = {}) =>
-      createTvcClient({
+      verify({
         backend: {
           kind: "gateway",
           endpoint: new URL("https://gateway.example.invalid/v1/private-wallet?api-key=key"),
@@ -345,8 +357,8 @@ describe("connectAndVerify", () => {
         },
       });
 
-    await expect(session().connectAndVerify()).resolves.toMatchObject({
-      releaseId: "connect-poc",
+    await expect(session()).resolves.toMatchObject({
+      info: { release_id: "connect-poc" },
     });
     expect(requested.map(String)).toEqual([
       "https://gateway.example.invalid/v1/private-wallet/session?api-key=key",
@@ -359,7 +371,7 @@ describe("connectAndVerify", () => {
       nowMs: 1_750_000_000_000n,
     });
 
-    await expect(session({ policy: {} }).connectAndVerify()).rejects.toMatchObject({
+    await expect(session({ policy: {} })).rejects.toMatchObject({
       code: "UnknownJsonField",
     });
   });
@@ -385,7 +397,7 @@ describe("connectAndVerify", () => {
       ),
     ) as Record<string, unknown>;
 
-    const client = createTvcClient({
+    const verified = verify({
       network: "devnet",
       backend: { kind: "enclave", endpoint: new URL("https://tvc.example.invalid") },
       release: {
@@ -397,7 +409,7 @@ describe("connectAndVerify", () => {
       transport: { fetch: async () => new Response("{}", { status: 500 }) },
     });
 
-    await expect(client.connectAndVerify()).rejects.toThrow();
+    await expect(verified).rejects.toThrow();
     expect(seen.length).toBeGreaterThan(0);
   });
 });
@@ -406,20 +418,20 @@ describe("the client's network", () => {
   it("refuses a release for another network before it fetches anything", async () => {
     const { signedPolicy, authorities, expectedPcrs } = connectFixture();
     const fetch = vi.fn();
-    const client = createTvcClient({
+    const verified = verify({
       network: "mainnet",
       backend: { kind: "gateway", endpoint: new URL("https://gateway.example.invalid/v1/private-wallet") },
       release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
       nowMs: () => 1_750_000_000_000n,
       transport: { fetch },
     });
-    await expect(client.connectAndVerify()).rejects.toMatchObject({ code: "NetworkMismatch" });
+    await expect(verified).rejects.toMatchObject({ code: "NetworkMismatch" });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("refuses discovery for another network than the release's", async () => {
     const { signedPolicy, authorities, info, expectedPcrs, bootProof, pingAnswer } = connectFixture();
-    const client = createTvcClient({
+    const verified = verify({
       network: "devnet",
       backend: { kind: "gateway", endpoint: new URL("https://gateway.example.invalid/v1/private-wallet") },
       release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
@@ -435,22 +447,6 @@ describe("the client's network", () => {
         },
       },
     });
-    await expect(client.connectAndVerify()).rejects.toMatchObject({ code: "NetworkMismatch" });
-  });
-
-  it("pins the package's release of its network and names the release's Turnkey service key", () => {
-    const { signedPolicy, authorities, expectedPcrs } = connectFixture();
-    const backend = { kind: "enclave", endpoint: new URL("https://tvc.example.invalid") } as const;
-    expect(() => createTvcClient({ network: "mainnet", backend })).toThrowError(/ReleaseNotPinned/);
-    expect(() => createTvcClient({ network: "testnet" as "devnet", backend })).toThrowError(/UnknownNetwork/);
-    expect(createTvcClient({ network: "devnet", backend }).network).toBe("devnet");
-
-    const client = createTvcClient({
-      network: "devnet",
-      backend,
-      release: { releasePolicy: signedPolicy, releaseAuthorities: authorities, qosIdentityPcrs: expectedPcrs },
-    });
-    const signing = p256.getPublicKey(secret("connect-quorum-signing"), true);
-    expect(client.servicePublicKey).toBe(encodeLowerHex(signing));
+    await expect(verified).rejects.toMatchObject({ code: "NetworkMismatch" });
   });
 });

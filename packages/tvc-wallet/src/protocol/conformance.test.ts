@@ -32,7 +32,7 @@ import {
   computeQosLiveManifestCommitmentPcr,
   verifyBootProof,
 } from "../verify/index.js";
-import { createTvcClient } from "../wallet/client.js";
+import { connectAndVerifyTvc } from "../client/connection.js";
 import {
   bindDiscoveryToPolicy,
   verifySignedReleasePolicy,
@@ -453,7 +453,7 @@ describe("descriptor provisioning digests", () => {
   });
 });
 
-describe("connectAndVerify", () => {
+describe("enclave verification", () => {
   const PCRS = { 0: "44".repeat(48), 1: "55".repeat(48), 2: "66".repeat(48), 3: "77".repeat(48) };
 
   it("rejects an unsigned policy before Boot Proof", async () => {
@@ -462,7 +462,7 @@ describe("connectAndVerify", () => {
       policyFixture.signed
     ) as SignedReleasePolicy;
     signed.signatures = [];
-    const client = createTvcClient({
+    const verified = connectAndVerifyTvc({
       network: "devnet",
       backend: { kind: "enclave", endpoint: new URL("https://tvc.example.invalid") },
       release: {
@@ -477,7 +477,7 @@ describe("connectAndVerify", () => {
         },
       },
     });
-    await expect(client.connectAndVerify()).rejects.toMatchObject({
+    await expect(verified).rejects.toMatchObject({
       code: "ReleasePolicyInvalid",
     });
   });
@@ -485,7 +485,7 @@ describe("connectAndVerify", () => {
   it("fails closed when a replica proves nothing after a valid policy", async () => {
     const http = readJson("http-skeleton.json");
     const policyFixture = readJson("signed-release-policy.json");
-    const client = createTvcClient({
+    const verified = connectAndVerifyTvc({
       network: "devnet",
       backend: { kind: "enclave", endpoint: new URL("https://tvc.example.invalid") },
       release: {
@@ -504,7 +504,7 @@ describe("connectAndVerify", () => {
             : new Response(null, { status: 503 }),
       },
     });
-    await expect(client.connectAndVerify()).rejects.toMatchObject({
+    await expect(verified).rejects.toMatchObject({
       code: "BootProofUnverified",
     });
     await expect(verifyBootProof({} as never)).rejects.toThrowError(

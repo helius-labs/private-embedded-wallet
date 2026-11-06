@@ -72,11 +72,11 @@ Trust material arrives out of band: a threshold-signed release policy, the
 authority public keys, and PCR pins, one release per network
 (`packages/tvc-wallet/src/releases/<network>.json`). The policy names its
 network, `devnet` or `mainnet`, and a client accepts it only for the network
-it was created for. `connectAndVerify()` verifies the policy,
-binds `GET /v1/info` to it, completes the Quorum-encrypted `POST /v1/ping`,
-and verifies the Nitro Boot Proof against the PCRs and accepted manifest
-digests. Wallet calls take the resulting `VerifiedConnection` only; HTTPS
-alone establishes nothing. A wallet descriptor, signed by the operator with the
+it was created for. Before its first wallet call the client verifies the
+policy, binds `GET /v1/info` to it, completes the Quorum-encrypted
+`POST /v1/ping`, and verifies the Nitro Boot Proof against the PCRs and
+accepted manifest digests; it verifies again once the policy's window no
+longer holds or the backend refuses a call. HTTPS alone establishes nothing. A wallet descriptor, signed by the operator with the
 provisioning key whose public half is compiled into the image, grants a client
 key the operations of one Turnkey wallet. Each operation also carries a wallet
 grant, signed with the grant key, that is at most an hour old; a client key

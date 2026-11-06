@@ -56,16 +56,8 @@ export type TvcConnectionConfig = {
   requestTimeoutMs?: number;
 };
 
-const verifiedConnectionBrand: unique symbol = Symbol("VerifiedConnection");
-
-export type VerifiedConnection = {
-  readonly [verifiedConnectionBrand]: true;
-  readonly releaseId: string;
-  readonly network: Network;
-};
-
+/** What one verification established: the release's discovery, bound to the policy, and how to check each answer. */
 export type ConnectedTvcRuntime = {
-  readonly connection: VerifiedConnection;
   readonly backend: TvcBackend;
   readonly info: ServiceInfo;
   readonly transport: TvcTransport;
@@ -75,14 +67,6 @@ export type ConnectedTvcRuntime = {
   readonly trustVerifier: TvcTrustVerifier;
   readonly requestTimeoutMs?: number;
 };
-
-export function createVerifiedConnection(releaseId: string, network: Network): VerifiedConnection {
-  return Object.freeze({
-    [verifiedConnectionBrand]: true as const,
-    releaseId,
-    network,
-  });
-}
 
 export function parseServiceInfo(text: string): ServiceInfo {
   return parseStrictJson<ServiceInfo>(text, SERVICE_INFO_KEYS);
@@ -185,7 +169,6 @@ export async function connectAndVerifyTvc(
   });
 
   return {
-    connection: createVerifiedConnection(info.release_id, network),
     backend,
     info,
     transport,

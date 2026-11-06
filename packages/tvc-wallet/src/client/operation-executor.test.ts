@@ -33,8 +33,8 @@ function fixture() {
     backend: { kind: "enclave", endpoint: new URL("https://example.invalid"), walletGrant: async () => grant },
     info, transport: { fetch },
     operations: {
-      walletDescriptor: descriptor,
-      authorizer: { clientKeyId: clientKeyIdFor(publicKey), authorizeTvcRequest: sign },
+      descriptor,
+      signer: { clientKeyId: clientKeyIdFor(publicKey), signRequest: sign },
     },
     releasePolicyValidFromMs: 0n,
     releasePolicyExpiresAtMs: 9999999n, nowMs: () => 1000n,
@@ -77,7 +77,7 @@ it("refuses a descriptor for another network before signing", async () => {
     ...context,
     operations: {
       ...context.operations,
-      walletDescriptor: { ...context.operations.walletDescriptor, network: "mainnet" },
+      descriptor: { ...context.operations.descriptor, network: "mainnet" },
     },
   };
   await expect(executeOperationEnvelope(mainnet, { type: "Decrypt", items: [item] }))
@@ -106,7 +106,7 @@ describe("through a gateway", () => {
       request: Record<string, unknown>;
     };
     expect(Object.keys(body).sort()).toEqual(["descriptor", "request"]);
-    expect(body.descriptor).toEqual(context.operations.walletDescriptor);
+    expect(body.descriptor).toEqual(context.operations.descriptor);
     expect(Object.keys(body.request).sort()).toEqual(["ciphertext", "quorum_key_epoch", "quorum_key_id", "version"]);
   });
 
@@ -182,7 +182,7 @@ it("wipes the response key when request authorization fails", async () => {
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it("releases and wipes a request whose authorizer never answers, without sending it later", async () => {
+it("releases and wipes a request whose signer never answers, without sending it later", async () => {
   const { context, item, sign, fetch } = fixture();
   const responseKey = new Uint8Array(32).fill(7);
   vi.spyOn(p256.utils, "randomPrivateKey").mockReturnValueOnce(responseKey);

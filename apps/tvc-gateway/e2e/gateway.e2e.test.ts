@@ -1,26 +1,21 @@
 import { ed25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/p256";
 import { getAddressDecoder } from "@solana/kit";
-import {
-  createTvcClient,
-  identityOf,
-  sealedSeedOf,
-  type ReleaseTrust,
-  type TvcClient,
-  type TvcTransport,
-  type VerifiedConnection,
-} from "@heliuslabs/spr-embedded-wallet";
+import type { TvcKeys, TvcRequestSigner, TvcTransport } from "@heliuslabs/spr-embedded-wallet";
 import {
   decodeLowerHex,
   encodeLowerHex,
   walletEnrollmentMessage,
-  type BootstrapResult,
   type Network,
   type ReleasePolicy,
   type ServiceInfo,
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
-import { createLocalTvcClient } from "@heliuslabs/spr-embedded-wallet/testing";
+import {
+  createLocalTvcClient,
+  createTestTvcClient,
+  type ReleaseTrust,
+} from "@heliuslabs/spr-embedded-wallet/testing";
 import { beforeAll, describe, expect, inject, it } from "vitest";
 import {
   ORGANIZATION_ID,
@@ -155,10 +150,7 @@ describe("a wallet enrolled through the gateway", () => {
       return response;
     },
   };
-  let descriptor: WalletDescriptor;
-  let tvc: TvcClient;
-  let connection: VerifiedConnection;
-  let bootstrap: BootstrapResult;
+  let keys: TvcKeys;
   const firstSent = () => {
     const operation = sent.find(({ path }) => path.endsWith("/operations"));
     if (!operation) throw new Error("no operation was sent");
@@ -168,16 +160,14 @@ describe("a wallet enrolled through the gateway", () => {
     JSON.parse(firstSent().body) as { descriptor: WalletDescriptor; request: { ciphertext: string } };
 
   beforeAll(async () => {
-    descriptor = (await post("/enroll", enrollment())).body.descriptor;
-    tvc = createLocalTvcClient({
+    const tvc = createLocalTvcClient({
       network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(privateWallet) },
       solanaAddress: ownerAddress,
-      walletDescriptor: descriptor,
+      descriptor: (await post("/enroll", enrollment())).body.descriptor,
       transport,
     });
-    connection = await tvc.connectAndVerify();
-    bootstrap = await tvc.bootstrap(connection);
+    keys = await tvc.open();
   });
 
   it("connects with one /session request", () => {
@@ -187,16 +177,20 @@ describe("a wallet enrolled through the gateway", () => {
   });
 
   it("bootstraps through /operations with a grant the gateway adds", () => {
-    expect(identityOf(bootstrap).solanaAddress).toBe(ownerAddress);
+    expect(keys.stored.identity.solanaAddress).toBe(ownerAddress);
     expect(firstOperation().request).not.toHaveProperty("wallet_grant");
   });
 
-  it("answers TransactionKeys for the bootstrapped wallet", async () => {
-    const identity = identityOf(bootstrap);
-    const keys = await tvc.transactionKeys(connection, sealedSeedOf(bootstrap), [
-      { viewing_public_key: identity.shieldedViewingPublicKey, first_nullifier: "01".padStart(64, "0") },
+  it("answers TransactionKeys for the bootstrapped wallet over the same session", async () => {
+    type Request = Parameters<TvcKeys["transactionKeys"]>[0][number];
+    const firstNullifier = new Uint8Array(32);
+    firstNullifier[31] = 1;
+    const [viewingPublicKey] = keys.viewingPublicKeys();
+    const answered = await keys.transactionKeys([
+      { viewingPublicKey: viewingPublicKey!, firstNullifier: firstNullifier as Request["firstNullifier"] },
     ]);
-    expect(keys).toHaveLength(1);
+    expect(answered).toHaveLength(1);
+    expect(sent.filter(({ path }) => path.endsWith("/session"))).toHaveLength(1);
   });
 
   it("answers a resent operation with the first answer", async () => {
@@ -259,10 +253,9 @@ describe("a direct caller with a Helius API key", () => {
       network: "devnet",
       backend: { kind: "gateway", endpoint: new URL(`${privateWallet}?api-key=${apiKey}`) },
       solanaAddress: ownerAddress,
-      walletDescriptor: descriptor,
+      descriptor,
     });
-    const connection = await tvc.connectAndVerify();
-    expect(identityOf(await tvc.bootstrap(connection)).solanaAddress).toBe(ownerAddress);
+    expect((await tvc.open()).stored.identity.solanaAddress).toBe(ownerAddress);
   });
 });
 
@@ -293,19 +286,27 @@ describe("a release the release script signs for the testkit", () => {
       qosIdentityPcrs: { 0: "00".repeat(48), 1: "00".repeat(48), 2: "00".repeat(48), 3: "00".repeat(48) },
     };
     expect(release.releasePolicy.policy).toEqual(policy);
+    const descriptor: WalletDescriptor = (await post("/enroll", enrollment())).body.descriptor;
+    // Verification fails before any request is signed.
+    const signer: TvcRequestSigner = {
+      clientKeyId: "unused",
+      signRequest: () => Promise.reject(new Error("signed before verification")),
+    };
     const client = (network: Network) =>
-      createTvcClient({
+      createTestTvcClient({
         network,
         backend: { kind: "gateway", endpoint: new URL(privateWallet) },
         release,
+        descriptor,
+        signer,
         transport: { fetch: (url, init) => fetch(url, { ...init, headers: gatekeeperHeaders() }) },
       });
     // The policy verifies and binds the testkit's discovery and ping; only
     // the unattested Boot Proof is refused.
-    await expect(client("devnet").connectAndVerify()).rejects.toMatchObject({
+    await expect(client("devnet").open()).rejects.toMatchObject({
       code: "BootProofUnverified",
     });
-    await expect(client("mainnet").connectAndVerify()).rejects.toMatchObject({ code: "NetworkMismatch" });
+    await expect(client("mainnet").open()).rejects.toMatchObject({ code: "NetworkMismatch" });
     expect(() => releasePolicy(info.release_id, { ...cfg, network: "mainnet" }, info, Date.now())).toThrow(
       "/v1/info network is devnet, expected mainnet",
     );

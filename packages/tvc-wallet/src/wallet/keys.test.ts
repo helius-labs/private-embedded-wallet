@@ -3,13 +3,12 @@ import type { MergeInputs, ProverInputs } from "@heliuslabs/spr/client";
 import { gcm } from "@noble/ciphers/aes";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { VerifiedConnection } from "../client/connection.js";
 import type { TvcTransport } from "../client/transport.js";
 import { TvcError, TvcOperationError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
 import type { ProverSealing, SealedProverRequest, SealedSeed } from "../protocol/types.js";
-import type { ShieldedIdentity, TvcClient } from "./client.js";
-import { TvcKeys } from "./keys.js";
+import type { ShieldedIdentity } from "./client.js";
+import { EnclaveKeys, type TvcEnclave } from "./keys.js";
 import { TvcProverPolicy } from "./prover-policy.js";
 import { POLICY_URL, policyFile } from "./prover-policy.testkit.js";
 import type { OperationOptions } from "./operations.js";
@@ -24,7 +23,6 @@ vi.mock("@heliuslabs/spr/client", async (importOriginal) => ({
   mergeProverRequestBody: encoders.mergeProverRequestBody,
 }));
 
-const connection = { verified: true } as unknown as VerifiedConnection;
 const sealedSeed: SealedSeed = { sealedSeed: "11".repeat(64) };
 const ZERO_PROOF = {
   proof: {
@@ -88,33 +86,28 @@ function fixture(answers: readonly Response[] = []) {
     shieldedNullifierPublicKey: encodeLowerHex(address.nullifierPublicKey),
     shieldedViewingPublicKey: encodeLowerHex(address.viewingPublicKey.toBytes()),
   };
-  const client = {
-    network: "devnet" as const,
-    servicePublicKey: "",
-    connectAndVerify: vi.fn(),
-    bootstrap: vi.fn(),
-    decrypt: vi.fn(async (_c: unknown, _k: unknown, items: readonly unknown[]) =>
+  const enclave = {
+    decrypt: vi.fn(async (_k: unknown, items: readonly unknown[]) =>
       items.map((_, index) => encodeLowerHex(bytes(index + 1, 3))),
     ),
-    derive: vi.fn(async (_c: unknown, _k: unknown, items: readonly unknown[]) =>
+    derive: vi.fn(async (_k: unknown, items: readonly unknown[]) =>
       items.map((_, index) => encodeLowerHex(bytes(index + 1))),
     ),
-    transactionKeys: vi.fn(async (_c: unknown, _k: unknown, items: readonly unknown[]) =>
+    transactionKeys: vi.fn(async (_k: unknown, items: readonly unknown[]) =>
       items.map((_, index) => encodeLowerHex(bytes(index + 1))),
     ),
-    prove: vi.fn(async (_c: unknown, _k: unknown, _r: unknown, prover: ProverSealing) =>
+    prove: vi.fn(async (_k: unknown, _r: unknown, prover: ProverSealing) =>
       sealedFor(prover.target),
     ),
-  } satisfies TvcClient;
+  } satisfies TvcEnclave;
   const { transport, seen } = proverTransport(answers);
   return {
     address,
     identity,
-    client,
+    enclave,
     seen,
-    keys: new TvcKeys({
-      client,
-      connection,
+    keys: new EnclaveKeys({
+      enclave,
       sealedSeed,
       identity,
       prover: { url: PROVER_URL, policy: new TvcProverPolicy(POLICY_URL, transport), transport },
@@ -125,18 +118,19 @@ function fixture(answers: readonly Response[] = []) {
 describe("TvcKeys", () => {
   beforeAll(() => initializePoseidon());
 
-  it("is the bootstrapped identity and holds its one viewing key", () => {
-    const { address, keys } = fixture();
+  it("is the bootstrapped identity, holds its one viewing key, and stores what reopens it", () => {
+    const { address, identity, keys } = fixture();
     expect(keys.address().toBytes()).toEqual(address.toBytes());
     expect(keys.viewingPublicKeys().map((key) => key.toBytes())).toEqual([
       address.viewingPublicKey.toBytes(),
     ]);
-    const { identity, client } = fixture();
+    expect(keys.stored).toEqual({ identity, sealedSeed });
+    expect(Object.isFrozen(keys.stored.identity)).toBe(true);
+    const { enclave } = fixture();
     expect(
       () =>
-        new TvcKeys({
-          client,
-          connection,
+        new EnclaveKeys({
+          enclave,
           sealedSeed,
           identity: { ...identity, shieldedOwnerHash: "00".repeat(32) },
           prover: { url: PROVER_URL, policy: new TvcProverPolicy(POLICY_URL) },
@@ -144,25 +138,8 @@ describe("TvcKeys", () => {
     ).toThrowError(/ShieldedIdentityChanged/);
   });
 
-  it("proves under the policy of the client's network unless told otherwise", () => {
-    const forNetwork = vi.spyOn(TvcProverPolicy, "forNetwork");
-    try {
-      const { identity, client } = fixture();
-      new TvcKeys({
-        client: { ...client, network: "mainnet" },
-        connection,
-        sealedSeed,
-        identity,
-        prover: { url: PROVER_URL },
-      });
-      expect(forNetwork).toHaveBeenCalledWith("mainnet");
-    } finally {
-      forNetwork.mockRestore();
-    }
-  });
-
   it("puts every SDK request on the wire in the enclave's terms", async () => {
-    const { address, keys, client } = fixture();
+    const { address, keys, enclave } = fixture();
     const other = ShieldedKeypair.generate().viewingPublicKey();
     const plaintexts = await keys.decrypt([
       {
@@ -182,7 +159,7 @@ describe("TvcKeys", () => {
         label: "ringDeposit",
       },
     ]);
-    expect(client.decrypt).toHaveBeenCalledWith(connection, sealedSeed, [
+    expect(enclave.decrypt).toHaveBeenCalledWith(sealedSeed, [
       {
         ciphertext: "09090909",
         viewing_public_key: encodeLowerHex(address.viewingPublicKey.toBytes()),
@@ -202,7 +179,7 @@ describe("TvcKeys", () => {
       { kind: "mergePrivateTxBlinding", firstNullifier: bytes(3) as Bytes32 },
       { kind: "mergeOutputKey", firstNullifier: bytes(3) as Bytes32 },
     ]);
-    expect(client.derive).toHaveBeenCalledWith(connection, sealedSeed, [
+    expect(enclave.derive).toHaveBeenCalledWith(sealedSeed, [
       { kind: "Nullifier", utxo_hash: "01".repeat(32), blinding: "02".repeat(32) },
       { kind: "MergeDummyNullifier", first_nullifier: "03".repeat(32), slot_index: "7" },
       { kind: "MergeOutputBlinding", first_nullifier: "03".repeat(32) },
@@ -214,7 +191,7 @@ describe("TvcKeys", () => {
     const [txKey] = await keys.transactionKeys([
       { viewingPublicKey: address.viewingPublicKey, firstNullifier: bytes(4) as Bytes32 },
     ]);
-    expect(client.transactionKeys).toHaveBeenCalledWith(connection, sealedSeed, [
+    expect(enclave.transactionKeys).toHaveBeenCalledWith(sealedSeed, [
       {
         viewing_public_key: encodeLowerHex(address.viewingPublicKey.toBytes()),
         first_nullifier: "04".repeat(32),
@@ -229,23 +206,23 @@ describe("TvcKeys", () => {
   });
 
   it("splits a long batch and keeps the answers in request order", async () => {
-    const { keys, client } = fixture();
+    const { keys, enclave } = fixture();
     const values = await keys.derive(
       Array.from({ length: 300 }, (_, index) => ({
         kind: "mergeOutputBlinding" as const,
         firstNullifier: bytes(index % 256) as Bytes32,
       })),
     );
-    expect(client.derive).toHaveBeenCalledTimes(2);
-    expect(client.derive.mock.calls[0]?.[2]).toHaveLength(256);
-    expect(client.derive.mock.calls[1]?.[2]).toHaveLength(44);
+    expect(enclave.derive).toHaveBeenCalledTimes(2);
+    expect(enclave.derive.mock.calls[0]?.[1]).toHaveLength(256);
+    expect(enclave.derive.mock.calls[1]?.[1]).toHaveLength(44);
     expect(values).toHaveLength(300);
     expect(values[256]).toEqual(bytes(1));
   });
 
   it("splits on the byte ceiling, preserves order, and propagates other failures", async () => {
-    const { keys, client } = fixture();
-    client.derive.mockImplementation(async (_c, _k, items) => {
+    const { keys, enclave } = fixture();
+    enclave.derive.mockImplementation(async (_k, items) => {
       if (items.length > 2) throw new TvcError("RequestTooLarge");
       return items.map((item) => (item as { first_nullifier: string }).first_nullifier);
     });
@@ -254,28 +231,27 @@ describe("TvcKeys", () => {
       firstNullifier: bytes(index) as Bytes32,
     }));
     expect(await keys.derive(requests)).toEqual(requests.map((item) => item.firstNullifier));
-    expect(client.derive.mock.calls.map((call) => call[2].length)).toEqual([7, 3, 1, 2, 4, 2, 2]);
+    expect(enclave.derive.mock.calls.map((call) => call[1].length)).toEqual([7, 3, 1, 2, 4, 2, 2]);
 
     for (const code of ["RequestTooLarge", "OperationRejected"] as const) {
-      client.derive.mockClear();
-      client.derive.mockRejectedValue(new TvcError(code));
+      enclave.derive.mockClear();
+      enclave.derive.mockRejectedValue(new TvcError(code));
       await expect(keys.derive(requests.slice(0, 1))).rejects.toMatchObject({ code });
-      expect(client.derive).toHaveBeenCalledTimes(1);
+      expect(enclave.derive).toHaveBeenCalledTimes(1);
     }
-    client.derive.mockClear();
+    enclave.derive.mockClear();
     await expect(keys.derive(requests)).rejects.toMatchObject({ code: "OperationRejected" });
-    expect(client.derive).toHaveBeenCalledTimes(1);
+    expect(enclave.derive).toHaveBeenCalledTimes(1);
   });
 
   it("seals the SDK's open prover body to the attested prover and opens its answer", async () => {
-    const { keys, client, seen } = fixture();
+    const { keys, enclave, seen } = fixture();
     const body = { circuitType: "merge", inputs: [{}], userNullifierSecret: null };
     encoders.mergeProverRequestBody.mockReturnValueOnce(body);
     const inputs = { circuit: "merge" } as unknown as MergeInputs;
     const proof = await keys.proveMerge(inputs);
     expect(encoders.mergeProverRequestBody).toHaveBeenCalledWith(inputs);
-    expect(client.prove).toHaveBeenCalledWith(
-      connection,
+    expect(enclave.prove).toHaveBeenCalledWith(
       sealedSeed,
       body,
       {
@@ -292,7 +268,7 @@ describe("TvcKeys", () => {
     // enclave checks; the sealed request goes to its target with the base
     // URL's API key and the TEE headers.
     const [policy, attest, submit] = seen;
-    const nonce = client.prove.mock.lastCall?.[3].nonce;
+    const nonce = enclave.prove.mock.lastCall?.[2].nonce;
     expect(policy?.url.href).toBe(POLICY_URL);
     expect(attest?.url.pathname).toBe("/v1/spr/attestation");
     expect(attest?.url.searchParams.get("nonce")).toBe(nonce);
@@ -309,8 +285,7 @@ describe("TvcKeys", () => {
     };
     encoders.proverRequestBody.mockReturnValueOnce(transfer);
     await keys.prove({ circuit: "transfer" } as unknown as ProverInputs);
-    expect(client.prove).toHaveBeenLastCalledWith(
-      connection,
+    expect(enclave.prove).toHaveBeenLastCalledWith(
       sealedSeed,
       transfer,
       expect.objectContaining({ target: "/prove/transfer_confidential_1_2" }),
@@ -320,7 +295,7 @@ describe("TvcKeys", () => {
 
   it("downloads the policy, attests and seals again once when the prover lost its key", async () => {
     const lost = () => Response.json({ code: "tee_decryption_failed" }, { status: 400 });
-    const { keys, client, seen } = fixture([lost()]);
+    const { keys, enclave, seen } = fixture([lost()]);
     encoders.mergeProverRequestBody.mockReturnValue({
       circuitType: "merge",
       inputs: [{}],
@@ -328,7 +303,7 @@ describe("TvcKeys", () => {
     });
     const proof = await keys.proveMerge({ circuit: "merge" } as unknown as MergeInputs);
     expect(proof.a).toHaveLength(64);
-    expect(client.prove).toHaveBeenCalledTimes(2);
+    expect(enclave.prove).toHaveBeenCalledTimes(2);
     expect(seen.filter(({ url }) => url.pathname.endsWith("/attestation"))).toHaveLength(2);
     expect(seen.filter(({ url }) => url.href === POLICY_URL)).toHaveLength(2);
 
@@ -341,7 +316,7 @@ describe("TvcKeys", () => {
   it("reuses one attestation for the policy's max age", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     try {
-      const { keys, client, seen } = fixture();
+      const { keys, enclave, seen } = fixture();
       encoders.mergeProverRequestBody.mockReturnValue({
         circuitType: "merge",
         inputs: [{}],
@@ -353,20 +328,20 @@ describe("TvcKeys", () => {
       now.mockReturnValue(1_800_000_000_000 + 599_000);
       await keys.proveMerge(inputs);
       expect(attestations()).toHaveLength(1);
-      const [first, second] = client.prove.mock.calls.map((call) => call[3].nonce);
+      const [first, second] = enclave.prove.mock.calls.map((call) => call[2].nonce);
       expect(second).toBe(first);
 
       now.mockReturnValue(1_800_000_000_000 + 600_000);
       await keys.proveMerge(inputs);
       expect(attestations()).toHaveLength(2);
-      expect(client.prove.mock.lastCall?.[3].nonce).not.toBe(first);
+      expect(enclave.prove.mock.lastCall?.[2].nonce).not.toBe(first);
     } finally {
       now.mockRestore();
     }
   });
 
   it("fetches a fresh policy and attestation once when the enclave refuses them", async () => {
-    const { keys, client, seen } = fixture();
+    const { keys, enclave, seen } = fixture();
     encoders.mergeProverRequestBody.mockReturnValue({
       circuitType: "merge",
       inputs: [{}],
@@ -374,23 +349,23 @@ describe("TvcKeys", () => {
     });
     const inputs = { circuit: "merge" } as unknown as MergeInputs;
     await keys.proveMerge(inputs);
-    client.prove.mockRejectedValueOnce(new TvcOperationError("Prove", "Prover"));
+    enclave.prove.mockRejectedValueOnce(new TvcOperationError("Prove", "Prover"));
     await keys.proveMerge(inputs);
     expect(seen.filter(({ url }) => url.pathname.endsWith("/attestation"))).toHaveLength(2);
     expect(seen.filter(({ url }) => url.href === POLICY_URL)).toHaveLength(2);
-    expect(client.prove).toHaveBeenCalledTimes(3);
+    expect(enclave.prove).toHaveBeenCalledTimes(3);
 
     // Only the structured stage counts, never an error's text.
     const plain = fixture();
-    plain.client.prove.mockRejectedValueOnce(new TvcError("OperationFailed", "Prover"));
+    plain.enclave.prove.mockRejectedValueOnce(new TvcError("OperationFailed", "Prover"));
     await expect(plain.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed" });
-    expect(plain.client.prove).toHaveBeenCalledOnce();
+    expect(plain.enclave.prove).toHaveBeenCalledOnce();
 
     // A fresh policy and attestation the enclave refuses are the caller's error.
     const refused = fixture();
-    refused.client.prove.mockRejectedValue(new TvcOperationError("Prove", "Prover"));
+    refused.enclave.prove.mockRejectedValue(new TvcOperationError("Prove", "Prover"));
     await expect(refused.keys.proveMerge(inputs)).rejects.toMatchObject({ code: "OperationFailed", stage: "Prover" });
-    expect(refused.client.prove).toHaveBeenCalledTimes(2);
+    expect(refused.enclave.prove).toHaveBeenCalledTimes(2);
   });
 
   it("refuses an unencrypted success and surfaces the prover's refusal", async () => {
@@ -429,17 +404,17 @@ describe("TvcKeys", () => {
             headers: { "Spr-Tee": "v1", "Retry-After": "3" },
           })
         : new Response("upstream unavailable", { status, headers: { "Retry-After": "3" } });
-      const { keys, client, seen } = fixture([response]);
+      const { keys, enclave, seen } = fixture([response]);
       await expect(keys.proveMerge(inputs)).rejects.toMatchObject({
         name: "TvcHttpError", code: "ProverRefused", status, retryAfter: "3",
       });
-      expect(client.prove).toHaveBeenCalledTimes(1);
+      expect(enclave.prove).toHaveBeenCalledTimes(1);
       expect(seen.filter(({ url }) => url.pathname.includes("/prove/"))).toHaveLength(1);
     }
   });
 
   it("hands the SDK's request context to every batch of a key call", async () => {
-    const { address, keys, client } = fixture();
+    const { address, keys, enclave } = fixture();
     const controller = new AbortController();
     const context = { signal: controller.signal, timeoutMs: 1_000 };
 
@@ -451,8 +426,8 @@ describe("TvcKeys", () => {
       context,
     );
     // One combined signal per SDK request: the deadline covers both batches.
-    const [first, second] = client.derive.mock.calls.map(
-      (call) => (call.at(3) as OperationOptions | undefined)?.signal,
+    const [first, second] = enclave.derive.mock.calls.map(
+      (call) => (call.at(2) as OperationOptions | undefined)?.signal,
     );
     expect(first).toBeInstanceOf(AbortSignal);
     expect(second).toBe(first);
@@ -462,13 +437,13 @@ describe("TvcKeys", () => {
       [{ viewingPublicKey: address.viewingPublicKey, firstNullifier: bytes(4) as Bytes32 }],
       { signal: controller.signal },
     );
-    expect(client.transactionKeys).toHaveBeenLastCalledWith(connection, sealedSeed, expect.anything(), {
+    expect(enclave.transactionKeys).toHaveBeenLastCalledWith(sealedSeed, expect.anything(), {
       signal: controller.signal,
     });
   });
 
   it("hands the SDK's cancellation and deadline to the enclave call", async () => {
-    const { keys, client } = fixture();
+    const { keys, enclave } = fixture();
     encoders.proverRequestBody.mockReturnValue({
       circuitType: "transfer-confidential",
       inputs: [{ nullifierSecret: null }],
@@ -478,8 +453,7 @@ describe("TvcKeys", () => {
 
     const controller = new AbortController();
     await keys.prove(inputs, { signal: controller.signal });
-    expect(client.prove).toHaveBeenLastCalledWith(
-      connection,
+    expect(enclave.prove).toHaveBeenLastCalledWith(
       sealedSeed,
       expect.anything(),
       expect.anything(),
@@ -487,7 +461,7 @@ describe("TvcKeys", () => {
     );
 
     await keys.prove(inputs, { signal: controller.signal, timeoutMs: 1_000 });
-    const options = client.prove.mock.lastCall?.at(4) as OperationOptions | undefined;
+    const options = enclave.prove.mock.lastCall?.at(3) as OperationOptions | undefined;
     expect(options?.signal).toBeInstanceOf(AbortSignal);
     expect(options?.signal?.aborted).toBe(false);
     controller.abort();

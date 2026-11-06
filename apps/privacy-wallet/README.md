@@ -51,14 +51,14 @@ cargo run -p zolana-tvc-privacy-wallet --features local-dev \
   --wallet-keypair /path/to/disposable-keypair.json --prover-url http://127.0.0.1:3001
 ```
 
-Clients prove through `http://127.0.0.1:44021` (`localProverConfig` in
-`@heliuslabs/spr-embedded-wallet/testing`).
+Clients prove through `http://127.0.0.1:44021` (`createLocalTvcClient`'s
+`prover: localProverConfig(url)` in `@heliuslabs/spr-embedded-wallet/testing`).
 
 `--live-prover` starts no stand-in: the local enclave seals witnesses only to a
 prover whose Nitro attestation chains to the production AWS root and passes
 the network's signed policy, as the enclave image does. Clients of that network
-(`createLocalTvcClient({ network })`) prove through its TEE provers under its
-policy; the custody and QOS keys stay local and unattested.
+(`createLocalTvcClient({ network, prover: { url } })`) prove through its TEE
+provers under its policy; the custody and QOS keys stay local and unattested.
 
 The `local-dev` feature is never enabled in the enclave binary.
 

@@ -167,14 +167,13 @@ empty, duplicate, or unknown key. A re-signed policy is a new authority set
 every client must accept.
 
 The trust material a client pins is the policy, the authority public keys,
-and the QOS identity PCRs. `connectAndVerify()` in `@heliuslabs/spr-embedded-wallet`
-verifies the policy, binds every security field of `GET /v1/info` to it,
-including the network,
-completes the Quorum-encrypted `POST /v1/ping`, and verifies the Nitro Boot
-Proof against the PCRs and the accepted manifest digests. Wallet calls take
-the resulting `VerifiedConnection` only. `/v1/info` is discovery, not a trust
-root, `/health` reports process readiness only, and HTTPS alone establishes
-nothing.
+and the QOS identity PCRs. Before its first wallet call, the client in
+`@heliuslabs/spr-embedded-wallet` verifies the policy, binds every security
+field of `GET /v1/info` to it, including the network, completes the
+Quorum-encrypted `POST /v1/ping`, and verifies the Nitro Boot Proof against
+the PCRs and the accepted manifest digests. Wallet calls run only over that
+verification. `/v1/info` is discovery, not a trust root, `/health` reports
+process readiness only, and HTTPS alone establishes nothing.
 
 ## Fixtures
 

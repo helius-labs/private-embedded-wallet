@@ -1,11 +1,11 @@
 import type {
-  AuthorizeTvcRequestInput,
-  TvcOperationAuthorizer,
+  SignTvcRequestInput,
+  TvcRequestSigner,
 } from "../client/operation-executor.js";
 import { clientKeyIdFor } from "../protocol/digest.js";
 import { TvcError } from "../protocol/error.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
-import { authorizedRequestMessage, compactLowS } from "./authorizer.js";
+import { compactLowS, signedRequestMessage } from "./signer.js";
 import { openDatabase, STORE_NAME } from "./persisted-state.js";
 
 const DATABASE_NAME = "zolana-tvc-privacy-wallet-authorizer-v1";
@@ -30,19 +30,20 @@ type PersistentBrowserTvcSealedValue = {
   readonly ciphertext: string;
 };
 
-export type PersistentBrowserTvcAuthorizer = {
-  /** Stable public registration data used by descriptor provisioning. */
-  readonly clientKeyId: string;
+/**
+ * The browser profile's request signer; it never exposes the private
+ * CryptoKey. Pass it as `createTvcClient`'s `signer`.
+ */
+export type PersistentBrowserTvcSigner = TvcRequestSigner & {
+  /** The uncompressed P-256 public key, hex, that enrollment names. */
   readonly clientPublicKey: string;
-  /** Closed-operation authorizer; it never exposes the private CryptoKey. */
-  readonly authorizer: TvcOperationAuthorizer;
   /** Encrypts privacy material under a non-exportable, device-local AES key. */
   seal(plaintext: Uint8Array, additionalData: Uint8Array): Promise<PersistentBrowserTvcSealedValue>;
   /** Opens a value sealed by this browser profile. */
   open(sealed: PersistentBrowserTvcSealedValue, additionalData: Uint8Array): Promise<Uint8Array>;
 };
 
-export type PersistentBrowserTvcAuthorizerOptions = {
+export type PersistentBrowserTvcSignerOptions = {
   /** Selects an isolated persistent-key namespace for a demo or tenant. */
   readonly databaseName?: string;
 };
@@ -198,12 +199,12 @@ async function assertKeyMatches(record: StoredClientKey): Promise<void> {
 }
 
 /**
- * Loads or creates the browser's dedicated TVC authorization key. This key is
+ * Loads or creates the browser's dedicated TVC request key. This key is
  * separate from Turnkey's persistent login/session key and cannot be exported.
  */
-export async function loadOrCreatePersistentBrowserTvcAuthorizer(
-  options: PersistentBrowserTvcAuthorizerOptions = {},
-): Promise<PersistentBrowserTvcAuthorizer> {
+export async function loadOrCreatePersistentBrowserTvcSigner(
+  options: PersistentBrowserTvcSignerOptions = {},
+): Promise<PersistentBrowserTvcSigner> {
   const database = await openDatabase(options.databaseName ?? DATABASE_NAME);
   try {
     const record = await loadOrCreateRecord(database);
@@ -211,18 +212,15 @@ export async function loadOrCreatePersistentBrowserTvcAuthorizer(
     return {
       clientKeyId: record.clientKeyId,
       clientPublicKey: record.clientPublicKey,
-      authorizer: {
-        clientKeyId: record.clientKeyId,
-        async authorizeTvcRequest(input: AuthorizeTvcRequestInput) {
-          const expected = authorizedRequestMessage(input, record.clientKeyId);
-          return compactLowS(
-            await crypto.subtle.sign(
-              { name: "ECDSA", hash: "SHA-256" },
-              record.privateKey,
-              ownedBytes(expected),
-            ),
-          );
-        },
+      async signRequest(input: SignTvcRequestInput) {
+        const expected = signedRequestMessage(input, record.clientKeyId);
+        return compactLowS(
+          await crypto.subtle.sign(
+            { name: "ECDSA", hash: "SHA-256" },
+            record.privateKey,
+            ownedBytes(expected),
+          ),
+        );
       },
       async seal(plaintext, additionalData) {
         if (plaintext.length === 0 || additionalData.length === 0) {

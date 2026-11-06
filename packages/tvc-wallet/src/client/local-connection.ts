@@ -6,7 +6,6 @@ import { TvcError } from "../protocol/error.js";
 import type { Network, OperationKind } from "../protocol/types.js";
 import { fetchSession, type TvcBackend } from "./backend.js";
 import {
-  createVerifiedConnection,
   parseServiceInfo,
   qosPingChallenge,
   verifyQosPingAnswer,
@@ -72,7 +71,6 @@ export async function connectLocalUnattestedTvc(
   }
   const nowMs = config.nowMs ?? (() => BigInt(Date.now()));
   return {
-    connection: createVerifiedConnection(info.release_id, info.network),
     backend: config.backend,
     info,
     transport,

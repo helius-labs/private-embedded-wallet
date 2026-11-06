@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { authorizedRequestMessage } from "./authorizer.js";
+import { signedRequestMessage } from "./signer.js";
 import { clientAuthMessage, requestDigest } from "../protocol/digest.js";
-import type { AuthorizeTvcRequestInput } from "../client/operation-executor.js";
+import type { SignTvcRequestInput } from "../client/operation-executor.js";
 import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
 
 const CLIENT_KEY_ID = "tvc-browser-p256-" + "11".repeat(16);
@@ -40,7 +40,7 @@ function request(): OperationRequest {
   };
 }
 
-function input(overrides: Partial<AuthorizeTvcRequestInput> = {}): AuthorizeTvcRequestInput {
+function input(overrides: Partial<SignTvcRequestInput> = {}): SignTvcRequestInput {
   const value = request();
   return {
     operation: value.operation,
@@ -51,25 +51,25 @@ function input(overrides: Partial<AuthorizeTvcRequestInput> = {}): AuthorizeTvcR
   };
 }
 
-describe("browser authorizer request guard", () => {
+describe("request signer guard", () => {
   it("returns the message rederived from the request it was shown", () => {
     const value = input();
-    expect(authorizedRequestMessage(value, CLIENT_KEY_ID)).toEqual(
+    expect(signedRequestMessage(value, CLIENT_KEY_ID)).toEqual(
       clientAuthMessage(requestDigest(value.request)),
     );
   });
 
   it("refuses to sign bytes that are not this request's authorization message", () => {
-    // A signing oracle would sign whatever the caller handed it; the authorizer
+    // A signing oracle would sign whatever the caller handed it; the signer
     // must reject anything it cannot rederive from the disclosed request.
     expect(() =>
-      authorizedRequestMessage(
+      signedRequestMessage(
         input({ clientAuthMessage: new Uint8Array(64).fill(9) }),
         CLIENT_KEY_ID,
       ),
     ).toThrowError(/OperationNotAllowed/);
     expect(() =>
-      authorizedRequestMessage(input({ clientAuthMessage: new Uint8Array(0) }), CLIENT_KEY_ID),
+      signedRequestMessage(input({ clientAuthMessage: new Uint8Array(0) }), CLIENT_KEY_ID),
     ).toThrowError(/OperationNotAllowed/);
   });
 
@@ -77,7 +77,7 @@ describe("browser authorizer request guard", () => {
     const other = request();
     other.operation = { type: "Derive", items: [] };
     expect(() =>
-      authorizedRequestMessage(
+      signedRequestMessage(
         input({ clientAuthMessage: clientAuthMessage(requestDigest(other)) }),
         CLIENT_KEY_ID,
       ),
@@ -85,7 +85,7 @@ describe("browser authorizer request guard", () => {
   });
 
   it("refuses a request authorized under another client key id", () => {
-    expect(() => authorizedRequestMessage(input(), "tvc-browser-p256-" + "22".repeat(16))).toThrowError(
+    expect(() => signedRequestMessage(input(), "tvc-browser-p256-" + "22".repeat(16))).toThrowError(
       /OperationNotAllowed/,
     );
   });

@@ -1,8 +1,8 @@
-export { loadOrCreatePersistentBrowserTvcAuthorizer } from "./platform/browser-authorizer.js";
+export { loadOrCreatePersistentBrowserTvcSigner } from "./platform/browser-signer.js";
 export type {
-  PersistentBrowserTvcAuthorizer,
-  PersistentBrowserTvcAuthorizerOptions,
-} from "./platform/browser-authorizer.js";
+  PersistentBrowserTvcSigner,
+  PersistentBrowserTvcSignerOptions,
+} from "./platform/browser-signer.js";
 export {
   parsePersistentBrowserTvcWalletState,
   parseShieldedIdentity,

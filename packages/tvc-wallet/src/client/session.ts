@@ -1,10 +1,8 @@
 import { awaitWithSignal, requestScope, type TvcRequestOptions } from "./request.js";
-import { TvcError } from "../protocol/error.js";
 import {
   connectAndVerifyTvc,
   type ConnectedTvcRuntime,
   type TvcConnectionConfig,
-  type VerifiedConnection,
 } from "./connection.js";
 import type {
   OperationExecutionContext,
@@ -12,35 +10,45 @@ import type {
 } from "./operation-executor.js";
 
 export type TvcSessionConfig = TvcConnectionConfig & {
-  /** Descriptor-bound authority for the wallet operations; absent for a verify-only client. */
-  operations?: OperationsConfig;
+  /** The wallet the operations act on and the key that signs them. */
+  operations: OperationsConfig;
 };
 
+/**
+ * The client's one verified connection, made on first use. Verification runs
+ * again once the release policy's validity window no longer holds, and after
+ * `forget`; nothing else replaces it.
+ */
 export type TvcSession = {
-  connectAndVerify(options?: TvcRequestOptions): Promise<VerifiedConnection>;
-  /**
-   * Rejects a connection that this session did not produce, so operations can
-   * never run against a context left over from a superseded verification.
-   */
-  requireOperationContext(connection: VerifiedConnection): OperationExecutionContext;
+  /** The operation context of the verified connection, verifying first when there is none or it no longer holds. */
+  context(options?: TvcRequestOptions): Promise<OperationExecutionContext>;
+  /** Drops `context` if it is still the current one, so the next call verifies again. */
+  forget(context: OperationExecutionContext): void;
 };
+
+/** Whether the connection's release policy is still in force. Operations check the same window again before they sign. */
+function holds(context: OperationExecutionContext): boolean {
+  const now = context.nowMs();
+  return now >= context.releasePolicyValidFromMs && now <= context.releasePolicyExpiresAtMs;
+}
 
 export function sessionFromConnector(
   connect: (signal: AbortSignal) => Promise<ConnectedTvcRuntime>,
-  operations: OperationsConfig | undefined,
+  operations: OperationsConfig,
   requestTimeoutMs?: number,
 ): TvcSession {
-  let activeConnection: VerifiedConnection | null = null;
-  let operationContext: OperationExecutionContext | null = null;
-  type Flight = { controller: AbortController; promise: Promise<VerifiedConnection>; users: number };
+  let active: OperationExecutionContext | null = null;
+  type Flight = { controller: AbortController; promise: Promise<OperationExecutionContext>; users: number };
   let pending: Flight | null = null;
 
   return {
-    async connectAndVerify(options): Promise<VerifiedConnection> {
+    async context(options): Promise<OperationExecutionContext> {
       const scope = requestScope(options, requestTimeoutMs);
       let flight: Flight | undefined;
       try {
         scope.signal.throwIfAborted();
+        if (active && holds(active)) return active;
+        active = null;
         if (!pending) {
           const controller = new AbortController();
           const current: Flight = { controller, users: 0, promise: Promise.resolve().then(async () => {
@@ -48,9 +56,9 @@ export function sessionFromConnector(
             const runtime = await connect(controller.signal);
             // An abandoned connector may ignore cancellation and finish after its replacement.
             controller.signal.throwIfAborted();
-            activeConnection = runtime.connection;
-            operationContext = operations ? { ...runtime, operations } : null;
-            return runtime.connection;
+            const context = { ...runtime, operations };
+            active = context;
+            return context;
           }).finally(() => { if (pending === current) pending = null; }) };
           pending = current;
         }
@@ -67,17 +75,13 @@ export function sessionFromConnector(
       }
     },
 
-    requireOperationContext(connection): OperationExecutionContext {
-      if (connection !== activeConnection || !operationContext) {
-        throw new TvcError("OperationNotConfigured");
-      }
-      return operationContext;
+    forget(context): void {
+      if (active === context) active = null;
     },
   };
 }
 
 export function createTvcSession(config: TvcSessionConfig): TvcSession {
-  // Single-flighted: overlapping verification calls must not invalidate each
-  // other's connection identity.
+  // Single-flighted: concurrent first calls share one verification.
   return sessionFromConnector((signal) => connectAndVerifyTvc(config, signal), config.operations, config.requestTimeoutMs);
 }

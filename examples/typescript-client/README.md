@@ -23,27 +23,38 @@ operations.
 
 ## How the example works
 
-1. `setup()` reaches the enclave of the network `SPR_NETWORK` names through
-   that network's Helius-hosted tvc-gateway, verifies it against the release
-   the package pins for the network, and returns the client, verified
-   connection, and wallet signer.
-2. `bootstrap` runs once per wallet. Its result, the public identity and the
-   sealed seed, is stored in a file. Neither is a secret to the client. If the
-   file is lost, `bootstrap` runs again and returns the same identity. Both
-   initial setup and recovery first configure the Turnkey grant, then
-   automatically approve the exact bootstrap request through the configured
-   owner session, within the same `bootstrap()` call.
-3. `new TvcKeys({ client, connection, sealedSeed, identity, prover })` is the
-   SDK's `WalletKeys`, answered by the enclave; it proves under the network's
-   signed prover policy.
-4. The SDK does the rest: `Wallet`, `syncWallet`, `buildDepositTransaction`,
-   `buildTransferTransaction`, `buildWithdrawalTransaction`. The calls are the
-   same as with local keys.
-5. The application signs each transaction with the Turnkey wallet, sends it,
+`setup()` in [`src/lib.ts`](src/lib.ts) does the whole integration:
+
+```ts
+const tvc = createTvcClient({
+  network, // SPR_NETWORK: the pinned release, the prover policy, the enrollment chain
+  endpoint, // the network's /v1/private-wallet on its Helius host
+  descriptor, // enrolled once, then read from TVC_DESCRIPTOR_PATH
+  signer: requestSigner(key), // the client key the descriptor lists
+});
+const stored = await loadWallet(walletPath); // TVC_WALLET_PATH, absent before the first run
+const keys = await tvc.open(stored, { approve });
+if (!stored) await writeFile(walletPath, JSON.stringify(keys.stored));
+```
+
+1. `createTvcClient` names the enclave of the network `SPR_NETWORK` names,
+   behind that network's Helius-hosted tvc-gateway. The client verifies it
+   against the release the package pins for the network on its first call.
+2. `open` bootstraps the wallet once and the example stores `keys.stored`,
+   the public identity and the sealed seed, in a file. Neither is a secret to
+   the client. Later runs reopen the stored wallet without a call. If the file
+   is lost, the next run bootstraps again and gets the same identity. Before a
+   bootstrap, `approve` configures the Turnkey grant, then approves the exact
+   bootstrap request through the configured owner session while it runs.
+3. `keys` is the SDK's `WalletKeys`, answered by the enclave; it proves under
+   the network's signed prover policy. The SDK does the rest: `Wallet`,
+   `syncWallet`, `buildDepositTransaction`, `buildTransferTransaction`,
+   `buildWithdrawalTransaction`. The calls are the same as with local keys.
+4. The application signs each transaction with the Turnkey wallet, sends it,
    confirms it and syncs the wallet to the landed slot.
 
 The plain client does the same with `LocalKeys.fromKeypair(keypair,
-client.proofService)` in place of `TvcKeys`. Nothing else changes.
+client.proofService)` in place of `keys`. Nothing else changes.
 
 ## What you need
 
@@ -115,8 +126,8 @@ pnpm example examples/merge.ts
 
 ## Bootstrap authorization
 
-The client returned by `setup()` keeps the normal `tvc.bootstrap(connection)`
-interface. While that call is active, it finds a new pending Turnkey activity,
+`open` hands the bootstrap to the example's `approve`. While the bootstrap
+runs, `approve` finds a new pending Turnkey activity,
 checks the exact SDK derivation message, wallet, organization, pinned service
 signing key, and freshness, then approves the checked fingerprint using the
 owner session. Previous pending activities and unrelated messages are skipped;
@@ -131,7 +142,7 @@ The policy still requires **both** the owner and the service user. Automation
 runs in the owner client; it does not give the service the owner's credential.
 Turnkey [policy parameters](https://docs.turnkey.com/features/policies/language#activity-parameters)
 cannot inspect the payload, so that exact-message check remains essential.
-Before each bootstrap the example sets its policy to name the enclave's current
+Before each bootstrap `approve` sets the policy to name the enclave's current
 service user, the client's `servicePublicKey` from the network's release, so a
 Quorum key rotation needs no manual step. Separately created
 signing grants must be reviewed by the operator.
@@ -152,8 +163,10 @@ two-note merge all finalized on devnet.
 The examples run against the local testkit and a fresh Zolana localnet, with
 a disposable keypair as the wallet in place of Turnkey and pinned process keys
 in place of Nitro attestation. The Rust testkit runs the real handlers of the
-five operations; the `@heliuslabs/spr-embedded-wallet/testing` client still verifies
-envelopes, signatures and bindings, and accepts loopback HTTP only. It needs a
+five operations; `createLocalTvcClient` from
+`@heliuslabs/spr-embedded-wallet/testing` still verifies envelopes, signatures
+and bindings, and accepts loopback HTTP only. The testkit needs no bootstrap
+approval. It needs a
 sibling `../zolana` checkout at the commit
 [`headless-local-e2e.yml`](../../.github/workflows/headless-local-e2e.yml)
 pins, with its localnet toolchain (Solana CLI, Go, Rust, `just`). From the
@@ -210,8 +223,8 @@ IndexedDB.
   `mainnet`) is the client's network: it picks the Helius host, the gateway
   and the enrollment domain on it, the pinned release, the enrollment chain,
   and the prover policy. The enclave seals each proof's witness to the
-  attested prover at `TVC_PROVER_URL` (default gatekeeper's `/v1/spr`); the
-  client-side prover at `ZOLANA_PROVER_URL` never sees an enclave witness. `ZOLANA_ENDPOINT`, `ZOLANA_INDEXER_URL`,
+  attested prover at `TVC_PROVER_URL` (default `/v1/spr` beside the gateway);
+  the client-side prover at `ZOLANA_PROVER_URL` never sees an enclave witness. `ZOLANA_ENDPOINT`, `ZOLANA_INDEXER_URL`,
   `ZOLANA_PROVER_URL` and `TVC_GATEWAY_URL` override the Helius routes.
 - Never commit `.env`, the client key, the descriptor, or the stored wallet.
 

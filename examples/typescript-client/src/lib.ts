@@ -31,20 +31,17 @@ import type { AssetBalance } from "@heliuslabs/spr/transaction";
 import { DEFAULT_SOLANA_ACCOUNTS, Turnkey } from "@turnkey/sdk-server";
 import {
   createTvcClient,
-  createTvcOperationAuthorizer,
-  identityOf,
-  sealedSeedOf,
+  createTvcRequestSigner,
   type Network,
-  type ShieldedIdentity,
+  type StoredWallet,
   type TvcClient,
-  type TvcProverConfig,
-  type VerifiedConnection,
+  type TvcKeys,
+  type TvcOpenOptions,
 } from "@heliuslabs/spr-embedded-wallet";
 import {
   clientKeyIdFor,
   encodeLowerHex,
   walletEnrollmentMessage,
-  type SealedSeed,
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import { createLocalTvcClient, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
@@ -54,25 +51,23 @@ export type Client = Awaited<ReturnType<typeof createSprClient>>;
 
 export interface ExampleSetup {
   readonly zolana: Client;
-  readonly tvc: TvcClient;
-  readonly connection: VerifiedConnection;
+  /** The wallet's keys, held by the enclave: the SDK's `WalletKeys`. */
+  readonly keys: TvcKeys;
   /** The wallet owner signs transactions and pays fees. */
   readonly signer: TransactionPartialSigner;
-  readonly walletPath: string;
-  /** The attested prover the enclave seals proofs to; the client posts them. */
-  readonly prover: TvcProverConfig;
+}
+
+/** The enclave's client, the owner's transaction signer, and how the owner approves a bootstrap. */
+interface WalletClient {
+  readonly tvc: TvcClient;
+  readonly signer: TransactionPartialSigner;
+  readonly approve?: TvcOpenOptions["approve"];
 }
 
 export interface ConfirmedTransaction {
   readonly signature: Signature;
   /** Slot the transaction landed in; drives the indexer freshness gates. */
   readonly slot: bigint;
-}
-
-/** The two values `bootstrap` returns. Neither is a secret to the client. */
-export interface StoredWallet {
-  readonly identity: ShieldedIdentity;
-  readonly sealedSeed: SealedSeed;
 }
 
 // Each network's Helius host. SPR_NETWORK picks one; it must be the network the
@@ -194,9 +189,9 @@ async function walletDescriptor(
   return descriptor;
 }
 
-/** Operations signed with the enrolled client key. */
-function requestAuthorizer(key: { privateKey: webcrypto.CryptoKey; publicKey: Uint8Array }) {
-  return createTvcOperationAuthorizer({
+/** Requests signed with the enrolled client key. */
+function requestSigner(key: { privateKey: webcrypto.CryptoKey; publicKey: Uint8Array }) {
+  return createTvcRequestSigner({
     clientKeyId: clientKeyIdFor(key.publicKey),
     sign: async (message) =>
       new Uint8Array(
@@ -270,27 +265,41 @@ async function gatewayDescriptor(
  * release the package pins for the network. Any Helius API key reaches it;
  * the wallet's Turnkey sub-organization must be named after the key's project.
  */
-async function gatewayClientFromEnv(network: Network): Promise<{
-  tvc: TvcClient;
-  descriptor: WalletDescriptor;
-}> {
+async function gatewayClientFromEnv(network: Network): Promise<WalletClient> {
   const key = await clientKey(env("TVC_CLIENT_KEY_PATH"));
-  const organizationId = env("TURNKEY_ORGANIZATION_ID");
+  const enrollIn = env("TURNKEY_ORGANIZATION_ID");
   const endpoint = gatewayEndpoint(network);
   const descriptor = await gatewayDescriptor(
-    await turnkeyClient(organizationId),
-    organizationId,
+    await turnkeyClient(enrollIn),
+    enrollIn,
     network,
     endpoint,
     encodeLowerHex(key.publicKey),
     env("TVC_DESCRIPTOR_PATH"),
   );
+  // The enclave seals proofs to /v1/spr beside the gateway unless TVC_PROVER_URL names another prover.
+  const prover = process.env["TVC_PROVER_URL"]?.trim();
   const tvc = createTvcClient({
     network,
-    backend: { kind: "gateway", endpoint },
-    operations: { walletDescriptor: descriptor, authorizer: requestAuthorizer(key) },
+    endpoint,
+    descriptor,
+    signer: requestSigner(key),
+    ...(prover ? { prover: new URL(prover) } : {}),
   });
-  return { tvc, descriptor };
+  const organizationId = descriptor.turnkey_organization_id;
+  const owner = await turnkeyClient(organizationId);
+  const { servicePublicKey } = tvc;
+  const expected = { organizationId, walletAddress: descriptor.address, servicePublicKey };
+  return {
+    tvc,
+    signer: turnkeySigner(owner, descriptor),
+    // The grant names the enclave's current service key, so it is set before
+    // each bootstrap, including the one after a Quorum key rotation.
+    async approve(bootstrap, signal) {
+      await grantEnclaveBootstrap(owner, organizationId, servicePublicKey, descriptor.address);
+      await bootstrapWithApproval(owner, expected, bootstrap, signal);
+    },
+  };
 }
 
 function sameBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
@@ -495,10 +504,7 @@ function turnkeySigner(turnkey: TurnkeyApi, descriptor: WalletDescriptor): Trans
 }
 
 /** Use local process keys and a Solana keypair for the loopback-only testkit built for `network`. */
-async function localTestkit(network: Network, endpoint: string): Promise<{
-  tvc: TvcClient;
-  signer: TransactionPartialSigner;
-}> {
+async function localTestkit(network: Network, endpoint: string): Promise<WalletClient> {
   const secret = JSON.parse(
     await readFile(env("TVC_SOLANA_KEYPAIR_PATH"), "utf8"),
   ) as unknown;
@@ -506,58 +512,32 @@ async function localTestkit(network: Network, endpoint: string): Promise<{
     throw new Error("TVC_SOLANA_KEYPAIR_PATH is not a Solana keypair file");
   }
   const signer = await createKeyPairSignerFromBytes(Uint8Array.from(secret));
+  // TVC_PROVER_URL names a TEE prover of the network, for a testkit started
+  // with --live-prover, under the network's policy; otherwise the testkit's
+  // stand-in prover.
+  const liveProver = process.env["TVC_PROVER_URL"]?.trim();
   const tvc = createLocalTvcClient({
     network,
     backend: { kind: "enclave", endpoint: new URL(endpoint) },
     solanaAddress: signer.address,
+    prover: liveProver
+      ? { url: liveProver }
+      : localProverConfig(process.env["TVC_LOCAL_PROVER_URL"]?.trim() || LOCAL_PROVER_URL),
   });
   return { tvc, signer };
 }
 
+/** The SDK client, the wallet's keys from the enclave, and the owner's signer. */
 export async function setup(): Promise<ExampleSetup> {
   await initializePoseidon();
   const network = networkFromEnv();
   const zolana = await createSprClient(clientConfigFromEnv(network));
-  const walletPath = env("TVC_WALLET_PATH");
   const testkit = process.env["TVC_LOCAL_TESTKIT_ENDPOINT"]?.trim();
-  if (testkit) {
-    const local = await localTestkit(network, testkit);
-    const connection = await local.tvc.connectAndVerify();
-    // TVC_PROVER_URL names a TEE prover of the network, for a testkit
-    // started with --live-prover, under the network's policy; otherwise the
-    // testkit's stand-in prover.
-    const liveProver = process.env["TVC_PROVER_URL"]?.trim();
-    const prover = liveProver
-      ? { url: liveProver }
-      : localProverConfig(process.env["TVC_LOCAL_PROVER_URL"]?.trim() || LOCAL_PROVER_URL);
-    return Object.freeze({ zolana, walletPath, ...local, connection, prover });
-  }
-  const { tvc: enclave, descriptor } = await gatewayClientFromEnv(network);
-  const connection = await enclave.connectAndVerify();
-  const organizationId = descriptor.turnkey_organization_id;
-  const owner = await turnkeyClient(organizationId);
-  const { servicePublicKey } = enclave;
-  const expected = { organizationId, walletAddress: descriptor.address, servicePublicKey };
-  const tvc: TvcClient = {
-    ...enclave,
-    // The grant names the enclave's current service key, so it is set before
-    // each bootstrap, including the one after a Quorum key rotation.
-    bootstrap: async (verified, options) => {
-      await grantEnclaveBootstrap(owner, organizationId, servicePublicKey, descriptor.address);
-      return bootstrapWithApproval(
-        owner, expected,
-        (signal) => enclave.bootstrap(verified, { ...options, signal }),
-        options?.signal,
-      );
-    },
-  };
-  return Object.freeze({
-    zolana, tvc, connection,
-    signer: turnkeySigner(owner, descriptor),
-    walletPath,
-    // TvcKeys proves under the signed policy of the client's network.
-    prover: { url: process.env["TVC_PROVER_URL"]?.trim() || heliusUrl(network, "/v1/spr") },
-  });
+  const { tvc, signer, approve } = testkit
+    ? await localTestkit(network, testkit)
+    : await gatewayClientFromEnv(network);
+  const keys = await openWallet(tvc, env("TVC_WALLET_PATH"), approve ? { approve } : {});
+  return Object.freeze({ zolana, keys, signer });
 }
 
 /** The stored identity and sealed seed, or `undefined` before the first bootstrap. */
@@ -581,19 +561,12 @@ async function loadWallet(
   return parsed as unknown as StoredWallet;
 }
 
-/** Bootstrap once, then reuse the stored public identity and sealed seed. */
-export async function loadOrBootstrapWallet(
-  tvc: TvcClient,
-  connection: VerifiedConnection,
-  path: string,
-): Promise<StoredWallet> {
+/** The stored wallet, or a wallet the enclave bootstraps once and the file then keeps. */
+async function openWallet(tvc: TvcClient, path: string, options: TvcOpenOptions): Promise<TvcKeys> {
   const stored = await loadWallet(path);
-  if (stored) return stored;
-
-  const result = await tvc.bootstrap(connection, {});
-  const wallet = { identity: identityOf(result), sealedSeed: sealedSeedOf(result) };
-  await writeFile(path, JSON.stringify(wallet, null, 2), { mode: 0o600 });
-  return wallet;
+  const keys = await tvc.open(stored, options);
+  if (!stored) await writeFile(path, JSON.stringify(keys.stored, null, 2), { mode: 0o600 });
+  return keys;
 }
 
 export { env as requiredEnv };
