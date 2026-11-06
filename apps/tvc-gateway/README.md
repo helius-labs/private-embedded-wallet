@@ -187,8 +187,8 @@ directory, is the network's release file as clients pin it
 (`packages/tvc-wallet/src/releases/`, copied to `/app/releases/` in the
 image): the signed release policy that descriptors are issued under and the
 authority set it must verify against. The service refuses to start if the
-policy is for another network or does not verify, and stops enrolling once it
-expires.
+file is `null` (the network has no release yet), or its policy is for another
+network or does not verify, and stops enrolling once it expires.
 
 **When a new enclave release ships:** the release writes the network's file;
 publish a new image and redeploy.

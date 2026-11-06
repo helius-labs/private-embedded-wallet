@@ -101,9 +101,10 @@ client is for that network only:
 
 - The release it verifies the enclave against is this package's
   `src/releases/<network>.json`, which `scripts/release.mjs` writes and
-  tvc-gateway reads. `createTvcClient` throws `ReleaseNotPinned` for a network
-  without one; mainnet has none yet. `createTestTvcClient` in `./testing`
-  takes another release for a test deployment.
+  tvc-gateway reads. A file that is `null` pins no release, and
+  `createTvcClient` throws `ReleaseNotPinned` for its network.
+  `createTestTvcClient` in `./testing` takes another release for a test
+  deployment.
 - The signed policy names its network, and verification refuses a policy, or
   a `/v1/info`, for another (`NetworkMismatch`). Operations refuse a wallet
   descriptor for another network before they sign.

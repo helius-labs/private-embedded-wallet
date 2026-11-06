@@ -81,7 +81,7 @@ wallet signs a Sign-In With Solana message for the gateway's host and network,
 and `POST /v1/private-wallet/enroll` answers a wallet descriptor for that key,
 which the client keeps in memory. Nothing but the stored wallet is written.
 The client verifies the enclave against the package's release for the
-network; a network without one (mainnet until its first release) fails with
+network; a network whose release file is `null` fails with
 `ReleaseNotPinned`.
 
 ## Setup

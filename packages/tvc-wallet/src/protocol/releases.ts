@@ -1,4 +1,5 @@
 import devnet from "../releases/devnet.json";
+import mainnet from "../releases/mainnet.json";
 import type { QosIdentityPcrs } from "../verify/index.js";
 import { TvcError } from "./error.js";
 import type { Network, PinnedReleaseAuthorities, SignedReleasePolicy } from "./types.js";
@@ -12,14 +13,22 @@ export type ReleaseTrust = {
 };
 
 /**
- * The live privacy-wallet release of each network that has one,
- * `src/releases/<network>.json`, which the `policy` phase of
- * `scripts/release.mjs` writes and tvc-gateway reads too. A client verifies
- * the release when it connects; nothing here parses it.
+ * Each network's file, `src/releases/<network>.json`, which the `policy`
+ * phase of `scripts/release.mjs` writes and tvc-gateway reads too. `null` in
+ * a file pins no release for its network.
  */
-export const RELEASES: Readonly<Partial<Record<Network, ReleaseTrust>>> = Object.freeze({
-  devnet: devnet as unknown as ReleaseTrust,
-});
+const PINS: Readonly<Record<Network, ReleaseTrust | null>> = {
+  devnet: devnet as unknown as ReleaseTrust | null,
+  mainnet: mainnet as unknown as ReleaseTrust | null,
+};
+
+/**
+ * The live privacy-wallet release of each network that has one. A client
+ * verifies the release when it connects; nothing here parses it.
+ */
+export const RELEASES: Readonly<Partial<Record<Network, ReleaseTrust>>> = Object.freeze(
+  Object.fromEntries(Object.entries(PINS).filter(([, release]) => release !== null)),
+);
 
 /** The release this package pins for `network`; a network without one is `ReleaseNotPinned`. */
 export function releaseFor(network: Network): ReleaseTrust {

@@ -36,41 +36,15 @@ pub struct Provisioner {
 }
 
 impl Provisioner {
-    /// Refuses to start under a release file for another network, or one
-    /// that does not verify now.
+    /// Refuses to start under a release file that pins nothing (`null`), is
+    /// for another network, or does not verify now.
     pub fn new(config: &ProvisioningConfig, network: Network) -> anyhow::Result<Self> {
         let (secret, public_key) = signing_key(config)?;
-        let path = &config.release_path;
-        let release: ReleaseFile = read_json(path)?;
-        let policy = &release.release_policy.policy;
-        anyhow::ensure!(
-            policy.network == network,
-            "{} is the {} release, and this gateway serves {network}",
-            path.display(),
-            policy.network
-        );
-        verify_signed_release_policy(
-            &release.release_policy,
-            &release.release_authorities,
-            network,
-            now_ms()?,
-        )
-        .map_err(|error| match error.code {
-            ErrorCode::ExpiredRequest => anyhow::anyhow!(
-                "the release policy in {} is valid from {} to {} (Unix ms), not now",
-                path.display(),
-                policy.valid_from_ms,
-                policy.expires_at_ms
-            ),
-            code => anyhow::anyhow!(
-                "the release policy in {} does not verify: {code}",
-                path.display()
-            ),
-        })?;
+        let policy = read_release(&config.release_path, network, now_ms()?)?;
         Ok(Self {
             secret,
             public_key,
-            policy: release.release_policy.policy,
+            policy,
         })
     }
 
@@ -133,6 +107,45 @@ impl Provisioner {
         )
         .map_err(|_| invalid)
     }
+}
+
+/// The release policy the release file at `path` pins for `network`, once
+/// it verifies at `now_ms` against the authorities the file pins.
+pub fn read_release(path: &Path, network: Network, now_ms: u64) -> anyhow::Result<ReleasePolicy> {
+    let release: Option<ReleaseFile> = read_json(path)?;
+    let Some(release) = release else {
+        anyhow::bail!(
+            "{} pins no {network} release (it is null): release the {network} enclave with \
+             scripts/release.mjs, whose policy phase writes it, and build this image again",
+            path.display()
+        );
+    };
+    let policy = &release.release_policy.policy;
+    anyhow::ensure!(
+        policy.network == network,
+        "{} is the {} release, and this gateway serves {network}",
+        path.display(),
+        policy.network
+    );
+    verify_signed_release_policy(
+        &release.release_policy,
+        &release.release_authorities,
+        network,
+        now_ms,
+    )
+    .map_err(|error| match error.code {
+        ErrorCode::ExpiredRequest => anyhow::anyhow!(
+            "the release policy in {} is valid from {} to {} (Unix ms), not now",
+            path.display(),
+            policy.valid_from_ms,
+            policy.expires_at_ms
+        ),
+        code => anyhow::anyhow!(
+            "the release policy in {} does not verify: {code}",
+            path.display()
+        ),
+    })?;
+    Ok(release.release_policy.policy)
 }
 
 pub fn now_ms() -> anyhow::Result<u64> {
@@ -337,6 +350,75 @@ mod release_file_tests {
                 .ends_with("does not verify: InvalidSignature"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_release_file_that_pins_nothing_does_not_start() {
+        let path = std::env::temp_dir().join(format!(
+            "tvc-gateway-release-{}-null.json",
+            std::process::id()
+        ));
+        fs::write(&path, "null\n").expect("the release file writes");
+        let error = provisioner(path.clone(), Network::Mainnet).err();
+        let _ = fs::remove_file(path);
+        let error = error.expect("a null release file starts the gateway");
+        assert!(
+            error
+                .to_string()
+                .contains("pins no mainnet release (it is null)"),
+            "{error}"
+        );
+    }
+
+    /// Every release file the client and this gateway's image carry
+    /// (`packages/tvc-wallet/src/releases/<network>.json`) is `null` or a
+    /// release of the network it is named after, signed by the authorities
+    /// it pins and in force now, with the four PCRs clients check.
+    #[test]
+    fn every_committed_release_file_pins_nothing_or_verifies_for_its_network() {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/tvc-wallet/src/releases");
+        let mut names = Vec::new();
+        for entry in fs::read_dir(&dir).expect("the releases directory reads") {
+            let path = entry.expect("the entry reads").path();
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .expect("a file name")
+                .to_owned();
+            assert_eq!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("json"),
+                "{}",
+                path.display()
+            );
+            let network: Network = serde_json::from_value(serde_json::json!(stem))
+                .unwrap_or_else(|_| panic!("{} is not named after a network", path.display()));
+            let file: serde_json::Value = read_json(&path).expect("the release file parses");
+            if !file.is_null() {
+                let policy = read_release(&path, network, now_ms().expect("clock"))
+                    .unwrap_or_else(|error| panic!("{error}"));
+                assert_eq!(policy.network, network);
+                let pcrs = file["qosIdentityPcrs"]
+                    .as_object()
+                    .expect("the release file pins PCRs");
+                assert_eq!(
+                    pcrs.keys().map(String::as_str).collect::<Vec<_>>(),
+                    ["0", "1", "2", "3"]
+                );
+                for pcr in pcrs.values() {
+                    let pcr = pcr.as_str().expect("a PCR is hex");
+                    assert!(
+                        pcr.len() == 96
+                            && pcr.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+                        "{pcr}"
+                    );
+                }
+            }
+            names.push(stem);
+        }
+        names.sort();
+        assert_eq!(names, ["devnet", "mainnet"]);
     }
 
     #[test]

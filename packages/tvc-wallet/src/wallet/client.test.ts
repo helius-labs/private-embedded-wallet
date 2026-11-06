@@ -25,6 +25,20 @@ vi.mock("./operations.js", async (importOriginal) => ({
   executeOperation: execute,
 }));
 
+/** The releases these tests pin, by network, in place of the package's own files. */
+const pins = vi.hoisted(() => new Map<string, unknown>());
+vi.mock("../protocol/releases.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../protocol/releases.js")>();
+  const { TvcError: Refused } = await import("../protocol/error.js");
+  return {
+    ...actual,
+    releaseFor: (network: string) => {
+      if (!pins.has(network)) throw new Refused("ReleaseNotPinned", `no ${network} release`);
+      return pins.get(network);
+    },
+  };
+});
+
 const signer = { clientKeyId: "client", signRequest: () => Promise.reject(new Error("unused")) };
 const endpoint = new URL("https://devnet.helius-rpc.com/v1/private-wallet?api-key=key");
 
@@ -229,6 +243,17 @@ describe("a client key that changes", () => {
   });
 });
 
+/** A release whose Quorum key signs with `signing`, as far as building a client reads it. */
+function releaseSignedBy(signing: Uint8Array): ReleaseTrust {
+  const quorumPublicKey = encodeLowerHex(
+    Uint8Array.from([
+      ...p256.getPublicKey(p256.utils.randomPrivateKey(), false),
+      ...p256.getPublicKey(signing, false),
+    ]),
+  );
+  return { releasePolicy: { policy: { quorumPublicKey } } } as unknown as ReleaseTrust;
+}
+
 describe("createTvcClient", () => {
   const descriptor = { address: "11111111111111111111111111111111", network: "devnet" } as WalletDescriptor;
   const turnkey: TvcTurnkey = {
@@ -237,6 +262,8 @@ describe("createTvcClient", () => {
     fetchWallets: () => Promise.reject(new Error("unused")),
     signMessage: () => Promise.reject(new Error("unused")),
   };
+  const pinnedSigning = p256.utils.randomPrivateKey();
+  pins.set("devnet", releaseSignedBy(pinnedSigning));
 
   it("pins the package's release of its network and names its Turnkey service key", () => {
     expect(() => createTvcClient({ network: "mainnet", endpoint, turnkey })).toThrowError(
@@ -247,21 +274,15 @@ describe("createTvcClient", () => {
     ).toThrowError(/UnknownNetwork/);
     const client = createTvcClient({ network: "devnet", endpoint, turnkey });
     expect(client.network).toBe("devnet");
-    expect(client.servicePublicKey).toMatch(/^0[23][0-9a-f]{64}$/);
+    expect(client.servicePublicKey).toBe(encodeLowerHex(p256.getPublicKey(pinnedSigning, true)));
 
     const quorumSigning = p256.utils.randomPrivateKey();
-    const quorumPublicKey = encodeLowerHex(
-      Uint8Array.from([
-        ...p256.getPublicKey(p256.utils.randomPrivateKey(), false),
-        ...p256.getPublicKey(quorumSigning, false),
-      ]),
-    );
     const test = createClient({
       network: "mainnet",
       backend: { kind: "gateway", endpoint },
       descriptor,
       signer,
-      release: { releasePolicy: { policy: { quorumPublicKey } } } as unknown as ReleaseTrust,
+      release: releaseSignedBy(quorumSigning),
     });
     expect(test.servicePublicKey).toBe(encodeLowerHex(p256.getPublicKey(quorumSigning, true)));
     expect(() =>
