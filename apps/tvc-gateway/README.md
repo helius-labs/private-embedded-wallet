@@ -179,10 +179,11 @@ either file, with nested fields joined by `__`:
 | `TVC_GATEWAY_TURNKEY__BOOT_PROOF_API_KEY__{PUBLIC,PRIVATE}_KEY`   | Turnkey API key in the TVC organization that can read Boot Proofs.                        |
 | `TVC_GATEWAY_TURNKEY__WAAS_API_KEY__{PUBLIC,PRIVATE}_KEY`         | Turnkey API key in the Helius WaaS parent organization, with read access to its sub-orgs. |
 
-`enrollment.domains` are the hosts clients reach the gateway at, gatekeeper's
-`devnet.helius-rpc.com` and `beta-devnet.helius-rpc.com` on devnet and
-`mainnet.helius-rpc.com` and `beta-mainnet.helius-rpc.com` on mainnet; an
-enrollment message names the one the client called. `dev_api.base_url` is the
+`enrollment.domains` are the hosts an enrollment message may name:
+gatekeeper's `devnet.helius-rpc.com` and `beta-devnet.helius-rpc.com` on devnet
+and `mainnet.helius-rpc.com` on mainnet. A client signs for its network's
+gatekeeper host (`ENROLLMENT_DOMAINS` in tvc-wallet) wherever it sends
+`/enroll`, so an application can serve the gateway from its own origin. `dev_api.base_url` is the
 Helius dev-api that resolves a direct caller's API key.
 
 `provisioning.release_path`, `releases/<network>.json` relative to the working
