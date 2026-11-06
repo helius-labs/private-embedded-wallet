@@ -186,7 +186,7 @@ fn request(operation: Operation, descriptor: WalletDescriptor) -> OperationReque
         client_response_public_key: vec![0u8; 65],
         operation,
         authorization: ClientAuthorization {
-            client_key_id: "tvc-browser-p256-test".to_owned(),
+            client_key_id: "spr-client-p256-test".to_owned(),
             signature: vec![0u8; 64],
         },
     }

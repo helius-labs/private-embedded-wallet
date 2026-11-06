@@ -12,7 +12,7 @@ use zolana_tvc_protocol::crypto::parse_uncompressed_sec1;
 use crate::config::is_canonical_uuid;
 use crate::error::ApiError;
 
-pub const STATEMENT: &str = "Authorize this device key to use your private wallet.";
+pub const STATEMENT: &str = "Authorize this client key to use your private wallet.";
 const MAX_ENROLLMENT_AGE_MS: u64 = 5 * 60 * 1_000;
 
 /// A device's enrollment, signed by the wallet owner.

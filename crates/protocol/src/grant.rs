@@ -60,7 +60,7 @@ mod tests {
 
     const GRANT_SECRET: [u8; 32] = [6; 32];
     const NOW: u64 = 1_800_000_000_000;
-    const CLIENT: &str = "tvc-browser-p256-00112233445566778899aabbccddeeff";
+    const CLIENT: &str = "spr-client-p256-00112233445566778899aabbccddeeff";
 
     fn grant_public() -> Vec<u8> {
         let secret = SecretKey::from_slice(&GRANT_SECRET).unwrap();
@@ -124,7 +124,7 @@ mod tests {
             verify(
                 &signed,
                 &mine,
-                "tvc-browser-p256-ffffffffffffffffffffffffffffffff",
+                "spr-client-p256-ffffffffffffffffffffffffffffffff",
                 NOW
             ),
             Some(ErrorCode::UnauthorizedClient)

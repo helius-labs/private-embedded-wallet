@@ -193,7 +193,7 @@ pub(crate) async fn session(
     .into_response())
 }
 
-/// Enroll a device key
+/// Enroll a client key
 ///
 /// A descriptor for the enrollment's client key, once the wallet owner's
 /// signature and the wallet's ownership check out. Enrolling again answers

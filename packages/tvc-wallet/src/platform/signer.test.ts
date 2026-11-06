@@ -4,7 +4,7 @@ import { clientAuthMessage, requestDigest } from "../protocol/digest.js";
 import type { SignTvcRequestInput } from "../client/operation-executor.js";
 import type { OperationRequest, WalletDescriptor } from "../protocol/types.js";
 
-const CLIENT_KEY_ID = "tvc-browser-p256-" + "11".repeat(16);
+const CLIENT_KEY_ID = "spr-client-p256-" + "11".repeat(16);
 const WALLET_DESCRIPTOR = {
   version: 1,
   security_domain_id: "44".repeat(32),
@@ -87,7 +87,7 @@ describe("request signer guard", () => {
   });
 
   it("refuses a request authorized under another client key id", () => {
-    expect(() => signedRequestMessage(input(), "tvc-browser-p256-" + "22".repeat(16))).toThrowError(
+    expect(() => signedRequestMessage(input(), "spr-client-p256-" + "22".repeat(16))).toThrowError(
       /OperationNotAllowed/,
     );
   });

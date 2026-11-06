@@ -7,7 +7,7 @@ pub const TVC_QOS_PING_PROOF_TYPE: &str = "zolana.tvc.qos_ping.v1";
 pub const EXPECTED_TURNKEY_TRUST_ROOT_ID: &str = "aws-nitro-root-g1";
 /// A client key's ID is this prefix and the first 16 bytes of the SHA-256 of
 /// its SEC1 encoding, in hex.
-pub const CLIENT_KEY_ID_PREFIX: &str = "tvc-browser-p256-";
+pub const CLIENT_KEY_ID_PREFIX: &str = "spr-client-p256-";
 
 /// What a client key signs is the UTF-8 text `<CLIENT_AUTH_DOMAIN>:<request
 /// digest in lowercase hex>`, so a key that signs only text, such as a Turnkey

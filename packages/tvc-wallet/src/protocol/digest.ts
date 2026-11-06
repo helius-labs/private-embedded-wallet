@@ -77,7 +77,7 @@ export function walletGrantDigest(grant: object): Uint8Array {
 
 /** Grant identity the enclave derives from the client public key. */
 export function clientKeyIdFor(clientPublicKey: Uint8Array): string {
-  return `tvc-browser-p256-${encodeLowerHex(sha256(clientPublicKey).slice(0, 16))}`;
+  return `spr-client-p256-${encodeLowerHex(sha256(clientPublicKey).slice(0, 16))}`;
 }
 
 /** Digest of the exact sealed-state wire bytes. */

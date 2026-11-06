@@ -86,7 +86,7 @@ The wallet owner signs, with the wallet's Ed25519 key through Turnkey, a
 beta-devnet.helius-rpc.com wants you to sign in with your Solana account:
 <solanaAddress>
 
-Authorize this device key to use your private wallet.
+Authorize this client key to use your private wallet.
 
 Version: 1
 Chain ID: <network>
@@ -144,7 +144,7 @@ resent, and so can one whose answer was larger than 64 KiB, which the ledger
 does not keep: only `Decrypt`, `Derive`, `TransactionKeys` and `Prove`
 answer that much, and running them again is harmless.
 
-To revoke a client key, add its `tvc-browser-p256-…` ID to
+To revoke a client key, add its `spr-client-p256-…` ID to
 `wallet_grant.revoked_client_key_ids`. The gateway refuses its enrollments and
 operations from the next deploy.
 

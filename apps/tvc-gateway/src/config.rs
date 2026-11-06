@@ -127,7 +127,7 @@ pub struct WalletGrantConfig {
     /// Uncompressed SEC1 hex of the grant key the enclave is built with.
     pub expected_public_key: String,
     pub ttl_secs: u64,
-    /// Client key IDs (`tvc-browser-p256-…`) refused a wallet grant.
+    /// Client key IDs (`spr-client-p256-…`) refused a wallet grant.
     #[serde(default)]
     pub revoked_client_key_ids: Vec<String>,
 }

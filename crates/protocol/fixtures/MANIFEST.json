@@ -16,6 +16,6 @@
     "qos-p256-public.json": "d8332b125d10478c8ca74f5ff6bc5a9b20ea567b93c6a35eb4126bcb8abc5311",
     "request-digest.json": "92092d6e9e66b2f7accd5dc2d81030c95cfaab2e136c12a65b95d2032d8f15c4",
     "signed-release-policy.json": "90f59bf2b0d04ebdec010f5860f6df25f8f5bacd2412bc04f891f6ea652ce890",
-    "wallet-grant-digest.json": "a40d7c54f51c0de5e7e166c03f5016c380114c592348ce797c7ecbc2994525da"
+    "wallet-grant-digest.json": "467e82331e726b457fad858e1102e38655eb4e6a5ef92a8abc852cade101253d"
   }
 }

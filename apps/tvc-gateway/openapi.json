@@ -25,7 +25,7 @@
         "tags": [
           "Private wallet"
         ],
-        "summary": "Enroll a device key",
+        "summary": "Enroll a client key",
         "description": "A descriptor for the enrollment's client key, once the wallet owner's\nsignature and the wallet's ownership check out. Enrolling again answers\nthe same descriptor.",
         "operationId": "enroll",
         "requestBody": {

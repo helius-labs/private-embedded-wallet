@@ -2,8 +2,8 @@ import { TvcError } from "./error.js";
 import { requireNetwork } from "./network.js";
 import type { Network } from "./types.js";
 
-/** The statement of the Sign-In With Solana message that enrolls a device key with tvc-gateway. */
-export const WALLET_ENROLLMENT_STATEMENT = "Authorize this device key to use your private wallet.";
+/** The statement of the Sign-In With Solana message that enrolls a client key with tvc-gateway. */
+export const WALLET_ENROLLMENT_STATEMENT = "Authorize this client key to use your private wallet.";
 const ENROLLMENT_LIFETIME_MS = 5 * 60 * 1_000;
 /** `9999-12-31T23:59:59.999Z`, the last instant with a four-digit year, less the lifetime. */
 const MAX_ISSUED_AT_MS = 253_402_300_799_999 - ENROLLMENT_LIFETIME_MS;

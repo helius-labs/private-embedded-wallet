@@ -719,7 +719,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
     let grant = WalletGrant {
         version: API_VERSION,
         descriptor_digest,
-        client_key_id: "tvc-browser-p256-00112233445566778899aabbccddeeff".to_owned(),
+        client_key_id: "spr-client-p256-00112233445566778899aabbccddeeff".to_owned(),
         project_id: "project-1".to_owned(),
         issued_at_ms: 1_800_000_000_000,
         expires_at_ms: 1_800_000_900_000,
