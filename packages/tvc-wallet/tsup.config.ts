@@ -7,16 +7,11 @@ import { defineConfig } from "tsup";
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url));
 
 function verifyProductionBoundary(): void {
-  const roots = [
-    "dist/index.js",
-    "dist/protocol.js",
-    "dist/index.cjs",
-    "dist/protocol.cjs",
-  ];
+  const roots = ["dist/index.js", "dist/protocol.js"];
   // Names that exist only in the testkit: its session factory and its pinned
   // key fixture.
   const localTestkitMarkers = /LocalTvcSession|local-testkit/;
-  const relativeModule = /\.\.?\/[A-Za-z0-9/_-]+\.(?:c?js)/g;
+  const relativeModule = /\.\.?\/[A-Za-z0-9/_-]+\.js/g;
   const visited = new Set<string>();
 
   const inspect = (path: string): void => {
@@ -41,7 +36,8 @@ export default defineConfig({
     protocol: "src/protocol.ts",
     testing: "src/testing.ts",
   },
-  format: ["esm", "cjs"],
+  // ESM only: `@heliuslabs/spr`, which the client imports, ships no CommonJS.
+  format: ["esm"],
   dts: true,
   clean: true,
   sourcemap: true,

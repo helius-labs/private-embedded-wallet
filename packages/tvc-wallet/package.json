@@ -1,36 +1,42 @@
 {
   "name": "@heliuslabs/spr-embedded-wallet",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha",
   "description": "TVC client for attested Solana Privacy Rings wallets: verified connection, bootstrap, and the SDK's WalletKeys answered by the enclave.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/helius-labs/zolana-tvc.git",
+    "directory": "packages/tvc-wallet"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "main": "./dist/index.js",
-  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": "./dist/index.js"
     },
     "./protocol": {
       "types": "./dist/protocol.d.ts",
-      "import": "./dist/protocol.js",
-      "require": "./dist/protocol.cjs"
+      "import": "./dist/protocol.js"
     },
     "./testing": {
       "types": "./dist/testing.d.ts",
-      "import": "./dist/testing.js",
-      "require": "./dist/testing.cjs"
+      "import": "./dist/testing.js"
     },
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsup",
@@ -49,7 +55,7 @@
     "@turnkey/sdk-types": "1.5.1"
   },
   "peerDependencies": {
-    "@heliuslabs/spr": ">=0.9.0-alpha",
+    "@heliuslabs/spr": "^0.9.0-alpha",
     "@solana/kit": "^8.3.0"
   },
   "devDependencies": {
