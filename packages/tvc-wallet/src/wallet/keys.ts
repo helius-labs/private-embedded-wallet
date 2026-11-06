@@ -6,7 +6,7 @@ import {
   type RequestContext,
   type ShieldedAddress,
   type WalletKeys,
-} from "@heliuslabs/zolana";
+} from "@heliuslabs/spr";
 import {
   mergeProverRequestBody,
   parseProof,
@@ -14,9 +14,9 @@ import {
   type MergeInputs,
   type Proof,
   type ProverInputs,
-} from "@heliuslabs/zolana/client";
-import type { X25519PublicKey } from "@heliuslabs/zolana/keypair";
-import type { TransactionKeyRequest } from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/client";
+import type { X25519PublicKey } from "@heliuslabs/spr/keypair";
+import type { TransactionKeyRequest } from "@heliuslabs/spr/transaction";
 
 import type { VerifiedConnection } from "../client/connection.js";
 import { encodeDecimalU64 } from "../protocol/decimal.js";

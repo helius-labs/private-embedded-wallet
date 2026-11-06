@@ -1,11 +1,13 @@
 # TypeScript client with a TVC wallet
 
-A client example for `@heliuslabs/zolana` with the shielded keys held by a TVC
-enclave (`@zolana/tvc-wallet`), in the layout of
+A client example for `@heliuslabs/spr` with the shielded keys held by a TVC
+enclave (`@heliuslabs/spr-embedded-wallet`), in the layout of
 [zolana-examples](https://github.com/helius-labs/zolana-examples).
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw, with the enclave as the key holder
 - **[spl_deposit_transfer_withdraw](examples/spl_deposit_transfer_withdraw.ts)** - The same lifecycle for an SPL token registered with the pool
+- **[merge](examples/merge.ts)** - Merge the wallet's SOL notes into one
+- **[enroll](examples/enroll.ts)** - Prepare a wallet and client key for an operator-signed descriptor (direct mode)
 
 ## What a TVC wallet is
 
@@ -22,9 +24,10 @@ operations.
 
 ## How the example works
 
-1. `setup()` verifies the enclave against the client's release policy and PCR
-   pins, configures the Turnkey grant, and returns the client, verified connection,
-   and wallet signer.
+1. `setup()` reaches the enclave through the Helius-hosted tvc-gateway, or
+   directly when `TVC_ENDPOINT` is set, verifies it against the client's release
+   policy and PCR pins, configures the Turnkey grant, and returns the client,
+   verified connection, and wallet signer.
 2. `bootstrap` runs once per wallet. Its result, the public identity and the
    sealed seed, is stored in a file. Neither is a secret to the client. If the
    file is lost, `bootstrap` runs again and returns the same identity. Both
@@ -43,11 +46,32 @@ client.proofService)` in place of `TvcKeys`. Nothing else changes.
 
 ## What you need
 
-- Node.js 24+, pnpm, and a Helius devnet API key.
-- The TVC deployment's endpoint and trust material: the operator's
-  trust file (`releasePolicy`, `releaseAuthorities`, `qosIdentityPcrs`;
-  `packages/tvc-wallet/src/devnet-release.json` is the current one).
-  Never copy these values from the service itself.
+- Node.js 24+, pnpm, and a Helius devnet API key (`API_KEY`). The network's
+  Helius host serves everything else: the RPC, the indexer and the TEE prover at
+  `/v1/spr`, and the private-wallet gateway at `/v1/private-wallet`.
+- A Turnkey sub-organization named after the API key's Helius project, with a
+  Solana wallet, and a root user's API key in it, as the key pair or a Turnkey
+  API key file (`TURNKEY_API_KEY_PATH`). Helius creates these sub-organizations
+  for an embedded-wallet project; the gateway refuses a wallet in any other
+  (`SubOrganizationNotOwned`). The example signs with the key, and `setup()`
+  uses it to enroll and to configure the enclave's grant. A browser integration
+  uses the authenticated owner session instead; never embed a root API key in
+  browser code.
+
+The first run enrolls the client key: the wallet owner signs a Sign-In With
+Solana message for the gateway's host, and `POST /v1/private-wallet/enroll`
+answers a wallet descriptor, stored at `TVC_DESCRIPTOR_PATH`. The trust
+material is the package's `DEVNET_RELEASE` unless `TVC_TRUST_PATH` names
+another.
+
+### Direct to the enclave
+
+An operator running its own deployment sets `TVC_ENDPOINT` to the enclave and
+supplies what the gateway would:
+
+- The trust file (`TVC_TRUST_PATH`: `releasePolicy`, `releaseAuthorities`,
+  `qosIdentityPcrs`; `packages/tvc-wallet/src/devnet-release.json` is the
+  current one). Never copy these values from the service itself.
 - A Boot Proof source. Only a user of the TVC organization can read the
   enclave's Boot Proof from Turnkey, so either a server the operator runs
   returns it (`TVC_BOOT_PROOF_URL`; the wallet-kit demo serves
@@ -55,13 +79,9 @@ client.proofService)` in place of `TvcKeys`. Nothing else changes.
   [`zolana-tvc-boot-proof`](../../crates/boot-proof/README.md) is the same
   fetch as a command), or your Turnkey API key is a user of that organization
   and reads it directly (`TVC_ORGANIZATION_ID`).
-- A Turnkey organization and a root user's API key, as the key pair or a
-  Turnkey API key file (`TURNKEY_API_KEY_PATH`). The example signs with it,
-  and `setup()` uses it to configure the enclave's grant. A browser integration
-  uses the authenticated owner session and application provisioning backend;
-  never embed a root API key in browser code or in the TVC deployment.
 - A wallet descriptor for your client key, signed by the operator. See
-  [Operator provisioning](#operator-provisioning) if one has not been issued.
+  [Operator provisioning](#operator-provisioning).
+- The operator's wallet-grant key (`TVC_WALLET_GRANT_KEY_PATH`).
 
 ## Setup
 
@@ -76,8 +96,8 @@ cp client.env.example .env # ...and fill in the values
 
 ## Run
 
-With the deployment and wallet configuration in `.env`, run one command. No
-separate enrollment or approval command is needed:
+With the wallet configuration in `.env`, run one command. No separate
+enrollment or approval command is needed:
 
 ```bash
 pnpm example examples/deposit_transfer_withdraw.ts
@@ -86,7 +106,7 @@ pnpm example examples/deposit_transfer_withdraw.ts
 The examples check balance changes relative to the wallet's starting balance,
 so they can be rerun with an existing wallet.
 
-The wallet in the descriptor pays fees and the deposit, so it needs devnet
+The Turnkey wallet pays fees and the deposit, so it needs devnet
 SOL: the SOL example deposits 0.01 SOL, so 0.1 SOL covers a run of
 everything. For the SPL example set `SPL_MINT`, `SPL_ASSET_ID` (the id the pool
 registered the mint under) and `SPL_TOKEN_ACCOUNT` (the wallet's token account
@@ -132,16 +152,20 @@ Separately created signing grants must also be reviewed by the operator.
 The owner approval API can return the bootstrap signature. The adapter discards
 the result and does not log it; it must run in a trusted owner environment.
 This restriction does not protect privacy secrets after a quorum-key compromise
-or undo previous exposure. Live checks on 2026-09-09 against
-`keyholder-pr9-34b4e28` verified attestation, encrypted ping, bootstrap with
-automatic owner approval and App Proof verification, and recovery of the same
-wallet identity. SOL and SPL deposit, private transfer, and withdrawal all
-finalized on devnet with the expected balance changes.
+or undo previous exposure.
+
+On 2026-11-05, against release `private-wallet-devnet-31a9dec`, the SOL
+example and the merge example ran through the hosted gateway, with the indexer
+and the prover at gatekeeper's `/v1/spr`: enrollment, verification, bootstrap
+with automatic owner approval, deposit, private transfer, withdrawal and a
+two-note merge all finalized on devnet.
 
 ## Operator provisioning
 
-A signed wallet descriptor and pinned deployment trust material are application
-configuration. The operator signs the descriptor with its provisioning key;
+Through the hosted gateway, enrollment issues the descriptor; this section is
+for direct mode. A signed wallet descriptor and pinned deployment trust
+material are application configuration. The operator signs the descriptor with
+its provisioning key;
 that key is not distributed to wallet clients. An application can deliver the
 descriptor during onboarding through its provisioning backend. This repository
 provides an offline operator tool, not a hosted provisioning API.
@@ -176,7 +200,7 @@ at `TVC_WALLET_GRANT_KEY_PATH` (`{"private_key": "<hex>"}`), whose public half i
 The examples run against the local testkit and a fresh Zolana localnet, with
 a disposable keypair as the wallet in place of Turnkey and pinned process keys
 in place of Nitro attestation. The Rust testkit runs the real handlers of the
-five operations; the `@zolana/tvc-wallet/testing` client still verifies
+five operations; the `@heliuslabs/spr-embedded-wallet/testing` client still verifies
 envelopes, signatures and bindings, and accepts loopback HTTP only. It needs a
 sibling `../zolana` checkout at the commit
 [`headless-local-e2e.yml`](../../.github/workflows/headless-local-e2e.yml)
@@ -216,8 +240,8 @@ reopens a wallet often can store the SDK wallet snapshot instead. The enclave
 provides the snapshot key, so no secret is kept on the device:
 
 ```ts
-import { loadPersistedWallet, syncPersistedWallet } from "@heliuslabs/zolana";
-import { snapshotCipher } from "@zolana/tvc-wallet";
+import { loadPersistedWallet, syncPersistedWallet } from "@heliuslabs/spr";
+import { snapshotCipher } from "@heliuslabs/spr-embedded-wallet";
 
 const cipher = await snapshotCipher(keys);
 const wallet =
@@ -231,11 +255,12 @@ IndexedDB.
 ## Notes
 
 - Pre-production, disposable funds. `SPR_NETWORK` (`devnet` by default, or
-  `mainnet`) picks the RPC, Photon indexer and TEE prover, and must match the
-  network the enclave image was built for. The enclave seals each proof's
-  witness to the attested prover at `TVC_PROVER_URL` (default the network's
-  eu-north-1 prover); the client-side prover at `ZOLANA_PROVER_URL` never sees
-  an enclave witness.
+  `mainnet`) picks the Helius host, and must match the network the enclave
+  image was built for; the hosted gateway serves devnet only. The enclave seals
+  each proof's witness to the attested prover at `TVC_PROVER_URL` (default
+  gatekeeper's `/v1/spr`); the client-side prover at `ZOLANA_PROVER_URL` never
+  sees an enclave witness. `ZOLANA_ENDPOINT`, `ZOLANA_INDEXER_URL`,
+  `ZOLANA_PROVER_URL` and `TVC_GATEWAY_URL` override the Helius routes.
 - Never commit `.env`, the client key, the descriptor, or the stored wallet.
 
 ## Documentation
@@ -243,4 +268,4 @@ IndexedDB.
 - [Connect](https://www.helius.dev/docs/privacy/connect)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)
-- [`@zolana/tvc-wallet`](../../packages/tvc-wallet/README.md)
+- [`@heliuslabs/spr-embedded-wallet`](../../packages/tvc-wallet/README.md)

@@ -1,5 +1,5 @@
-import { ShieldedKeypair, initializePoseidon, type Bytes16, type Bytes32 } from "@heliuslabs/zolana";
-import type { MergeInputs, ProverInputs } from "@heliuslabs/zolana/client";
+import { ShieldedKeypair, initializePoseidon, type Bytes16, type Bytes32 } from "@heliuslabs/spr";
+import type { MergeInputs, ProverInputs } from "@heliuslabs/spr/client";
 import { gcm } from "@noble/ciphers/aes";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -18,8 +18,8 @@ const encoders = vi.hoisted(() => ({
   proverRequestBody: vi.fn(),
   mergeProverRequestBody: vi.fn(),
 }));
-vi.mock("@heliuslabs/zolana/client", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@heliuslabs/zolana/client")>()),
+vi.mock("@heliuslabs/spr/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@heliuslabs/spr/client")>()),
   proverRequestBody: encoders.proverRequestBody,
   mergeProverRequestBody: encoders.mergeProverRequestBody,
 }));

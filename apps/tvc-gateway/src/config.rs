@@ -34,10 +34,10 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnrollmentConfig {
-    /// The host clients reach this gateway at, such as
-    /// `beta-devnet.helius-rpc.com`: the domain of the Sign-In With Solana
-    /// message a wallet owner signs to enroll.
-    pub domain: String,
+    /// The hosts clients reach this gateway at, such as gatekeeper's
+    /// `devnet.helius-rpc.com` and `beta-devnet.helius-rpc.com`: a wallet owner
+    /// signs the Sign-In With Solana message for the one it calls.
+    pub domains: Vec<String>,
 }
 
 /// Helius dev-api (`ts-services/dev-api` in helius-labs/monorepo), which
@@ -153,12 +153,11 @@ impl Config {
             "enclave replay window and capacity must be positive"
         );
         anyhow::ensure!(
-            !self.enrollment.domain.is_empty()
-                && !self
-                    .enrollment
-                    .domain
-                    .contains(|c: char| c.is_whitespace() || c == '/'),
-            "enrollment.domain must be a host, such as beta-devnet.helius-rpc.com"
+            !self.enrollment.domains.is_empty()
+                && self.enrollment.domains.iter().all(|domain| {
+                    !domain.is_empty() && !domain.contains(|c: char| c.is_whitespace() || c == '/')
+                }),
+            "enrollment.domains must list hosts, such as beta-devnet.helius-rpc.com"
         );
         Ok(())
     }
@@ -186,6 +185,16 @@ mod tests {
             .extract()?;
         config.validate()?;
         Ok(config)
+    }
+
+    #[test]
+    fn the_committed_config_enrolls_at_both_gatekeeper_hosts() {
+        let config =
+            committed_config_with(&"a".repeat(MIN_SECRET_LEN)).expect("the committed config loads");
+        assert_eq!(
+            config.enrollment.domains,
+            ["devnet.helius-rpc.com", "beta-devnet.helius-rpc.com"]
+        );
     }
 
     #[test]

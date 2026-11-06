@@ -8,14 +8,14 @@ import {
   type TvcClient,
   type TvcTransport,
   type VerifiedConnection,
-} from "@zolana/tvc-wallet";
+} from "@heliuslabs/spr-embedded-wallet";
 import {
   decodeLowerHex,
   encodeLowerHex,
   walletEnrollmentMessage,
   type WalletDescriptor,
-} from "@zolana/tvc-wallet/protocol";
-import { createLocalTvcClient } from "@zolana/tvc-wallet/testing";
+} from "@heliuslabs/spr-embedded-wallet/protocol";
+import { createLocalTvcClient } from "@heliuslabs/spr-embedded-wallet/testing";
 import { beforeAll, describe, expect, inject, it } from "vitest";
 import {
   ORGANIZATION_ID,

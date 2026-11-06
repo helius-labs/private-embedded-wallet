@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { getAddressEncoder, address } from "@solana/kit";
-import { ed25519DerivationMessage, type Bytes32 } from "@heliuslabs/zolana/keypair";
+import { ed25519DerivationMessage, type Bytes32 } from "@heliuslabs/spr/keypair";
 import type { BootstrapApprovalApi as Api } from "./lib.js";
 type Activity = Awaited<ReturnType<Api["getActivity"]>>["activity"];
 

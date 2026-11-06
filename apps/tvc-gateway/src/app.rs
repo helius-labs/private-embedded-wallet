@@ -53,7 +53,7 @@ impl AppState {
             enclave: Enclave::new(config.enclave.clone())?,
             turnkey: Turnkey::new(&config.turnkey)?,
             provisioner: Provisioner::new(&config.provisioning)?,
-            enrollment: Enrollment::new(&config.enrollment.domain),
+            enrollment: Enrollment::new(&config.enrollment.domains),
             wallet_grants: WalletGrants::new(&config.wallet_grant)?,
             limiter: InFlightLimiter::new(config.enclave.max_in_flight_per_project),
             replay: ReplayLedger::connect(
@@ -388,7 +388,7 @@ mod tests {
             enclave,
             turnkey: Turnkey::for_tests(UNREACHABLE),
             provisioner: crate::provisioner::tests::provisioner(),
-            enrollment: Enrollment::new(crate::enrollment::tests::DOMAIN),
+            enrollment: Enrollment::new(&[crate::enrollment::tests::DOMAIN.to_owned()]),
             wallet_grants: crate::wallet_grant::tests::grants(Vec::new()),
             limiter: InFlightLimiter::new(4),
             replay: ReplayLedger::Local(LocalLedger::new(Duration::from_secs(360), 1_000)),

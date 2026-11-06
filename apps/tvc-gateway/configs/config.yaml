@@ -33,4 +33,6 @@ wallet_grant:
     ttl_secs: 120
     revoked_client_key_ids: []
 enrollment:
-    domain: beta-devnet.helius-rpc.com
+    domains:
+        - devnet.helius-rpc.com
+        - beta-devnet.helius-rpc.com

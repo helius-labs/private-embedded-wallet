@@ -12,13 +12,19 @@ Pre-production, for disposable devnet funds. The witness, which holds the
 long-lived nullifier secret, reaches only an attested TEE prover; see
 [Network boundary](#network-boundary).
 
+Helius hosts it on devnet behind gatekeeper: the private wallet at
+`https://devnet.helius-rpc.com/v1/private-wallet` (also on `beta-devnet`), and
+the Zolana indexer and TEE prover at `/v1/spr` on the same host, all with a
+Helius API key.
+
 | Path | Purpose |
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
+| [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet`: one-request sessions with Boot Proofs, enrollment, and wallet grants. |
 | [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the five operations, `TvcKeys` for the Zolana SDK, browser persistence, React bindings. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
 | [`crates/boot-proof`](crates/boot-proof) | Fetches a replica's public Boot Proof from Turnkey for a relying party that cannot. |
-| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles against a deployed enclave or the local testkit. |
+| [`examples/typescript-client`](examples/typescript-client) | Enrollment, then SOL and SPL lifecycles and a merge, through the hosted gateway, directly against an enclave, or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: releases, wallet descriptors, the localnet for `just headless-e2e`. |
 
 ## Responsibility split

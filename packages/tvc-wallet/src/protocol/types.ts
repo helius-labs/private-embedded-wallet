@@ -143,7 +143,7 @@ export type TransactionKeyItem = {
 /**
  * The prover's request body as the Zolana SDK encodes it, with `null` in every
  * nullifier secret slot the enclave is to fill (`proverRequestBody` and
- * `mergeProverRequestBody` from `@heliuslabs/zolana/client`).
+ * `mergeProverRequestBody` from `@heliuslabs/spr/client`).
  */
 export type ProverRequest = Readonly<Record<string, unknown>>;
 
@@ -158,15 +158,21 @@ export type TransactionKeysOperation = {
   items: readonly TransactionKeyItem[];
 };
 
-/**
- * A network's signed prover policy file (zolana `prover/tee/WIRE_CONTRACT.md`,
- * "Signed policy"), as downloaded: the hex of the approved payload and the
- * Ed25519 signatures over it. The enclave verifies it against the signers its
- * image pins.
- */
-export type SignedProverPolicyFile = {
+/** One signed part of a prover policy file: the hex of a payload and the Ed25519 signatures over it. */
+export type SignedProverPolicyPart = {
   payload: string;
   signatures: readonly { public_key: string; signature: string }[];
+};
+
+/**
+ * A network's signed prover policy file (zolana `prover/tee/WIRE_CONTRACT.md`,
+ * "Signed policy"), as downloaded: a release part that names the approved
+ * measurements and a short-lived freshness part over it. The enclave verifies
+ * it against the release signers its image pins.
+ */
+export type SignedProverPolicyFile = {
+  release: SignedProverPolicyPart;
+  freshness: SignedProverPolicyPart;
 };
 
 /**

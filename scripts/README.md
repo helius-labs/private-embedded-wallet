@@ -77,4 +77,4 @@ the offset ports, mints a test SPL asset, and writes the `SPL_*` values the
 client example reads to `OUTPUT_ENV`. `just headless-e2e` runs it. The sibling checkout must
 be at the zolana commit
 [`headless-local-e2e.yml`](../.github/workflows/headless-local-e2e.yml) pins,
-the `gitHead` of the `@heliuslabs/zolana` release the packages depend on.
+the `gitHead` of the `@heliuslabs/spr` release the packages depend on.

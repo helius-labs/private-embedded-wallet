@@ -17,6 +17,7 @@ const HELD: HeldProverPolicy = {
   file: policyFile({ expiresAt: 1_900_000_000 }),
   version: 1,
   maxAgeSecs: 600,
+  issuedAt: 1_899_996_400,
   expiresAt: 1_900_000_000,
   fetchedAtMs: 0,
 };

@@ -6,10 +6,10 @@ import {
   buildTransferTransaction,
   buildWithdrawalTransaction,
   syncWallet,
-} from "@heliuslabs/zolana";
-import { AssetRegistry } from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr";
+import { AssetRegistry } from "@heliuslabs/spr/transaction";
 import { address } from "@solana/kit";
-import { TvcKeys, shieldedAddressOf } from "@zolana/tvc-wallet";
+import { TvcKeys, shieldedAddressOf } from "@heliuslabs/spr-embedded-wallet";
 
 import {
   expectBalance,

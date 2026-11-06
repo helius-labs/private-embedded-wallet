@@ -66,7 +66,7 @@ Bodies are at most 262,144 bytes each way. A request expires within 300 s of
 
 `POST /v1/operations` serves five operations. They are exactly the Zolana
 SDK's `ShieldedKeys` and `ProofAuthority` methods, so `TvcKeys` in
-`@zolana/tvc-wallet` implements the SDK's `WalletKeys` over them.
+`@heliuslabs/spr-embedded-wallet` implements the SDK's `WalletKeys` over them.
 
 | Operation | Sealed seed | Returns |
 | --- | --- | --- |
@@ -100,7 +100,7 @@ completed request is sealed to:
 | `target` | The route the request is sealed to: `/prove/<key>`, where `<key>` is the request's proving key (`<family>_<inputs>_<outputs>`, merges with 1 output). The client posts it below whatever prover URL it uses. No prefix or query; at most 256 bytes. |
 | `nonce` | 32 bytes, the nonce the client fetched the attestation with. |
 | `attestation` | The prover's answer to `GET <prover URL>/attestation?nonce=<nonce>`, as received. |
-| `policy` | The network's signed policy file as published, `{ payload, signatures: [{ public_key, signature }] }` (zolana `prover/tee/WIRE_CONTRACT.md`, "Signed policy"). |
+| `policy` | The network's signed policy file as published, `{ release, freshness }`, each part `{ payload, signatures: [{ public_key, signature }] }` (zolana `prover/tee/WIRE_CONTRACT.md`, "Signed policy"). |
 
 The enclave accepts the file only when enough of the policy signers compiled
 into the image sign its payload, the payload names the image's network, and
@@ -164,7 +164,7 @@ empty, duplicate, or unknown key. A re-signed policy is a new authority set
 every client must accept.
 
 The trust material a client pins is the policy, the authority public keys,
-and the QOS identity PCRs. `connectAndVerify()` in `@zolana/tvc-wallet`
+and the QOS identity PCRs. `connectAndVerify()` in `@heliuslabs/spr-embedded-wallet`
 verifies the policy, binds every security field of `GET /v1/info` to it,
 completes the Quorum-encrypted `POST /v1/ping`, and verifies the Nitro Boot
 Proof against the PCRs and the accepted manifest digests. Wallet calls take

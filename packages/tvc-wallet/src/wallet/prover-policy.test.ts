@@ -84,23 +84,53 @@ describe("TvcProverPolicy", () => {
   it("refuses a malformed or expired file", async () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
     const hex = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("hex");
+    const good = policyFile({ expiresAt: NOW_SECS + 60 });
+    const part = (value: unknown) => ({ payload: hex(value), signatures: [] });
+    const fresh = part({ issued_at: NOW_SECS - 60, expires_at: NOW_SECS + 60 });
     for (const body of [
       [],
-      { payload: "7b7d" },
-      { payload: "7B7D", signatures: [] },
-      { payload: hex({ version: 1, expires_at: NOW_SECS + 60, policy: {} }), signatures: [] },
-      { payload: hex({ version: 0, expires_at: NOW_SECS + 60, policy: { max_age_secs: 600 } }), signatures: [] },
-      { ...policyFile({ expiresAt: NOW_SECS + 60 }), extra: 1 },
+      { payload: good.release.payload, signatures: [] },
+      { release: good.release },
+      { ...good, extra: 1 },
+      { release: { payload: "7B7D", signatures: [] }, freshness: good.freshness },
+      { release: part({ version: 1, expires_at: NOW_SECS + 60, policy: {} }), freshness: fresh },
+      { release: part({ version: 0, expires_at: NOW_SECS + 60, policy: { max_age_secs: 600 } }), freshness: fresh },
+      { release: good.release, freshness: part({ issued_at: NOW_SECS + 60, expires_at: NOW_SECS + 60 }) },
+      { release: good.release, freshness: { ...good.freshness, extra: 1 } },
     ]) {
       const { transport } = served(() => Response.json(body));
       await expect(new TvcProverPolicy(POLICY_URL, transport).current(), JSON.stringify(body)).rejects.toMatchObject({
         code: "ProverPolicyInvalid",
       });
     }
-    const { transport } = served(file({ expiresAt: NOW_SECS }));
-    await expect(new TvcProverPolicy(POLICY_URL, transport).current()).rejects.toMatchObject({
-      code: "ProverPolicyExpired",
+    for (const expired of [file({ expiresAt: NOW_SECS }), file({ expiresAt: NOW_SECS + 3_600, freshUntil: NOW_SECS })]) {
+      const { transport } = served(expired);
+      await expect(new TvcProverPolicy(POLICY_URL, transport).current()).rejects.toMatchObject({
+        code: "ProverPolicyExpired",
+      });
+    }
+  });
+
+  it("stays in force until the earlier of the release and freshness expiries", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
+    const { transport } = served(file({ expiresAt: NOW_SECS + 7_200, freshUntil: NOW_SECS + 900 }));
+    expect(await new TvcProverPolicy(POLICY_URL, transport).current()).toMatchObject({
+      version: 1,
+      issuedAt: NOW_SECS + 900 - 3_600,
+      expiresAt: NOW_SECS + 900,
     });
+  });
+
+  it("takes a newer freshness part of the held release and refuses an older one", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
+    const part = (issuedAt: number) => file({ expiresAt: NOW_SECS + 7_200, issuedAt, freshUntil: NOW_SECS + 3_600 });
+    const { transport } = served(part(NOW_SECS - 600), part(NOW_SECS - 60), part(NOW_SECS - 900));
+    const policy = new TvcProverPolicy(POLICY_URL, transport);
+    await policy.current();
+    policy.invalidate();
+    expect(await policy.current()).toMatchObject({ issuedAt: NOW_SECS - 60 });
+    policy.invalidate();
+    await expect(policy.current()).rejects.toMatchObject({ code: "ProverPolicyRollback" });
   });
 
   it("lets one attestation serve for the max age and never past the expiry", () => {
@@ -108,6 +138,7 @@ describe("TvcProverPolicy", () => {
       file: policyFile({ expiresAt }),
       version: 1,
       maxAgeSecs,
+      issuedAt: 0,
       expiresAt,
       fetchedAtMs: 0,
     });

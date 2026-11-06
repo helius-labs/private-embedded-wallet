@@ -33,7 +33,10 @@ function sealing(target: string): ProverSealing {
     target,
     nonce: "42".repeat(32),
     attestation: { platform: "aws-nitro" },
-    policy: { payload: "7b7d", signatures: [{ public_key: "11".repeat(32), signature: "aa".repeat(64) }] },
+    policy: {
+      release: { payload: "7b7d", signatures: [{ public_key: "11".repeat(32), signature: "aa".repeat(64) }] },
+      freshness: { payload: "7b7d", signatures: [{ public_key: "33".repeat(32), signature: "bb".repeat(64) }] },
+    },
   };
 }
 

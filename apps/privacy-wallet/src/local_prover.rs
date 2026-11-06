@@ -13,11 +13,10 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, Method, Response, StatusCode, Uri};
 use axum::routing::get;
 use axum::Router;
-use ed25519_dalek::Signer as _;
 use serde_json::Value;
 use spr_prover_tee::{
-    seal_response, Anchors, FixtureProver, NitroFixture, PolicyPayload, PolicySignature,
-    SignedPolicyFile, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, POLICY_DOMAIN, VERSION,
+    seal_response, Anchors, FixtureProver, FreshnessSigners, NitroFixture, ReleasePayload,
+    SignedPolicyFile, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION,
 };
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
 
@@ -51,21 +50,25 @@ impl LocalProver {
             .duration_since(UNIX_EPOCH)
             .expect("clock after 1970")
             .as_secs();
-        let payload = serde_json::to_vec(&PolicyPayload {
+        // A freshness key the release names, distinct from the release signer.
+        let mut seed = signer.to_bytes();
+        seed[0] ^= 0xff;
+        let freshness = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let expires_at = epoch_secs + POLICY_LIFETIME_SECS;
+        let release = ReleasePayload {
             network: NETWORK.to_owned(),
             version: 1,
-            expires_at: epoch_secs + POLICY_LIFETIME_SECS,
+            expires_at,
+            freshness: FreshnessSigners::of(std::slice::from_ref(&freshness), POLICY_LIFETIME_SECS),
             policy: NitroFixture::at([0; 32], epoch_secs).policy().clone(),
-        })
-        .expect("fixture policy");
-        let signature = signer.sign(&[POLICY_DOMAIN, &payload].concat());
-        let policy = SignedPolicyFile {
-            payload: hex::encode(&payload),
-            signatures: vec![PolicySignature {
-                public_key: hex::encode(signer.verifying_key().to_bytes()),
-                signature: hex::encode(signature.to_bytes()),
-            }],
         };
+        let policy = SignedPolicyFile::sign(
+            &release,
+            std::slice::from_ref(&signer),
+            (epoch_secs, expires_at),
+            std::slice::from_ref(&freshness),
+        )
+        .expect("fixture policy");
         Self {
             prover,
             epoch_secs,

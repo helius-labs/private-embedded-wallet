@@ -1,4 +1,4 @@
-// THE SINGLE TURNKEY SEAM for @zolana/tvc-wallet.
+// THE SINGLE TURNKEY SEAM for @heliuslabs/spr-embedded-wallet.
 //
 // @turnkey/* may only be imported from this file. The composite verifier uses
 // Turnkey's AWS Nitro X.509 chain helper, then applies the Zolana release-policy
