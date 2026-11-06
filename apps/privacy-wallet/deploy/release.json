@@ -23,6 +23,17 @@
         "644edc98-0a77-4c6c-9c94-db73c0813a1d",
         "e4a0159b-1b0f-41ee-b730-725847dd1a82"
       ]
+    },
+    "mainnet": {
+      "appId": "8a2523d7-feb8-41ee-9587-c202048816ec",
+      "endpoint": "https://app-8a2523d7-feb8-41ee-9587-c202048816ec.app.turnkey.cloud",
+      "securityDomainId": "641b217b63e63594f4323b714cb7a08a4ae801333dde8be87a9dea404021519a",
+      "quorumKeyId": "4d7e49f7-a9dd-4346-880c-cd7e5c2dfc40",
+      "quorumKeyEpoch": "1",
+      "operatorIds": [
+        "a9346f7c-e66f-4ee2-9b02-312d8021af36",
+        "a17d5aa4-79d6-4a4b-9852-74ad4e3b13e3"
+      ]
     }
   }
 }
