@@ -2,8 +2,10 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/p256";
 import { getAddressDecoder } from "@solana/kit";
 import {
+  createTvcClient,
   identityOf,
   sealedSeedOf,
+  type ReleaseTrust,
   type TvcClient,
   type TvcTransport,
   type VerifiedConnection,
@@ -14,6 +16,8 @@ import {
   walletEnrollmentMessage,
   type BootstrapResult,
   type Network,
+  type ReleasePolicy,
+  type ServiceInfo,
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import { createLocalTvcClient } from "@heliuslabs/spr-embedded-wallet/testing";
@@ -25,7 +29,7 @@ import {
   testkit,
 } from "./fixtures.js";
 
-const { gatewayUrl, originAuth, apiKey, walletSeedHex } = inject("stack");
+const { gatewayUrl, enclaveUrl, originAuth, apiKey, walletSeedHex } = inject("stack");
 const privateWallet = `${gatewayUrl}/v1/private-wallet`;
 const ownerSeed = decodeLowerHex(walletSeedHex);
 const ownerAddress = getAddressDecoder().decode(ed25519.getPublicKey(ownerSeed));
@@ -262,3 +266,48 @@ describe("a direct caller with a Helius API key", () => {
   });
 });
 
+/** What `scripts/release.mjs` exports for its `policy` phase. */
+type ReleaseScript = {
+  releasePolicy(releaseId: string, cfg: Record<string, unknown>, info: ServiceInfo, now: number): ReleasePolicy;
+  signReleasePolicy(policy: ReleasePolicy, authoritySetId: string): Omit<ReleaseTrust, "qosIdentityPcrs">;
+};
+
+describe("a release the release script signs for the testkit", () => {
+  it("is accepted by the client for the enclave's network only, up to the Boot Proof", async () => {
+    const script = new URL("../../../scripts/release.mjs", import.meta.url).href;
+    const { releasePolicy, signReleasePolicy } = (await import(script)) as ReleaseScript;
+    const info = (await (await fetch(`${enclaveUrl}/v1/info`)).json()) as ServiceInfo;
+    const cfg = {
+      network: info.network,
+      appId: "local-testkit",
+      securityDomainId: info.security_domain_id,
+      quorumKeyId: info.quorum_key_id,
+      quorumKeyEpoch: info.quorum_key_epoch,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      turnkeyProofSchemaVersions: ["turnkey.boot_proof.v1"],
+      policyValidityDays: 1,
+    };
+    const policy = releasePolicy(info.release_id, cfg, info, Date.now());
+    const release: ReleaseTrust = {
+      ...signReleasePolicy(policy, "local-e2e-authorities"),
+      qosIdentityPcrs: { 0: "00".repeat(48), 1: "00".repeat(48), 2: "00".repeat(48), 3: "00".repeat(48) },
+    };
+    expect(release.releasePolicy.policy).toEqual(policy);
+    const client = (network: Network) =>
+      createTvcClient({
+        network,
+        backend: { kind: "gateway", endpoint: new URL(privateWallet) },
+        release,
+        transport: { fetch: (url, init) => fetch(url, { ...init, headers: gatekeeperHeaders() }) },
+      });
+    // The policy verifies and binds the testkit's discovery and ping; only
+    // the unattested Boot Proof is refused.
+    await expect(client("devnet").connectAndVerify()).rejects.toMatchObject({
+      code: "BootProofUnverified",
+    });
+    await expect(client("mainnet").connectAndVerify()).rejects.toMatchObject({ code: "NetworkMismatch" });
+    expect(() => releasePolicy(info.release_id, { ...cfg, network: "mainnet" }, info, Date.now())).toThrow(
+      "/v1/info network is devnet, expected mainnet",
+    );
+  });
+});

@@ -56,8 +56,17 @@ Clients prove through `http://127.0.0.1:44021` (`localProverConfig` in
 
 `--live-prover` starts no stand-in: the local enclave seals witnesses only to a
 prover whose Nitro attestation chains to the production AWS root and passes
-the network's signed policy, as the enclave image does. Clients prove through
-that network's TEE provers with `TvcProverPolicy.forNetwork(network)`; the
-custody and QOS keys stay local and unattested.
+the network's signed policy, as the enclave image does. Clients of that network
+(`createLocalTvcClient({ network })`) prove through its TEE provers under its
+policy; the custody and QOS keys stay local and unattested.
 
 The `local-dev` feature is never enabled in the enclave binary.
+
+## Release
+
+`deploy/release.json` holds the release constants, shared at the top and per
+network under `networks`; `deploy/<network>/` holds that network's Turnkey app
+and deployment files. `just release <network> <release-id> --image <reference>`
+deploys the network's image and pins its signed release in
+`packages/tvc-wallet/src/releases/<network>.json`; see
+[`scripts/README.md`](../../scripts/README.md#release).

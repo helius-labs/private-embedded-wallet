@@ -1,15 +1,6 @@
 {
-  "appId": "4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39",
-  "endpoint": "https://app-4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39.app.turnkey.cloud",
   "imageRepository": "ghcr.io/helius-labs/zolana-tvc-privacy-wallet",
   "qosVersion": "0.12.1",
-  "securityDomainId": "6833d54afc265196b7051a12acc448f28e3a34e0a1339f8a31ee4283c54fb3fd",
-  "quorumKeyId": "b45f8b07-4d2c-4c72-a2a5-a5eadc3c1373",
-  "quorumKeyEpoch": "1",
-  "operatorIds": [
-    "644edc98-0a77-4c6c-9c94-db73c0813a1d",
-    "e4a0159b-1b0f-41ee-b730-725847dd1a82"
-  ],
   "turnkeyTrustRootId": "aws-nitro-root-g1",
   "turnkeyProofSchemaVersions": [
     "turnkey.boot_proof.v1"
@@ -20,5 +11,18 @@
     "2": "21b9efbc184807662e966d34f390821309eeac6802309798826296bf3e8bec7c10edb30948c90ba67310f7b964fc500a",
     "3": "321c3cd57bd9dc5549f349c315b93167fca1adbaf19fbb9c548101bae757970fe269e530ba684826e2f5fb043319a20f"
   },
-  "policyValidityDays": 365
+  "policyValidityDays": 365,
+  "networks": {
+    "devnet": {
+      "appId": "4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39",
+      "endpoint": "https://app-4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39.app.turnkey.cloud",
+      "securityDomainId": "6833d54afc265196b7051a12acc448f28e3a34e0a1339f8a31ee4283c54fb3fd",
+      "quorumKeyId": "b45f8b07-4d2c-4c72-a2a5-a5eadc3c1373",
+      "quorumKeyEpoch": "1",
+      "operatorIds": [
+        "644edc98-0a77-4c6c-9c94-db73c0813a1d",
+        "e4a0159b-1b0f-41ee-b730-725847dd1a82"
+      ]
+    }
+  }
 }

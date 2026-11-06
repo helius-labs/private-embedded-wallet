@@ -229,7 +229,9 @@ the testkit client in gateway mode: enrollment, one session, Bootstrap,
 TransactionKeys and a resend answered with the first answer, and the refusals
 of stale, forged, other-domain, other-network and other-project enrollments,
 other projects' wallets and resends, and descriptors this gateway did not
-provision. CI runs it after `just ci`. Service logs go to a temporary
+provision. One test signs a release for the testkit through
+`scripts/release.mjs` and checks the client accepts it for the testkit's
+network only. CI runs it after `just ci`. Service logs go to a temporary
 directory the run prints.
 
 `fixtures/wallet-enrollment.json` is the enrollment message test vector that

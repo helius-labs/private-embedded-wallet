@@ -17,6 +17,8 @@ declare module "vitest" {
     stack: {
       /** The gateway's base URL; its routes are under `/v1/private-wallet`. */
       gatewayUrl: string;
+      /** The testkit enclave's base URL. */
+      enclaveUrl: string;
       /** The `Authorization` value gatekeeper sends. */
       originAuth: string;
       /** A Helius API key of `PROJECT_ID`, for a direct caller. */
@@ -133,6 +135,7 @@ export default async function setup({ provide }: GlobalSetupContext) {
   }
   provide("stack", {
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
+    enclaveUrl: `http://127.0.0.1:${enclavePort}`,
     originAuth,
     apiKey,
     walletSeedHex: hex(walletSeed),

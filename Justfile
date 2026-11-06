@@ -126,7 +126,7 @@ gateway-e2e: install-ts
     {{pnpm}} build:ts
     {{pnpm}} --filter @zolana/tvc-gateway-e2e e2e
 
-# Deploy a published image, sign the release policy and pin it in tvc-wallet and tvc-gateway; see scripts/release.mjs.
-release release_id *flags:
-    node scripts/release.mjs all {{release_id}} {{flags}}
+# Deploy a network's published image, sign its release policy and pin it in tvc-wallet's src/releases/<network>.json; see scripts/release.mjs.
+release network release_id *flags:
+    node scripts/release.mjs all {{release_id}} --network {{network}} {{flags}}
 
