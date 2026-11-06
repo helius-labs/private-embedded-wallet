@@ -1,11 +1,9 @@
-# Mainnet, over config.yaml. The mainnet Turnkey application does not exist
-# yet: until its enclave URL and organization replace the two values below,
-# the gateway refuses to start.
+# Mainnet, over config.yaml.
 network: mainnet
 enclave:
-    base_url: unset-until-the-mainnet-turnkey-application-exists
+    base_url: https://app-8a2523d7-feb8-41ee-9587-c202048816ec.app.turnkey.cloud
 turnkey:
-    tvc_organization_id: unset-until-the-mainnet-turnkey-application-exists
+    tvc_organization_id: 9b98a0d8-04a4-47a3-9dc3-afa84c686de4
 provisioning:
     expected_public_key: 04f87ca34fcd2b78f57321c662a66395e400744a1951655ed77fbd1482a84e7590359b5f9b157a84489db68b02984c90b641a05deec3cdfd67dd990aecc89a58e0
     release_path: releases/mainnet.json

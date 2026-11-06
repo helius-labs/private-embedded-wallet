@@ -309,27 +309,20 @@ mod tests {
         );
     }
 
-    /// Mainnet has no Turnkey application yet: its overlay refuses to start
-    /// until the enclave URL and organization are filled in.
     #[test]
-    fn the_mainnet_overlay_needs_its_turnkey_application() {
+    fn the_mainnet_overlay_serves_mainnet_at_both_gatekeeper_hosts() {
         let secret = "a".repeat(MIN_SECRET_LEN);
-        let error = committed_config("configs/mainnet.yaml", &secret, serde_json::json!({}))
-            .err()
-            .expect("the mainnet overlay starts without an enclave");
-        assert!(
-            error
-                .to_string()
-                .starts_with("enclave.base_url must be the mainnet enclave's URL"),
-            "{error}"
-        );
-        let filled = serde_json::json!({
-            "enclave": { "base_url": "https://app-mainnet.example" },
-            "turnkey": { "tvc_organization_id": "00000000-0000-4000-8000-000000000001" },
-        });
-        let config = committed_config("configs/mainnet.yaml", &secret, filled)
-            .expect("the filled-in mainnet overlay loads");
+        let config = committed_config("configs/mainnet.yaml", &secret, serde_json::json!({}))
+            .expect("the committed mainnet overlay loads");
         assert_eq!(config.network, Network::Mainnet);
+        assert_eq!(
+            config.enclave.base_url.as_str(),
+            "https://app-8a2523d7-feb8-41ee-9587-c202048816ec.app.turnkey.cloud"
+        );
+        assert_eq!(
+            config.turnkey.tvc_organization_id,
+            "9b98a0d8-04a4-47a3-9dc3-afa84c686de4"
+        );
         assert_eq!(config.provisioning.descriptor_ttl_secs, 86_400);
         assert_eq!(
             config.enrollment.domains,
