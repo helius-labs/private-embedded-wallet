@@ -4,9 +4,7 @@ import type {
 } from "../client/operation-executor.js";
 import { clientKeyIdFor } from "../protocol/digest.js";
 import { TvcError } from "../protocol/error.js";
-import { walletGrantRenewalMessage, type WalletGrantRenewal } from "../protocol/grant.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
-import type { WalletDescriptor } from "../protocol/types.js";
 import { authorizedRequestMessage, compactLowS } from "./authorizer.js";
 
 const DATABASE_NAME = "zolana-tvc-privacy-wallet-authorizer-v1";
@@ -38,8 +36,6 @@ export type PersistentBrowserTvcAuthorizer = {
   readonly clientPublicKey: string;
   /** Closed-operation authorizer; it never exposes the private CryptoKey. */
   readonly authorizer: TvcOperationAuthorizer;
-  /** Signs a grant renewal for a descriptor whose only client is this key. */
-  signWalletGrantRenewal(descriptor: WalletDescriptor, issuedAtMs: bigint): Promise<WalletGrantRenewal>;
   /** Encrypts privacy material under a non-exportable, device-local AES key. */
   seal(plaintext: Uint8Array, additionalData: Uint8Array): Promise<PersistentBrowserTvcSealedValue>;
   /** Opens a value sealed by this browser profile. */
@@ -242,20 +238,6 @@ export async function loadOrCreatePersistentBrowserTvcAuthorizer(
             ),
           );
         },
-      },
-      async signWalletGrantRenewal(descriptor, issuedAtMs) {
-        const [client, ...others] = descriptor.allowed_clients;
-        if (!client || others.length > 0 || client.client_public_key !== record.clientPublicKey) {
-          throw new TvcError("InvalidDescriptor", "the descriptor does not name this client key");
-        }
-        const signature = compactLowS(
-          await crypto.subtle.sign(
-            { name: "ECDSA", hash: "SHA-256" },
-            record.privateKey,
-            ownedBytes(walletGrantRenewalMessage(descriptor, issuedAtMs)),
-          ),
-        );
-        return Object.freeze({ descriptor, issuedAtMs: Number(issuedAtMs), signature: encodeLowerHex(signature) });
       },
       async seal(plaintext, additionalData) {
         if (plaintext.length === 0 || additionalData.length === 0) {

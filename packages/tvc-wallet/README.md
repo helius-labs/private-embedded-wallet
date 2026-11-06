@@ -178,12 +178,10 @@ Turnkey sub-organization must be named after the API key's Helius project. See
   release policy, `verifyWalletDescriptor` checks one, `provisioningSecret` reads the provisioning key and refuses
   one the enclave was not built with. The wallet-grant issuer's side:
   `walletGrantSecret` reads the grant key and refuses one the enclave was not
-  built with, `signWalletGrant`, and `verifyWalletGrantRenewal` for a
-  self-hosted issuer's renewal (`walletGrantRenewalMessage`).
+  built with, and `signWalletGrant`.
   `walletEnrollmentMessage` is the Sign-In With Solana message a wallet owner
   signs to enroll with tvc-gateway.
-- `@heliuslabs/spr-embedded-wallet/browser`: non-exportable P-256 request signer, which
-  also signs grant renewals for its own descriptor (`signWalletGrantRenewal`),
+- `@heliuslabs/spr-embedded-wallet/browser`: non-exportable P-256 request signer,
   the persisted enclave-state parser, and IndexedDB record helpers.
 - `@heliuslabs/spr-embedded-wallet/testing`: loopback-only unattested testkit client. The
   build fails if it becomes reachable from a production entry.
