@@ -27,7 +27,7 @@ import {
   testkit,
 } from "./fixtures.js";
 
-const { gatewayUrl, enclaveUrl, originAuth, apiKey, walletSeedHex } = inject("stack");
+const { gatewayUrl, enclaveUrl, originAuth, apiKey, walletSeedHex, turnkeyUrl } = inject("stack");
 const privateWallet = `${gatewayUrl}/v1/private-wallet`;
 const ownerSeed = decodeLowerHex(walletSeedHex);
 const ownerAddress = getAddressDecoder().decode(ed25519.getPublicKey(ownerSeed));
@@ -383,6 +383,20 @@ describe("a direct caller with a Helius API key", () => {
 type ReleaseScript = {
   releasePolicy(releaseId: string, cfg: Record<string, unknown>, info: ServiceInfo, now: number): ReleasePolicy;
   signReleasePolicy(policy: ReleasePolicy, authoritySetId: string): Omit<ReleaseTrust, "qosIdentityPcrs">;
+  turnkeyBootProofs(credentials: {
+    organizationId: string;
+    apiBaseUrl: string;
+    publicKey: string;
+    privateKey: string;
+  }): (ephemeralKey: string) => Promise<unknown>;
+  verifyRelease(cfg: Record<string, unknown>, info: ServiceInfo, deps: { bootProof: unknown }): Promise<void>;
+  verifiedReleaseFile(
+    releaseId: string,
+    cfg: Record<string, unknown>,
+    info: ServiceInfo,
+    now: number,
+    deps: { verify: (cfg: Record<string, unknown>, info: ServiceInfo) => Promise<void>; sign: () => never },
+  ): Promise<unknown>;
 };
 
 describe("a release the release script signs for the testkit", () => {
@@ -428,5 +442,40 @@ describe("a release the release script signs for the testkit", () => {
     expect(() => releasePolicy(info.release_id, { ...cfg, network: "mainnet" }, info, Date.now())).toThrow(
       "/v1/info network is devnet, expected mainnet",
     );
+  });
+
+  it("is not signed when the replica's Boot Proof does not verify, as the testkit's does not", async () => {
+    const script = new URL("../../../scripts/release.mjs", import.meta.url).href;
+    const { turnkeyBootProofs, verifyRelease, verifiedReleaseFile } = (await import(script)) as ReleaseScript;
+    const info = (await (await fetch(`${enclaveUrl}/v1/info`)).json()) as ServiceInfo;
+    const turnkeyKey = p256.utils.randomPrivateKey();
+    // Fetched from the mock Turnkey with a stamped request, as from Turnkey with the tvc login.
+    const bootProof = turnkeyBootProofs({
+      organizationId: ORGANIZATION_ID,
+      apiBaseUrl: turnkeyUrl,
+      publicKey: encodeLowerHex(p256.getPublicKey(turnkeyKey, true)),
+      privateKey: encodeLowerHex(turnkeyKey),
+    });
+    const cfg = {
+      network: info.network,
+      endpoint: enclaveUrl,
+      appId: "local-testkit",
+      securityDomainId: info.security_domain_id,
+      quorumKeyId: info.quorum_key_id,
+      quorumKeyEpoch: info.quorum_key_epoch,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      turnkeyProofSchemaVersions: ["turnkey.boot_proof.v1"],
+      policyValidityDays: 1,
+      qosIdentityPcrs: { 0: "00".repeat(48), 1: "00".repeat(48), 2: "00".repeat(48), 3: "00".repeat(48) },
+    };
+    const sign = vi.fn<() => never>();
+    // The testkit answers the challenge under its Quorum key; only the unattested Boot Proof is refused.
+    await expect(
+      verifiedReleaseFile(info.release_id, cfg, info, Date.now(), {
+        verify: (verified, served) => verifyRelease(verified, served, { bootProof }),
+        sign,
+      }),
+    ).rejects.toThrow(/does not verify, so nothing was signed: BootProofUnverified: decode/);
+    expect(sign).not.toHaveBeenCalled();
   });
 });

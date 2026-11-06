@@ -1,5 +1,6 @@
 /**
- * Clients for tests and local deployments.
+ * Clients for tests and local deployments, and `verifyLiveReplica` for the
+ * release tooling.
  *
  * `createTestTvcClient` verifies an enclave exactly as `createTvcClient` does,
  * against a release and backend the caller names. `createLocalTvcClient` is
@@ -49,6 +50,7 @@ export type {
   TvcBackend,
 } from "./client/backend.js";
 export type { SignTvcRequestInput, TvcRequestSigner } from "./client/operation-executor.js";
+export { verifyLiveReplica, type VerifyLiveReplicaInput } from "./client/connection.js";
 export { createTvcRequestSigner, type TvcRequestKey } from "./platform/signer.js";
 export type { ReleaseTrust } from "./protocol/releases.js";
 export type { QosIdentityPcrs } from "./verify/index.js";

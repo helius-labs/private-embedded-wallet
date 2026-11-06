@@ -6,9 +6,10 @@
 | [`create-service-key.mjs`](create-service-key.mjs) | Creates a P-256 service key (provisioning or wallet grant) straight into a new AWS Secrets Manager secret with the `aws` CLI and prints only its public key, the value the enclave pins. |
 | [`start-localnet.sh`](start-localnet.sh) | Starts a Zolana localnet for `just headless-e2e`. |
 
-The scripts need Node 24, Docker with `linux/amd64`, cargo, and the Turnkey
-`tvc` CLI logged in to the app's organization. Nothing here holds a key longer than
-one call. Never commit Turnkey operator files, API keys, or `.env.local`.
+The scripts need Node 24, Docker with `linux/amd64`, cargo, the Turnkey
+`tvc` CLI logged in to the app's organization, and a built tvc-wallet
+(`pnpm build:ts`), whose verifier the `policy` phase runs. Nothing here holds a
+key longer than one call. Never commit Turnkey operator files, API keys, or `.env.local`.
 
 ## Release
 
@@ -41,7 +42,7 @@ node scripts/release.mjs policy private-wallet-devnet-<sha> --network devnet   #
 | --- | --- |
 | `build` | Refuses an image not tagged for the network, reads the `/tvc_app` SHA-256 from the `--image` reference and records it (`expectedPivotDigest`) with the reference in `deploy/<network>/privacy-wallet-<release>.deployment.json`. Debug mode stays off; `qosVersion` equals the pinned `qos_core`. |
 | `deploy` | Drives the `tvc` CLI: creates the deployment, collects one approval per operator, provisions it, sets it live, and waits until `/v1/info` serves the release. Each approval shows the QOS manifest for the operator to confirm; `--unattended` skips that review and is refused on mainnet. A re-run continues from the last completed step. |
-| `policy` | Checks that `/v1/info` serves the network and the release's constants, assembles the release policy, signs it with a one-time authority key (`cargo run -p zolana-tvc-protocol --example sign-release-policy`, which verifies the signed policy for its network before it answers; the private half exists only inside that call), and writes the policy, the authority public keys and the QOS identity PCRs to tvc-wallet's `src/releases/<network>.json`, replacing what was there (`null` for a network with no release yet). The client exports it as `RELEASES[network]`, and tvc-gateway's image carries it as its release file. |
+| `policy` | Checks that `/v1/info` serves the network and the release's constants, then verifies the live replica as a client would, with tvc-wallet's `verifyLiveReplica` (`./testing`): it answers a challenge sealed to the Quorum key `/v1/info` reports, and its Boot Proof, fetched from Turnkey with the `tvc` login's API key (`TVC_ORG_ID`, `TVC_API_KEY_PUBLIC`, `TVC_API_KEY_PRIVATE`, or the active organization of `~/.config/turnkey/tvc.config.toml`), chains to the pinned AWS Nitro root, carries `qosIdentityPcrs` and attests the reported manifest digest, under the trust root `turnkeyTrustRootId` names. A replica that does not verify stops the phase before anything is signed. Only then it assembles the release policy, signs it with a one-time authority key (`cargo run -p zolana-tvc-protocol --example sign-release-policy`, which verifies the signed policy for its network before it answers; the private half exists only inside that call), and writes the policy, the authority public keys and the QOS identity PCRs to tvc-wallet's `src/releases/<network>.json`, replacing what was there (`null` for a network with no release yet). The client exports it as `RELEASES[network]`, and tvc-gateway's image carries it as its release file. |
 
 Commit `deploy/<network>/` and the release file, then publish a tvc-gateway
 image and redeploy the network's gateway.

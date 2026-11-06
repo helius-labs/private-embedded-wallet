@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { p256 } from "@noble/curves/p256";
 import { sha256 } from "@noble/hashes/sha256";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { qosDecrypt } from "../crypto/qos.js";
+import { qosDecrypt, qosEncrypt } from "../crypto/qos.js";
 import { signP256Message, signP256Prehash } from "../crypto/p256.js";
 import { canonicalizeJsonValue } from "../protocol/jcs.js";
 import { decodeLowerHex, encodeLowerHex } from "../protocol/hex.js";
@@ -15,7 +15,7 @@ import type {
   SignedReleasePolicy,
 } from "../protocol/types.js";
 import { policySigningDigest } from "../verify/release-policy.js";
-import type { TvcConnectionConfig } from "./connection.js";
+import { verifyLiveReplica, type TvcConnectionConfig } from "./connection.js";
 import type { TvcRequestOptions } from "./request.js";
 import { createTvcSession } from "./session.js";
 
@@ -442,5 +442,78 @@ describe("the client's network", () => {
       },
     });
     await expect(verified).rejects.toMatchObject({ code: "NetworkMismatch" });
+  });
+});
+
+describe("a live replica, before its release is signed", () => {
+  beforeEach(() => verifyBootProofMock.mockReset().mockResolvedValue(undefined));
+
+  function enclave(answer: (encryptedChallenge: string) => string) {
+    const fetch = vi.fn(async (url: URL, init?: RequestInit) => {
+      expect(url.pathname).toBe("/v1/ping");
+      const request = JSON.parse(String(init?.body)) as { encrypted_challenge: string };
+      try {
+        return new Response(answer(request.encrypted_challenge), { status: 200 });
+      } catch {
+        // A challenge sealed to a key the replica does not hold.
+        return new Response('{"error":"InvalidRequest"}', { status: 400 });
+      }
+    });
+    return { fetch };
+  }
+
+  it("answers the ping under the Quorum key info names, and its Boot Proof attests info's manifest", async () => {
+    const { ephemeralPublicKey, manifestDigest, info, expectedPcrs, bootProof, pingAnswer } = connectFixture();
+    const lookup = vi.fn().mockResolvedValue(bootProof);
+    await verifyLiveReplica({
+      endpoint: new URL("https://app.example"),
+      info,
+      qosIdentityPcrs: expectedPcrs,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      bootProof: lookup,
+      transport: enclave(pingAnswer),
+      nowMs: 1_750_000_000_000n,
+    });
+    expect(lookup).toHaveBeenCalledWith(ephemeralPublicKey, undefined);
+    expect(verifyBootProofMock).toHaveBeenCalledWith({
+      appProof: expect.objectContaining({ publicKey: ephemeralPublicKey }),
+      bootProof,
+      allowedManifestSha256: [manifestDigest],
+      expectedPcrs,
+      nowMs: 1_750_000_000_000n,
+    });
+  });
+
+  it("is refused when another key answers, the Boot Proof fails, or the trust root is not the pinned one", async () => {
+    const { info, expectedPcrs, bootProof, pingAnswer } = connectFixture();
+    const input = {
+      endpoint: new URL("https://app.example"),
+      info,
+      qosIdentityPcrs: expectedPcrs,
+      turnkeyTrustRootId: "aws-nitro-root-g1",
+      bootProof: vi.fn().mockResolvedValue(bootProof),
+      transport: enclave(pingAnswer),
+    };
+    // A Quorum key the replica does not hold: it cannot read the challenge.
+    const { info: otherRelease } = connectFixture();
+    const otherQuorum = qosPublic(secret("another-quorum-encryption"), secret("another-quorum-signing"));
+    await expect(
+      verifyLiveReplica({ ...input, info: { ...otherRelease, quorum_public_key: otherQuorum } }),
+    ).rejects.toMatchObject({ code: "BootProofUnverified", status: 400 });
+    // An answer to another challenge.
+    const replayed = enclave(() => pingAnswer(encodeLowerHex(qosEncrypt(
+      p256.getPublicKey(secret("connect-quorum-encryption"), false),
+      new TextEncoder().encode("another challenge"),
+    ))));
+    await expect(verifyLiveReplica({ ...input, transport: replayed })).rejects.toMatchObject({
+      code: "TurnkeyEvidenceInvalid",
+    });
+    verifyBootProofMock.mockRejectedValueOnce(new Error("BootProofUnverified"));
+    await expect(verifyLiveReplica(input)).rejects.toThrow("BootProofUnverified");
+    const fetch = vi.fn();
+    await expect(
+      verifyLiveReplica({ ...input, turnkeyTrustRootId: "another-root", transport: { fetch } }),
+    ).rejects.toMatchObject({ code: "ReleasePolicyInvalid" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

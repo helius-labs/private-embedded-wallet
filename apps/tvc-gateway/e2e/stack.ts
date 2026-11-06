@@ -25,6 +25,8 @@ declare module "vitest" {
       apiKey: string;
       /** The Ed25519 seed of the wallet the testkit enclave holds, hex. */
       walletSeedHex: string;
+      /** The mock Turnkey's base URL. */
+      turnkeyUrl: string;
     };
   }
 }
@@ -141,6 +143,7 @@ export default async function setup({ provide }: GlobalSetupContext) {
     originAuth,
     apiKey,
     walletSeedHex: hex(walletSeed),
+    turnkeyUrl: turnkey.url,
   });
   return teardown;
 }

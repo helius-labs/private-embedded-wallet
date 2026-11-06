@@ -221,9 +221,11 @@ sub-organization must be named after the API key's Helius project. See
   the caller names (a gateway, or the enclave itself with
   `{ kind: "enclave", endpoint, resolveBootProof, walletGrant }`), with the
   Turnkey session or a descriptor and the signer of its key
-  (`createTvcRequestSigner`), and `createLocalTvcClient`, the loopback-only
-  unattested testkit client for the network the testkit was built for. The
-  build fails if testkit code becomes reachable from a production entry.
+  (`createTvcRequestSigner`), `createLocalTvcClient`, the loopback-only
+  unattested testkit client for the network the testkit was built for, and
+  `verifyLiveReplica`, which `scripts/release.mjs` runs on a live replica
+  before it signs that replica's release policy. The build fails if testkit
+  code becomes reachable from a production entry.
 
 ## Verification
 

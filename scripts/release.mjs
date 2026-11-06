@@ -7,15 +7,20 @@
 //           descriptor
 //   deploy  creates the TVC deployment, approves and provisions it for every
 //           operator, makes it live, and waits for /v1/info to serve it
-//   policy  assembles the release policy from /v1/info, signs it with a
-//           one-time authority key, and pins it in tvc-wallet's
-//           src/releases/<network>.json, the file tvc-gateway reads too
+//   policy  verifies the live replica's Boot Proof as a client would (the
+//           pinned QOS PCRs, the manifest digest and Quorum key /v1/info
+//           reports, the Turnkey trust root), then assembles the release
+//           policy from /v1/info, signs it with a one-time authority key, and
+//           pins it in tvc-wallet's src/releases/<network>.json, the file
+//           tvc-gateway reads too
 //
 //   node scripts/release.mjs <build|deploy|policy|all> <release-id>
 //     --network <devnet|mainnet> [--image <reference>] [--unattended]
 //     [--prune-deployments]
 //
-// Turnkey is driven through the `tvc` CLI and its active login. Approvals are
+// Turnkey is driven through the `tvc` CLI and its active login; the policy
+// phase reads that login's API key to fetch the Boot Proof, and verifies it
+// with tvc-wallet's build (packages/tvc-wallet/dist). Approvals are
 // interactive: the CLI shows the QOS manifest for each operator to confirm.
 // --unattended approves without that review, on devnet only.
 // --prune-deployments deletes the oldest deployments that are neither live nor
@@ -25,11 +30,12 @@
 // apps/privacy-wallet/deploy/<network>/.
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { createECDH, createPrivateKey, sign } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -43,6 +49,9 @@ const HEX = (bytes) => new RegExp(`^[0-9a-f]{${2 * bytes}}$`);
 const WAIT_MS = 20 * 60_000;
 /** Turnkey's cap on deployable deployments per TVC app. */
 const DEPLOYABLE_LIMIT = 3;
+/** tvc-wallet's built `./testing` entry, whose `verifyLiveReplica` checks the replica before the policy is signed. */
+const CLIENT_TESTING = join(ROOT, "packages/tvc-wallet/dist/testing.js");
+const TURNKEY_API = "https://api.turnkey.com";
 
 /** The network's release pin in tvc-wallet, which tvc-gateway reads too. */
 const pinPath = (network) => join(ROOT, "packages/tvc-wallet/src/releases", `${network}.json`);
@@ -305,16 +314,122 @@ export function signReleasePolicy(policy, authoritySetId) {
   }
 }
 
-async function policy(releaseId, cfg) {
-  const info = await awaitRelease(releaseId, cfg);
-  const now = Date.now();
+/**
+ * The Turnkey API key the `tvc` CLI acts with, and its organization, which
+ * holds the TVC app: `TVC_ORG_ID`, `TVC_API_KEY_PUBLIC` and
+ * `TVC_API_KEY_PRIVATE` when set, as tvc reads them, else the active
+ * organization of tvc's config file.
+ */
+export function tvcCredentials({ env = process.env, configDir = join(homedir(), ".config/turnkey") } = {}) {
+  const named = [env.TVC_ORG_ID, env.TVC_API_KEY_PUBLIC, env.TVC_API_KEY_PRIVATE];
+  if (named.some(Boolean)) {
+    if (!named.every(Boolean)) fail("set all of TVC_ORG_ID, TVC_API_KEY_PUBLIC and TVC_API_KEY_PRIVATE, or none");
+    const [organizationId, publicKey, privateKey] = named;
+    return { organizationId, apiBaseUrl: TURNKEY_API, publicKey, privateKey };
+  }
+  const path = join(configDir, "tvc.config.toml");
+  if (!existsSync(path)) fail(`no ${path}: run tvc login, or set TVC_ORG_ID, TVC_API_KEY_PUBLIC and TVC_API_KEY_PRIVATE`);
+  const config = readFileSync(path, "utf8");
+  const active = /^active_org\s*=\s*"([^"]+)"/m.exec(config)?.[1];
+  if (!active) fail(`${path} names no active_org`);
+  // The [orgs.<active>] table, up to the next table header.
+  const table = config.split(/^\[/m).find((block) => block.startsWith(`orgs.${active}]`)) ?? "";
+  const value = (key) => new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m").exec(table)?.[1];
+  const organizationId = value("id");
+  const keyPath = value("api_key_path");
+  if (!organizationId || !keyPath) fail(`${path}: [orgs.${active}] needs id and api_key_path`);
+  const key = readJson(keyPath);
+  return { organizationId, apiBaseUrl: value("api_base_url") || TURNKEY_API, publicKey: key.public_key, privateKey: key.private_key };
+}
+
+/**
+ * Turnkey's API-key stamp of `body`, the `X-Stamp` header: ECDSA P-256 over
+ * SHA-256 of the body, DER, with the compressed public key that names the key.
+ */
+export function turnkeyStamp(body, { publicKey, privateKey }) {
+  if (!HEX(32).test(privateKey ?? "") || !/^0[23][0-9a-f]{64}$/.test(publicKey ?? "")) {
+    fail("the Turnkey API key must be a 32-byte private key and a compressed public key, in hex");
+  }
+  const secret = Buffer.from(privateKey, "hex");
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(secret);
+  if (ecdh.getPublicKey("hex", "compressed") !== publicKey) fail("the Turnkey API key's private half does not match its public key");
+  const point = ecdh.getPublicKey();
+  const jwk = {
+    kty: "EC",
+    crv: "P-256",
+    d: secret.toString("base64url"),
+    x: point.subarray(1, 33).toString("base64url"),
+    y: point.subarray(33).toString("base64url"),
+  };
+  const signature = sign("sha256", Buffer.from(body), createPrivateKey({ key: jwk, format: "jwk" })).toString("hex");
+  return Buffer.from(JSON.stringify({ publicKey, scheme: "SIGNATURE_SCHEME_TK_API_P256", signature })).toString("base64url");
+}
+
+/** Fetches a replica's Boot Proof from Turnkey (`get_boot_proof`) with `credentials`. */
+export function turnkeyBootProofs(credentials, transport = { fetch }) {
+  return async (ephemeralKey) => {
+    const body = JSON.stringify({ organizationId: credentials.organizationId, ephemeralKey });
+    const response = await transport.fetch(new URL("/public/v1/query/get_boot_proof", credentials.apiBaseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-stamp": turnkeyStamp(body, credentials) },
+      body,
+    });
+    if (!response.ok) fail(`Turnkey answered the Boot Proof lookup with ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    const { bootProof } = await response.json();
+    if (!bootProof) fail("Turnkey has no Boot Proof for the replica that answered");
+    return bootProof;
+  };
+}
+
+/**
+ * Verifies the replica that serves `info` as a client will, before anything
+ * is signed: it answers a challenge sealed to `info`'s Quorum key, and its Boot
+ * Proof chains to the pinned AWS Nitro root, carries release.json's
+ * `qosIdentityPcrs` and attests `info`'s manifest digest, under the trust root
+ * the release names. `bootProof` defaults to Turnkey with the `tvc` login.
+ */
+export async function verifyRelease(cfg, info, { bootProof, transport, nowMs } = {}) {
+  if (!existsSync(CLIENT_TESTING)) {
+    fail(`${relative(ROOT, CLIENT_TESTING)} is missing: the policy phase verifies the replica with it, so build tvc-wallet first (npx pnpm build:ts)`);
+  }
+  const { verifyLiveReplica } = await import(pathToFileURL(CLIENT_TESTING).href);
+  try {
+    await verifyLiveReplica({
+      endpoint: new URL(cfg.endpoint),
+      info,
+      qosIdentityPcrs: cfg.qosIdentityPcrs,
+      turnkeyTrustRootId: cfg.turnkeyTrustRootId,
+      bootProof: bootProof ?? turnkeyBootProofs(tvcCredentials()),
+      ...(transport ? { transport } : {}),
+      ...(nowMs === undefined ? {} : { nowMs }),
+    });
+  } catch (error) {
+    if (error instanceof ReleaseError) throw error;
+    fail(`the replica at ${cfg.endpoint} does not verify, so nothing was signed: ${error.message}`);
+  }
+  console.log(`verified a replica at ${cfg.endpoint}: manifest ${info.manifest_digest} under the pinned PCRs`);
+}
+
+/**
+ * The release file for `releaseId` as the enclave at `cfg.endpoint` serves it
+ * (`info`): verified first, then signed. `verify` and `sign` are
+ * `verifyRelease` and `signReleasePolicy`.
+ */
+export async function verifiedReleaseFile(releaseId, cfg, info, now, { verify = verifyRelease, sign = signReleasePolicy } = {}) {
   const unsigned = releasePolicy(releaseId, cfg, info, now);
-  const signed = signReleasePolicy(unsigned, `${releaseId}-${new Date(now).toISOString().slice(0, 7)}`);
-  writeJson(pinPath(cfg.network), {
+  await verify(cfg, info);
+  const signed = sign(unsigned, `${releaseId}-${new Date(now).toISOString().slice(0, 7)}`);
+  return {
     releasePolicy: signed.releasePolicy,
     releaseAuthorities: signed.releaseAuthorities,
     qosIdentityPcrs: cfg.qosIdentityPcrs,
-  });
+  };
+}
+
+async function policy(releaseId, cfg) {
+  const info = await awaitRelease(releaseId, cfg);
+  writeJson(pinPath(cfg.network), await verifiedReleaseFile(releaseId, cfg, info, Date.now()));
 }
 
 const USAGE =

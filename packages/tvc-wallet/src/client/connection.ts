@@ -3,6 +3,7 @@ import { verifyP256Message } from "../crypto/p256.js";
 import { parseQosP256Public, qosEncrypt } from "../crypto/qos.js";
 import {
   API_VERSION,
+  EXPECTED_TURNKEY_TRUST_ROOT_ID,
   QOS_P256_PUBLIC_LEN,
   TVC_APP_PROOF_KEYS,
   TVC_APP_PROOF_SCHEME,
@@ -15,13 +16,13 @@ import { parseStrictJson } from "../protocol/json.js";
 import type { ReleaseTrust } from "../protocol/releases.js";
 import { SERVICE_INFO_KEYS, type Network, type ServiceInfo } from "../protocol/types.js";
 import { createDefaultTransport, type TvcTransport } from "./transport.js";
-import { verifyBootProof } from "../verify/index.js";
+import { verifyBootProof, type QosIdentityPcrs } from "../verify/index.js";
 import type {
   TurnkeyAppProofWire,
   TurnkeyBootProofWire,
 } from "../verify/internal/turnkey-proof-seam.js";
 import { bindDiscoveryToPolicy, verifySignedReleasePolicy } from "../verify/release-policy.js";
-import { fetchSession, lookupBootProof, type TvcBackend } from "./backend.js";
+import { fetchPing, fetchSession, lookupBootProof, type TvcBackend } from "./backend.js";
 import { assertExactObjectKeys } from "./http.js";
 import { requireCurrentReleasePolicy } from "./operation-executor.js";
 import type { TvcTrustVerifier } from "./trust.js";
@@ -121,6 +122,52 @@ export function verifyQosPingAnswer(text: string, challenge: QosPingChallenge): 
     proofPayload: proof.proof_payload,
     signature: proof.signature,
   };
+}
+
+/** What a release tool checks of a live replica before it signs a release policy for it. */
+export type VerifyLiveReplicaInput = {
+  /** The enclave's public ingress. */
+  readonly endpoint: URL;
+  /** `/v1/info` as the enclave served it: the manifest digest and Quorum key to sign. */
+  readonly info: ServiceInfo;
+  /** The PCR0-3 pinned for the QOS version, never read from the enclave. */
+  readonly qosIdentityPcrs: QosIdentityPcrs;
+  /** The trust root the release names; only the one this package pins verifies. */
+  readonly turnkeyTrustRootId: string;
+  /** Turnkey's Boot Proof for the replica whose ephemeral public key is given. */
+  readonly bootProof: (ephemeralPublicKey: string, signal?: AbortSignal) => Promise<TurnkeyBootProofWire>;
+  readonly transport?: TvcTransport;
+  readonly nowMs?: bigint;
+  readonly signal?: AbortSignal;
+};
+
+/**
+ * For release tooling, before any release policy exists: the replica that
+ * answers at `endpoint` decrypts a challenge sealed to `info`'s Quorum key and
+ * signs it with an ephemeral key whose Boot Proof chains to the pinned AWS
+ * Nitro root, carries the pinned PCR0-3, and attests the manifest digest
+ * `info` reports. The QOS manifest names the Quorum key, so this verifies
+ * both values a release policy pins. Throws `TvcError` otherwise.
+ */
+export async function verifyLiveReplica(input: VerifyLiveReplicaInput): Promise<void> {
+  if (input.turnkeyTrustRootId !== EXPECTED_TURNKEY_TRUST_ROOT_ID) {
+    throw new TvcError("ReleasePolicyInvalid", `this client pins the trust root ${EXPECTED_TURNKEY_TRUST_ROOT_ID}`);
+  }
+  const info = parseServiceInfo(JSON.stringify(input.info));
+  const transport = input.transport ?? createDefaultTransport();
+  const challenge = qosPingChallenge(info.quorum_public_key);
+  const appProof = verifyQosPingAnswer(
+    await fetchPing(input.endpoint, challenge.body, transport, input.signal),
+    challenge,
+  );
+  const bootProof = await awaitWithSignal(input.bootProof(appProof.publicKey, input.signal), input.signal);
+  await verifyBootProof({
+    appProof,
+    bootProof,
+    allowedManifestSha256: [info.manifest_digest],
+    expectedPcrs: input.qosIdentityPcrs,
+    nowMs: input.nowMs ?? BigInt(Date.now()),
+  });
 }
 
 export async function connectAndVerifyTvc(

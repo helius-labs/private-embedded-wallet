@@ -100,6 +100,17 @@ async function readAnswer(
   return readBoundedText(response, maxBytes, signal);
 }
 
+/** The enclave's answer to `pingBody`, a QOS ping encrypted to its quorum key. */
+export async function fetchPing(
+  endpoint: URL,
+  pingBody: string,
+  transport: TvcTransport,
+  signal?: AbortSignal,
+): Promise<string> {
+  const ping = await postJson(transport, endpointUrl(endpoint, "/v1/ping"), pingBody, signal);
+  return readAnswer(ping, "BootProofUnverified", MAX_PING_RESPONSE_BYTES, signal);
+}
+
 /** Discovery and the answer to `pingBody`, a QOS ping encrypted to the pinned quorum key. */
 export async function fetchSession(
   backend: TvcBackend,
@@ -114,9 +125,7 @@ export async function fetchSession(
         transport, endpointUrl(backend.endpoint, "/v1/info"), undefined, signal,
       );
       const infoText = await readAnswer(info, "DiscoveryUntrusted", MAX_DISCOVERY_RESPONSE_BYTES, signal);
-      const ping = await postJson(transport, endpointUrl(backend.endpoint, "/v1/ping"), pingBody, signal);
-      const pingText = await readAnswer(ping, "BootProofUnverified", MAX_PING_RESPONSE_BYTES, signal);
-      return { infoText, pingText };
+      return { infoText, pingText: await fetchPing(backend.endpoint, pingBody, transport, signal) };
     }
     case "gateway": {
       const response = await postJson(transport, gatewayUrl(backend.endpoint, "session"), pingBody, signal);
