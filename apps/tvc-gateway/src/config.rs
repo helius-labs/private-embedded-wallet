@@ -324,10 +324,7 @@ mod tests {
             "9b98a0d8-04a4-47a3-9dc3-afa84c686de4"
         );
         assert_eq!(config.provisioning.descriptor_ttl_secs, 86_400);
-        assert_eq!(
-            config.enrollment.domains,
-            ["mainnet.helius-rpc.com"]
-        );
+        assert_eq!(config.enrollment.domains, ["mainnet.helius-rpc.com"]);
         assert_eq!(
             config.provisioning.release_path,
             Path::new("releases/mainnet.json")
