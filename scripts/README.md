@@ -3,7 +3,6 @@
 | Script | Purpose |
 | --- | --- |
 | [`release.mjs`](release.mjs) | Deploys and signs a release of the privacy-wallet enclave, then pins it in tvc-wallet and tvc-gateway. |
-| [`provision-descriptor.mjs`](provision-descriptor.mjs) | Signs a wallet descriptor for one client key. |
 | [`create-service-key.mjs`](create-service-key.mjs) | Creates a P-256 service key (provisioning or wallet grant) straight into a new AWS Secrets Manager secret with the `aws` CLI and prints only its public key, the value the enclave pins. |
 | [`start-localnet.sh`](start-localnet.sh) | Starts a Zolana localnet for `just headless-e2e`. |
 
@@ -44,29 +43,6 @@ one fits. Every Turnkey call goes through the `tvc` CLI and its active login.
 The [protocol specification](../crates/protocol/README.md#release-policy)
 defines the policy and its signature. Re-signing means a new authority set
 every client must accept.
-
-## Wallet descriptors
-
-A wallet descriptor is the operator's grant that lets one client key drive the
-enclave operations of one Turnkey wallet. tvc-gateway signs one on each
-`POST /v1/private-wallet/enroll`. For a client that talks to the enclave
-directly, the client reports the values and the operator signs:
-
-```sh
-node scripts/provision-descriptor.mjs --organization-id <org> --wallet-id <id> \
-  --address <address> --client-public-key <hex> --out descriptor.json
-```
-
-The security domain, environment, and operation list come from the published
-trust material (`--trust`, default
-`packages/tvc-wallet/src/devnet-release.json`), so the descriptor
-names exactly the release the client pins. The provisioning key comes from
-`TVC_PROVISIONING_KEY_JSON` or `--provisioning-key <path>`, in the Turnkey API
-key file format, and is checked against the public half compiled into the
-image before it signs. Treat it as release material. The descriptor itself is
-public data for the client to keep.
-
-The script imports the built tvc-wallet package, so run `pnpm build:ts` first.
 
 ## Localnet
 

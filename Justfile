@@ -130,6 +130,3 @@ gateway-e2e: install-ts
 release release_id *flags:
     node scripts/release.mjs all {{release_id}} {{flags}}
 
-# Sign a wallet descriptor for one client key; see scripts/provision-descriptor.mjs.
-provision-descriptor *flags:
-    node scripts/provision-descriptor.mjs {{flags}}

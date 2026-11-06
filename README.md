@@ -130,16 +130,15 @@ Each deployment has its own Turnkey TVC app, Quorum key, `linux/amd64` image
 pinned by `@sha256:`, signed release policy, and wallet descriptors. The
 constants of the current app are in
 [`apps/privacy-wallet/deploy/release.json`](apps/privacy-wallet/deploy/release.json);
-a release is one command, and a descriptor one more:
+a release is one command:
 
 ```sh
 just release private-wallet-devnet-<sha> --image <reference>
-just provision-descriptor --organization-id <org> --wallet-id <id> \
-  --address <address> --client-public-key <hex> --out descriptor.json
 ```
 
-[`scripts/README.md`](scripts/README.md) describes the release phases, the
-provisioning key, and the localnet.
+Wallet descriptors come from tvc-gateway, which signs one on each
+`POST /v1/private-wallet/enroll`. [`scripts/README.md`](scripts/README.md)
+describes the release phases and the localnet.
 
 ## License
 
