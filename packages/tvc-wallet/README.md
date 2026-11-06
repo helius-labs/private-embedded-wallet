@@ -185,8 +185,6 @@ Turnkey sub-organization must be named after the API key's Helius project. See
 - `@heliuslabs/spr-embedded-wallet/browser`: non-exportable P-256 request signer, which
   also signs grant renewals for its own descriptor (`signWalletGrantRenewal`),
   the persisted enclave-state parser, and IndexedDB record helpers.
-- `@heliuslabs/spr-embedded-wallet/react`: `TvcWalletProvider` / `useTvcWallet` for the
-  connection lifecycle.
 - `@heliuslabs/spr-embedded-wallet/testing`: loopback-only unattested testkit client. The
   build fails if it becomes reachable from a production entry.
 

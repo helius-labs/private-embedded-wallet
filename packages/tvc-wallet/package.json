@@ -30,11 +30,6 @@
       "import": "./dist/browser.js",
       "require": "./dist/browser.cjs"
     },
-    "./react": {
-      "types": "./dist/react/index.d.ts",
-      "import": "./dist/react/index.js",
-      "require": "./dist/react/index.cjs"
-    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
@@ -60,22 +55,12 @@
   },
   "peerDependencies": {
     "@heliuslabs/spr": ">=0.9.0-alpha",
-    "@solana/kit": "^8.3.0",
-    "react": ">=18.0.0"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    }
+    "@solana/kit": "^8.3.0"
   },
   "devDependencies": {
     "@heliuslabs/spr": "0.9.0-alpha",
     "@solana/kit": "^8.3.0",
     "@types/node": "^24.0.0",
-    "@types/react": "^19.0.2",
-    "@types/react-test-renderer": "19.1.0",
-    "react": "^19.0.0",
-    "react-test-renderer": "19.2.8",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
