@@ -4,6 +4,7 @@
 | --- | --- |
 | [`release.mjs`](release.mjs) | Deploys and signs a release of the privacy-wallet enclave, then pins it in tvc-wallet and tvc-gateway. |
 | [`provision-descriptor.mjs`](provision-descriptor.mjs) | Signs a wallet descriptor for one client key. |
+| [`create-service-key.mjs`](create-service-key.mjs) | Creates a P-256 service key (provisioning or wallet grant) straight into a new AWS Secrets Manager secret with the `aws` CLI and prints only its public key, the value the enclave pins. |
 | [`start-localnet.sh`](start-localnet.sh) | Starts a Zolana localnet for `just headless-e2e`. |
 
 The scripts need Node 24, Docker with `linux/amd64`, cargo, and the Turnkey
@@ -33,8 +34,8 @@ node scripts/release.mjs policy private-wallet-devnet-<sha>   # one phase
 | --- | --- |
 | `build` | Reads the `/tvc_app` SHA-256 from the `--image` reference and records it (`expectedPivotDigest`) with the reference in `privacy-wallet-<release>.deployment.json`. Debug mode stays off; `qosVersion` equals the pinned `qos_core`. |
 | `deploy` | Drives the `tvc` CLI: creates the deployment, collects one approval per operator, provisions it, sets it live, and waits until `/v1/info` serves the release. Each approval shows the QOS manifest for the operator to confirm; `--unattended` skips that review. A re-run continues from the last completed step. |
-| `policy` | Assembles the release policy from `/v1/info` and `release.json`, signs it with a one-time authority key (`cargo run -p zolana-tvc-protocol --example sign-release-policy`; the private half exists only inside that call), and writes `privacy-wallet-<release>.trust.json`: the policy, the authority public keys, and the QOS identity PCRs a client pins. |
-| `pins` | Copies the trust material into tvc-wallet's `src/devnet-release.json`, which it exports as `DEVNET_RELEASE`, and the signed policy and its authorities into tvc-gateway's `configs/`. |
+| `policy` | Assembles the release policy from `/v1/info` and `release.json`, signs it with a one-time authority key (`cargo run -p zolana-tvc-protocol --example sign-release-policy`; the private half exists only inside that call), and writes the trust material a client pins, the policy, the authority public keys and the QOS identity PCRs, to tvc-wallet's `src/devnet-release.json`, which it exports as `DEVNET_RELEASE`. |
+| `pins` | Copies the signed policy and its authorities from that file into tvc-gateway's `configs/`, after checking it pins this release. |
 
 Turnkey keeps three deployable deployments per app. `--prune-deployments`
 deletes the oldest that are neither live nor the release's own until the new

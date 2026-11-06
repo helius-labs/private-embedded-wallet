@@ -9,6 +9,6 @@ export type ReleaseTrust = Required<
 /**
  * The live devnet privacy-wallet release: its signed release policy, the
  * authority set it verifies against, and the QOS identity PCRs.
- * `scripts/release.mjs pins` writes it.
+ * The `policy` phase of `scripts/release.mjs` writes it.
  */
 export const DEVNET_RELEASE: ReleaseTrust = Object.freeze(devnetRelease as ReleaseTrust);

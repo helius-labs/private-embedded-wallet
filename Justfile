@@ -1,5 +1,7 @@
 set dotenv-load
 
+pnpm := "npx --yes pnpm@9.15.0"
+
 default:
     @just --list
 
@@ -39,22 +41,22 @@ check-protocol-fixtures:
 setup: install-ts
 
 install-ts:
-    npx --yes pnpm@9.15.0 install --frozen-lockfile
+    {{pnpm}} install --frozen-lockfile
 
 lint-ts:
-    npx --yes pnpm@9.15.0 lint:ts
+    {{pnpm}} lint:ts
 
 typecheck-ts:
-    npx --yes pnpm@9.15.0 typecheck:ts
+    {{pnpm}} typecheck:ts
 
 test-ts:
-    npx --yes pnpm@9.15.0 test:ts
+    {{pnpm}} test:ts
 
 build-ts:
-    npx --yes pnpm@9.15.0 build:ts
+    {{pnpm}} build:ts
 
 ci-ts:
-    npx --yes pnpm@9.15.0 ci:ts
+    {{pnpm}} ci:ts
 
 # Fresh Zolana localnet plus the Rust testkit, then the client example's SOL and SPL lifecycles; needs a sibling ../zolana checkout.
 headless-e2e port_offset="200":
@@ -84,8 +86,8 @@ headless-e2e port_offset="200":
         rm -rf -- "$run_dir"
     }
     trap cleanup EXIT
-    npx --yes pnpm@9.15.0 install --frozen-lockfile
-    npx --yes pnpm@9.15.0 build:ts
+    {{pnpm}} install --frozen-lockfile
+    {{pnpm}} build:ts
     bash scripts/start-localnet.sh "{{port_offset}}" "$wallet_keypair" "$fixture_dir" "$fixture_env"
     source "$fixture_env"
     solana airdrop 10 "$(solana address --keypair "$wallet_keypair")" --url "$rpc_url" >/dev/null
@@ -108,7 +110,7 @@ headless-e2e port_offset="200":
     export ZOLANA_ENDPOINT="$rpc_url" ZOLANA_INDEXER_URL="$indexer_url" ZOLANA_PROVER_URL="$prover_url"
     export SPL_MINT SPL_ASSET_ID SPL_TOKEN_ACCOUNT
     for example in deposit_transfer_withdraw spl_deposit_transfer_withdraw; do
-        npx --yes pnpm@9.15.0 --filter zolana-tvc-typescript-client-example example "examples/$example.ts"
+        {{pnpm}} --filter zolana-tvc-typescript-client-example example "examples/$example.ts"
     done
 
 ci: fmt-check lint test check-protocol-fixtures install-ts ci-ts
@@ -121,8 +123,8 @@ image-tvc-gateway:
 
 # The gateway on loopback against the local testkit enclave and a mock Turnkey; see apps/tvc-gateway/README.md.
 gateway-e2e: install-ts
-    npx --yes pnpm@9.15.0 build:ts
-    npx --yes pnpm@9.15.0 --filter @zolana/tvc-gateway-e2e e2e
+    {{pnpm}} build:ts
+    {{pnpm}} --filter @zolana/tvc-gateway-e2e e2e
 
 # Deploy a published image, sign the release policy and pin it in tvc-wallet and tvc-gateway; see scripts/release.mjs.
 release release_id *flags:
