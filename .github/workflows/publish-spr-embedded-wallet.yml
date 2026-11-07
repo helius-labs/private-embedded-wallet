@@ -70,9 +70,11 @@ jobs:
       # The check job ran the dependencies' install scripts; this job holds the
       # OIDC token, so it runs none. `npm publish` builds the package (prepack).
       - run: npx --yes pnpm@9.15.0 install --frozen-lockfile --ignore-scripts
+      # Verbose, because npm logs why a trusted-publishing token exchange
+      # failed only at that level and then fails the upload with a bare 404.
       - name: Publish
         working-directory: packages/tvc-wallet
-        run: npm publish --provenance --access public --tag latest
+        run: npm publish --provenance --access public --tag latest --loglevel verbose
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
