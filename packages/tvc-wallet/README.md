@@ -8,7 +8,7 @@ every operation to the enclave, checks each answer, and implements the SDK's
 `WalletKeys` over it, so every `@heliuslabs/spr` flow runs unchanged.
 
 Pre-production. ESM only. Needs `@heliuslabs/spr` 0.9 (`^0.9.0-alpha`) and
-`@solana/kit` 8 as peers, and Node 24 or a browser bundler.
+`@solana/kit` 8 as peers, and Node 22.12 or 24 or a browser bundler.
 
 ## Integration guide
 
