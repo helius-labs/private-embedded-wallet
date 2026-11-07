@@ -1,12 +1,19 @@
 # Changelog
 
-## 0.1.0-alpha — unreleased
+## 0.1.1-alpha — 2026-11-07
+
+Changed
+
+- Runs on Node `^22.12.0 || >=24`, the same range as `@heliuslabs/spr` 0.9.
+- `@heliuslabs/spr-embedded-wallet/protocol` exports `CLIENT_AUTH_DOMAIN`, the prefix of the client-auth text a Turnkey session key signs.
+
+## 0.1.0-alpha — 2026-11-07
 
 The first release. The client verifies the private-wallet enclave of a
 network against the release this package pins, enrolls the user's Turnkey
 session key with the Helius gateway, and answers the `@heliuslabs/spr` 0.9
-SDK's `WalletKeys` from the enclave. It pins a devnet release only, and is
-ESM only.
+SDK's `WalletKeys` from the enclave. It pins the devnet and mainnet
+releases, and is ESM only.
 
 Added
 
