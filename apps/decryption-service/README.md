@@ -1,7 +1,9 @@
 # Decryption-service TVC application
 
-Prototype of the [decryption service](../../crates/protocol/README.md#decryption-service):
-private transfers to a Solana address before its owner registers a wallet.
+Prototype of the decryption service: private transfers to a Solana address
+before its owner registers a wallet. [`SPEC.md`](SPEC.md) is the design;
+[`crates/protocol`](../../crates/protocol/README.md#decryption-service) has
+the encoding.
 
 1. A sender calls `PublicKeys` for an address and encrypts a transfer to the
    keys it returns.
