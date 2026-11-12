@@ -5,12 +5,13 @@ use qos_p256::P256Pair;
 use rand_core::{OsRng, RngCore as _, UnwrapErr};
 use spr_tvc_enclave::{Failure, Service};
 use zeroize::{Zeroize, Zeroizing};
-use zolana_tvc_protocol::constants::API_VERSION;
+use zolana_tvc_protocol::decryption_service::MASTER_SEED_SIGNATURE_DOMAIN;
 use zolana_tvc_protocol::digest::sealed_seed_digest;
 
 use crate::keys::MASTER_SEED_LEN;
 
-const SIGNATURE_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_SEED_V1";
+/// Outlives every release, so it changes only with the blob's own layout.
+const FORMAT_VERSION: u8 = 1;
 
 /// The wire bytes. The Quorum key signs the ciphertext, since anyone can encrypt to it.
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -36,22 +37,22 @@ impl Drop for UnsealedMasterSeed {
 }
 
 fn signed(ciphertext: &[u8]) -> Vec<u8> {
-    [SIGNATURE_DOMAIN, ciphertext].concat()
+    [MASTER_SEED_SIGNATURE_DOMAIN, ciphertext].concat()
 }
 
 /// Seals `seed` for the running release, signed by `signer`.
 fn seal(
     service: &Service,
-    seed: [u8; MASTER_SEED_LEN],
+    seed: &[u8; MASTER_SEED_LEN],
     signer: &P256Pair,
 ) -> Result<Vec<u8>, Failure> {
     let info = &service.info;
     let contents = UnsealedMasterSeed {
-        version: API_VERSION,
+        version: FORMAT_VERSION,
         quorum_key_id: info.quorum_key_id.clone(),
         quorum_key_epoch: info.quorum_key_epoch,
         network: info.network.as_str().to_owned(),
-        seed,
+        seed: *seed,
     };
     let plaintext = Zeroizing::new(borsh::to_vec(&contents).map_err(|_| Failure::Unavailable)?);
     let ciphertext = service
@@ -71,9 +72,9 @@ fn seal(
 
 /// Draws a master seed and seals it. Returns the wire bytes and their digest.
 pub(crate) fn generate(service: &Service) -> Result<(Vec<u8>, [u8; 32]), Failure> {
-    let mut seed = [0; MASTER_SEED_LEN];
-    UnwrapErr(OsRng).fill_bytes(&mut seed);
-    let bytes = seal(service, seed, &service.quorum)?;
+    let mut seed = Zeroizing::new([0; MASTER_SEED_LEN]);
+    UnwrapErr(OsRng).fill_bytes(seed.as_mut_slice());
+    let bytes = seal(service, &seed, &service.quorum)?;
     let digest = sealed_seed_digest(&bytes);
     Ok((bytes, digest))
 }
@@ -81,7 +82,7 @@ pub(crate) fn generate(service: &Service) -> Result<(Vec<u8>, [u8; 32]), Failure
 /// What anyone can build from the public Quorum key: a known seed, sealed.
 #[cfg(test)]
 pub(crate) fn forged(service: &Service, seed: [u8; MASTER_SEED_LEN]) -> Vec<u8> {
-    seal(service, seed, &P256Pair::generate().unwrap()).unwrap()
+    seal(service, &seed, &P256Pair::generate().unwrap()).unwrap()
 }
 
 /// Opens a blob this release's Quorum key signed. Returns the seed and the blob's digest.
@@ -102,7 +103,7 @@ pub(crate) fn unseal(
             .map_err(|_| Failure::Invalid)?,
     );
     let contents = UnsealedMasterSeed::try_from_slice(&plaintext).map_err(|_| Failure::Invalid)?;
-    if contents.version != API_VERSION
+    if contents.version != FORMAT_VERSION
         || contents.quorum_key_id != info.quorum_key_id
         || contents.quorum_key_epoch != info.quorum_key_epoch
         || contents.network != info.network.as_str()

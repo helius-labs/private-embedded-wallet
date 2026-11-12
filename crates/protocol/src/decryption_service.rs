@@ -11,6 +11,8 @@ use crate::types::{DecryptItem, Network, OperationKind};
 
 pub const SERVICE_PROOF_TYPE: &str = "spr.tvc.decryption_service.v1";
 pub const SERVICE_REQUEST_DIGEST_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1";
+/// What the Quorum key signs, before the sealed master seed's ciphertext.
+pub const MASTER_SEED_SIGNATURE_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_SEED_V1";
 
 /// Label of the message that authorizes a `Decrypt`.
 pub const DECRYPT_LABEL: &str = "TSPP/decryption-service/decrypt/v1";
@@ -51,8 +53,7 @@ pub enum ServiceOperation {
     Genesis,
     /// The service public keys of a base58 address.
     PublicKeys { address: String },
-    /// Opens `items` with the service viewing key of the base58 `signer`, whose
-    /// Ed25519 `signature` is over [`decrypt_message`] for this request.
+    /// Opens `items`; `signature` is the base58 `signer`'s, over [`decrypt_message`].
     Decrypt {
         signer: String,
         #[serde(with = "hex")]
@@ -122,8 +123,7 @@ pub fn service_request_digest(request: &ServiceRequest) -> Result<[u8; 32], TvcE
     ))
 }
 
-/// What an owner signs to authorize one `Decrypt` request: a Solana off-chain
-/// message v0, format 0, one signer, domain `SHA-256(DECRYPT_LABEL)`.
+/// What an owner signs for one `Decrypt`: a Solana off-chain message v0 with one signer.
 pub fn decrypt_message(
     signer: &[u8; ADDRESS_LEN],
     network: Network,

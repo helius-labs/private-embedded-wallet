@@ -8,7 +8,7 @@ use clap::Parser;
 use qos_p256::P256Pair;
 use zeroize::Zeroizing;
 use zolana_tvc_privacy_wallet::{
-    local_testkit_qos_seeds, local_unattested_state, router, LocalProver, LocalProverTrust, NET,
+    local_testkit_qos_seeds, local_unattested_state, router, LocalProver, LocalProverTrust,
 };
 
 #[derive(Debug, Parser)]
@@ -68,7 +68,7 @@ async fn main() -> io::Result<()> {
         eprintln!(
             "LOCAL DEVELOPMENT ONLY: unattested mock custody listening on {address}, sealing \
              to provers the {} prover policy admits; do not use funds",
-            NET.network
+            spr_tvc_enclave::NETWORK
         );
         state
     } else {

@@ -9,7 +9,7 @@ use zolana_tvc_protocol::decryption_service::{decrypt_message, ADDRESS_LEN};
 use zolana_tvc_protocol::types::Network;
 
 /// The key of an address a key can sign for: on the curve, not of small order.
-pub(crate) fn signer(address: &str) -> Result<VerifyingKey, Failure> {
+pub(crate) fn address_key(address: &str) -> Result<VerifyingKey, Failure> {
     Pubkey::from_str(address)
         .ok()
         .and_then(|address| VerifyingKey::from_bytes(&address.to_bytes()).ok())
@@ -24,7 +24,7 @@ pub(crate) fn authorized(
     network: Network,
     request_digest: &[u8; 32],
 ) -> Result<[u8; ADDRESS_LEN], Failure> {
-    let key = signer(signer_address)?;
+    let key = address_key(signer_address)?;
     let address = key.to_bytes();
     key.verify_strict(
         &decrypt_message(&address, network, request_digest),

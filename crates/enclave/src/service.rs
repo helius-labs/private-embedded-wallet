@@ -25,48 +25,7 @@ use zolana_tvc_protocol::types::{
 
 use crate::http::{self, PublicError};
 use crate::request::sign_ephemeral_low_s;
-
-/// The keys and digests QOS hands an application.
-pub struct QosState {
-    pub ephemeral: P256Pair,
-    pub quorum: P256Pair,
-    pub manifest_digest: [u8; 32],
-    pub executable_digest: [u8; 32],
-}
-
-/// Loads QOS-owned state from the canonical paths and checks the Quorum key
-/// against the approved manifest. Failures are deliberately free of key material.
-pub fn load_qos_state() -> io::Result<QosState> {
-    let handles = Handles::new(
-        EPHEMERAL_KEY_FILE.to_owned(),
-        QUORUM_FILE.to_owned(),
-        MANIFEST_FILE.to_owned(),
-        PIVOT_FILE.to_owned(),
-    );
-    let ephemeral = handles
-        .get_ephemeral_key()
-        .map_err(|_| io::Error::other("failed to load QOS ephemeral key"))?;
-    let quorum = handles
-        .get_quorum_key()
-        .map_err(|_| io::Error::other("failed to load QOS quorum key"))?;
-    let envelope = handles
-        .get_manifest_envelope()
-        .map_err(|_| io::Error::other("failed to load QOS manifest"))?;
-
-    let manifest_digest = envelope.manifest_hash();
-    let executable_digest = *envelope.pivot_hash();
-    if envelope.manifest().namespace().quorum_key != quorum.public_key().to_bytes() {
-        return Err(io::Error::other(
-            "QOS quorum key does not match the approved manifest",
-        ));
-    }
-    Ok(QosState {
-        ephemeral,
-        quorum,
-        manifest_digest,
-        executable_digest,
-    })
-}
+use crate::{App, Release};
 
 /// A running release: what it advertises and the QOS keys it answers with.
 #[derive(Clone)]
@@ -74,6 +33,46 @@ pub struct Service {
     pub info: Arc<ServiceInfo>,
     pub ephemeral: Arc<P256Pair>,
     pub quorum: Arc<P256Pair>,
+}
+
+impl Service {
+    pub fn new(info: ServiceInfo, ephemeral: P256Pair, quorum: P256Pair) -> Self {
+        Self {
+            info: Arc::new(info),
+            ephemeral: Arc::new(ephemeral),
+            quorum: Arc::new(quorum),
+        }
+    }
+
+    /// Loads the QOS keys from the canonical paths and binds discovery to the approved manifest.
+    pub fn load(release: Release, app: &App) -> io::Result<Self> {
+        let handles = Handles::new(
+            EPHEMERAL_KEY_FILE.to_owned(),
+            QUORUM_FILE.to_owned(),
+            MANIFEST_FILE.to_owned(),
+            PIVOT_FILE.to_owned(),
+        );
+        let ephemeral = handles
+            .get_ephemeral_key()
+            .map_err(|_| io::Error::other("failed to load QOS ephemeral key"))?;
+        let quorum = handles
+            .get_quorum_key()
+            .map_err(|_| io::Error::other("failed to load QOS quorum key"))?;
+        let envelope = handles
+            .get_manifest_envelope()
+            .map_err(|_| io::Error::other("failed to load QOS manifest"))?;
+
+        let manifest_digest = envelope.manifest_hash();
+        let executable_digest = *envelope.pivot_hash();
+        if envelope.manifest().namespace().quorum_key != quorum.public_key().to_bytes() {
+            return Err(io::Error::other(
+                "QOS quorum key does not match the approved manifest",
+            ));
+        }
+        let info =
+            release.service_info(app, manifest_digest, executable_digest, &quorum, &ephemeral);
+        Ok(Self::new(info, ephemeral, quorum))
+    }
 }
 
 #[derive(Clone)]
@@ -210,7 +209,6 @@ pub async fn serve(address: SocketAddr, router: Router) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
-    use http_body_util::BodyExt as _;
     use tower::ServiceExt as _;
     use zolana_tvc_protocol::constants::{QOS_P256_PUBLIC_LEN, RAW_P256_SIGNATURE_LEN};
     use zolana_tvc_protocol::crypto::{verify_p256_message, QosP256Public};
@@ -218,37 +216,22 @@ mod tests {
     use zolana_tvc_protocol::types::{OperationKind, QosPingChallenge, QosPingRequest};
 
     use super::*;
-    use crate::{App, Release, NETWORK};
+    use crate::{App, NETWORK};
 
     fn info(quorum: &P256Pair, ephemeral: &P256Pair) -> ServiceInfo {
         let app = App {
             operations: &[OperationKind::Decrypt],
             proof_type: "spr.tvc.test.v1",
         };
-        Release {
-            security_domain_id: [0x11; 32],
-            release_id: "tvc-pet-test".to_owned(),
-            quorum_key_id: "quorum-test".to_owned(),
-            quorum_key_epoch: 1,
-        }
-        .service_info(&app, [0x22; 32], [0x33; 32], quorum, ephemeral)
+        crate::testing::release().service_info(&app, [0x22; 32], [0x33; 32], quorum, ephemeral)
     }
 
     /// Refuses every operation, as an application refuses a malformed one.
     fn app(quorum: P256Pair, ephemeral: P256Pair) -> Router {
-        let service = Service {
-            info: Arc::new(info(&quorum, &ephemeral)),
-            ephemeral: Arc::new(ephemeral),
-            quorum: Arc::new(quorum),
-        };
+        let service = Service::new(info(&quorum, &ephemeral), ephemeral, quorum);
         router(service, |_| async {
             PublicError::InvalidRequest.into_response()
         })
-    }
-
-    async fn response_body(response: Response<Body>) -> String {
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        String::from_utf8(bytes.to_vec()).unwrap()
     }
 
     #[tokio::test]
@@ -261,7 +244,10 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
-        assert_eq!(response_body(response).await, r#"{"status":"Healthy"}"#);
+        assert_eq!(
+            crate::testing::body(response).await,
+            r#"{"status":"Healthy"}"#
+        );
     }
 
     #[tokio::test]
@@ -276,7 +262,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        let actual: ServiceInfo = parse_strict_json(&response_body(response).await).unwrap();
+        let actual: ServiceInfo = parse_strict_json(&crate::testing::body(response).await).unwrap();
         assert_eq!(actual, expected);
         assert_eq!(actual.network, NETWORK);
         assert_eq!(actual.ephemeral_public_key, ephemeral_public_key);
@@ -311,7 +297,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        let response: QosPingResponse = parse_strict_json(&response_body(response).await).unwrap();
+        let response: QosPingResponse =
+            parse_strict_json(&crate::testing::body(response).await).unwrap();
         let proof = response.tvc_app_proof;
         assert_eq!(proof.scheme, TVC_APP_PROOF_SCHEME);
         assert_eq!(proof.public_key, ephemeral_public.to_bytes());
@@ -371,7 +358,7 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::BAD_REQUEST);
             assert_eq!(
-                response_body(response).await,
+                crate::testing::body(response).await,
                 r#"{"error":"InvalidRequest"}"#
             );
         }
@@ -457,7 +444,7 @@ mod tests {
             assert_eq!(response.status(), status, "{target}");
             assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
             assert_eq!(
-                response_body(response).await,
+                crate::testing::body(response).await,
                 format!(r#"{{"error":"{error}"}}"#),
                 "{target}"
             );

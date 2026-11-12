@@ -22,7 +22,6 @@ borsh = { version = "=1.7.0", features = ["derive"] }
 clap = { version = "=4.5.53", features = ["derive"] }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"], optional = true }
 hex = "=0.4.3"
-qos_core = { version = "=0.12.1", default-features = false }
 qos_p256 = { version = "=0.12.1", default-features = false }
 p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa"] }
 # The local stand-in prover's client; the enclave's Turnkey client brings its own.
@@ -30,7 +29,7 @@ reqwest = { version = "=0.12.28", default-features = false, features = ["json", 
 serde_json = "=1.0.150"
 serde = { version = "=1.0.228", features = ["derive"] }
 solana-pubkey = "=4.2.0"
-tokio = { version = "=1.48.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "=1.48.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "time"] }
 turnkey_api_key_stamper = "=0.14.0"
 turnkey_client = "=0.14.0"
 uuid = { version = "=1.25.0", default-features = false }
@@ -42,6 +41,7 @@ spr-tvc-enclave = { path = "../../crates/enclave" }
 zolana-tvc-protocol = { path = "../../crates/protocol" }
 
 [dev-dependencies]
+spr-tvc-enclave = { path = "../../crates/enclave", features = ["testing"] }
 spr-prover-tee = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297afa13e8bfb6edadf6408304ef3fc2f8c676", features = ["test-fixtures"] }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
 http-body-util = "=0.1.3"

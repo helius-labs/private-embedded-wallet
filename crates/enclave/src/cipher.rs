@@ -7,18 +7,20 @@ use zolana_tvc_protocol::types::{DecryptItem, DecryptLabel};
 
 use crate::Failure;
 
-/// Applies the pool cipher to each item under `viewing`, which every item must name.
-///
-/// The cipher is unauthenticated, so every item answers; one for another key
-/// answers with bytes that do not decode, which the client detects against
-/// the indexed commitment.
+/// A batch holds between one and `MAX_ITEMS_PER_BATCH` items.
+pub fn check_batch<T>(items: &[T]) -> Result<(), Failure> {
+    if items.is_empty() || items.len() as u64 > MAX_ITEMS_PER_BATCH {
+        return Err(Failure::Invalid);
+    }
+    Ok(())
+}
+
+/// The pool cipher's output for each item under `viewing`; for another key's item, noise.
 pub fn open_ciphertexts(
     viewing: &ViewingKey,
     items: &[DecryptItem],
 ) -> Result<Vec<Vec<u8>>, Failure> {
-    if items.is_empty() || items.len() as u64 > MAX_ITEMS_PER_BATCH {
-        return Err(Failure::Invalid);
-    }
+    check_batch(items)?;
     items
         .iter()
         .map(|item| {

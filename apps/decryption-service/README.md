@@ -1,11 +1,7 @@
 # Decryption-service TVC application
 
-Prototype. Lets a Solana address receive private transfers before its owner
-registers a wallet. The enclave derives one viewing key and one nullifier key
-per address, its service keys, from a master seed sealed to the Quorum key,
-and never releases the viewing secret. The requests, results and signed
-message are specified in
-[`crates/protocol`](../../crates/protocol/README.md#decryption-service).
+Prototype of the [decryption service](../../crates/protocol/README.md#decryption-service):
+private transfers to a Solana address before its owner registers a wallet.
 
 1. An operator runs `Genesis` once and publishes the sealed master seed. Every
    later request presents it.

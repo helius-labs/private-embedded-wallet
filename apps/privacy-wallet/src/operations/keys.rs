@@ -9,17 +9,13 @@ use spr_transaction::instructions::merge::{
     merge_dummy_nullifier, merge_output_blinding, merge_output_key, merge_private_tx_blinding,
 };
 use spr_tvc_enclave::open_ciphertexts;
-use zolana_tvc_protocol::constants::MAX_ITEMS_PER_BATCH;
 use zolana_tvc_protocol::types::{DecryptItem, DeriveItem, OperationResult, TransactionKeyItem};
 
 use super::sealed::Roles;
 use super::Failure;
 
 fn check_batch<T>(items: &[T]) -> Result<(), Failure> {
-    if items.is_empty() || items.len() as u64 > MAX_ITEMS_PER_BATCH {
-        return Err(Failure::Invalid);
-    }
-    Ok(())
+    Ok(spr_tvc_enclave::check_batch(items)?)
 }
 
 /// The viewing key `public_key` names. This wallet holds one, so a request

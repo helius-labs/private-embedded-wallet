@@ -39,7 +39,7 @@ impl ProverTrust {
     pub(crate) fn image() -> Self {
         Self {
             signers: PolicySigners::new(
-                NET.network.as_str(),
+                spr_tvc_enclave::NETWORK.as_str(),
                 NET.policy_signers.to_vec(),
                 NET.policy_threshold,
             )

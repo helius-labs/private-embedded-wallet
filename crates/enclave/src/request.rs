@@ -14,8 +14,8 @@ use zolana_tvc_protocol::crypto::qos_encrypt;
 use zolana_tvc_protocol::digest::result_digest;
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
-    parse_encrypted_request, AppProof, EncryptedResponse, OperationProofPayload, ServiceInfo,
-    WalletGrant,
+    parse_encrypted_request, AppProof, EncryptedResponse, OperationKind, OperationProofPayload,
+    ServiceInfo, WalletGrant,
 };
 
 use crate::http::PublicError;
@@ -65,10 +65,19 @@ pub fn open_envelope(
     Ok((encrypted.wallet_grant, Zeroizing::new(plaintext.to_owned())))
 }
 
-/// Encrypts `result` to the response key under a signed App Proof; sets `proof.result_digest`.
+/// What an App Proof binds a result to.
+pub struct ProofBinding {
+    pub proof_type: &'static str,
+    pub request_id: [u8; 32],
+    pub request_digest: [u8; 32],
+    pub operation: OperationKind,
+    pub sealed_seed_digest: [u8; 32],
+}
+
+/// Encrypts `result` to the response key under an App Proof the Ephemeral key signs.
 pub fn respond<T: Serialize>(
     ephemeral: &P256Pair,
-    mut proof: OperationProofPayload,
+    binding: ProofBinding,
     client_response_public_key: &[u8],
     result: &T,
 ) -> Result<String, Failure> {
@@ -79,13 +88,20 @@ pub fn respond<T: Serialize>(
         return Err(Failure::Unavailable);
     }
 
-    proof.result_digest = result_digest(&encrypted_result);
-    let request_id = proof.request_id;
-    let proof_payload = jcs_serialize(&proof).map_err(|_| Failure::Unavailable)?;
+    let proof_payload = jcs_serialize(&OperationProofPayload {
+        r#type: binding.proof_type.to_owned(),
+        version: API_VERSION,
+        request_id: binding.request_id,
+        request_digest: binding.request_digest,
+        result_digest: result_digest(&encrypted_result),
+        operation: binding.operation,
+        sealed_seed_digest: binding.sealed_seed_digest,
+    })
+    .map_err(|_| Failure::Unavailable)?;
     let signature = sign_ephemeral_low_s(ephemeral, proof_payload.as_bytes())?;
     jcs_serialize(&EncryptedResponse {
         version: API_VERSION,
-        request_id,
+        request_id: binding.request_id,
         encrypted_result,
         tvc_app_proof: AppProof {
             scheme: TVC_APP_PROOF_SCHEME.to_owned(),

@@ -26,7 +26,6 @@ pub(crate) fn derive(seed: &[u8; MASTER_SEED_LEN], address: &[u8; ADDRESS_LEN]) 
     hkdf.expand_multi_info(&[NULLIFIER_KEY_LABEL, address], nullifier.as_mut_slice())
         .expect("31 bytes of output");
     ServiceKeys {
-        // Clamps, so the secret has one byte string.
         viewing: ViewingKey::from_bytes(&viewing),
         nullifier: NullifierKey::from_secret(*nullifier),
     }

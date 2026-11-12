@@ -21,7 +21,6 @@ use spr_prover_tee::{
 use zolana_tvc_protocol::encoding::decode_lower_hex_array;
 
 use crate::local_dev::testkit_prover_keys;
-use crate::network::NET;
 use crate::operations::sign_policy;
 
 /// Serves the signed policy the local enclave accepts, for the local client.
@@ -53,7 +52,7 @@ impl LocalProver {
             .as_secs();
         let policy = sign_policy(
             &signer,
-            NET.network.as_str(),
+            spr_tvc_enclave::NETWORK.as_str(),
             NitroFixture::at([0; 32], epoch_secs).policy().clone(),
             epoch_secs,
             epoch_secs + POLICY_LIFETIME_SECS,

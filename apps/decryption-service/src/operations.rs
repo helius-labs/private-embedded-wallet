@@ -3,19 +3,21 @@
 use axum::body::Body;
 use axum::http::Response;
 use axum::response::IntoResponse;
-use spr_tvc_enclave::{http, open_ciphertexts, open_envelope, respond, Failure, Service};
+use spr_tvc_enclave::{
+    http, open_ciphertexts, open_envelope, respond, Failure, ProofBinding, Service,
+};
 use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::crypto::parse_uncompressed_sec1;
 use zolana_tvc_protocol::decryption_service::{
     parse_service_request, service_request_digest, DecryptedOutputs, ServiceOperation,
     ServiceRequest, ServiceResult, SERVICE_PROOF_TYPE,
 };
-use zolana_tvc_protocol::types::{OperationKind, OperationProofPayload};
+use zolana_tvc_protocol::types::OperationKind;
 
 use crate::{keys, owner, seed};
 
 /// Every operation this application serves.
-pub const OPERATIONS: [OperationKind; 3] = [
+pub(crate) const OPERATIONS: [OperationKind; 3] = [
     OperationKind::ServiceGenesis,
     OperationKind::ServicePublicKeys,
     OperationKind::ServiceDecrypt,
@@ -38,18 +40,16 @@ fn execute(service: &Service, body: &[u8]) -> Result<String, Failure> {
 
     let request_digest = service_request_digest(&request).map_err(|_| Failure::Invalid)?;
     let (result, sealed_seed_digest) = run(&request, &request_digest, service)?;
-    let proof = OperationProofPayload {
-        r#type: SERVICE_PROOF_TYPE.to_owned(),
-        version: API_VERSION,
+    let binding = ProofBinding {
+        proof_type: SERVICE_PROOF_TYPE,
         request_id: request.request_id,
         request_digest,
-        result_digest: [0; 32],
         operation: request.operation.kind(),
         sealed_seed_digest,
     };
     respond(
         &service.ephemeral,
-        proof,
+        binding,
         &request.client_response_public_key,
         &result,
     )
@@ -83,7 +83,7 @@ fn run(
         }
         ServiceOperation::PublicKeys { address } => {
             let (seed, digest) = unseal()?;
-            let keys = keys::derive(&seed, &owner::signer(address)?.to_bytes());
+            let keys = keys::derive(&seed, &owner::address_key(address)?.to_bytes());
             let result = ServiceResult::PublicKeys {
                 viewing_public_key: *keys.viewing.pubkey().as_bytes(),
                 nullifier_public_key: keys.nullifier.pubkey().map_err(|_| Failure::Unavailable)?,

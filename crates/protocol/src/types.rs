@@ -147,14 +147,13 @@ pub enum DecryptLabel {
     RingDeposit,
 }
 
-/// One ciphertext to open with the wallet's viewing key. The result is the
-/// cipher's output, which the client decodes; the enclave interprets nothing.
+/// One ciphertext to open with a viewing key the enclave holds. The client decodes the output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecryptItem {
     #[serde(with = "hex")]
     pub ciphertext: Vec<u8>,
-    /// Which of the wallet's viewing keys opens it; this wallet holds one.
+    /// The viewing key that opens it.
     #[serde(with = "hex")]
     pub viewing_public_key: Vec<u8>,
     #[serde(with = "hex")]

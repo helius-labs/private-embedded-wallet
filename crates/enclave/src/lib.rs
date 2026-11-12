@@ -7,8 +7,10 @@ pub mod http;
 mod release;
 mod request;
 mod service;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
-pub use cipher::open_ciphertexts;
+pub use cipher::{check_batch, open_ciphertexts};
 pub use release::{App, Release, NETWORK};
-pub use request::{open_envelope, respond, Failure};
-pub use service::{load_qos_state, router, serve, QosState, Service};
+pub use request::{open_envelope, respond, Failure, ProofBinding};
+pub use service::{router, serve, Service};

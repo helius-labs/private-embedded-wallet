@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use qos_p256::P256Pair;
-use spr_tvc_enclave::{App, Service};
+use spr_tvc_enclave::{App, Release, Service};
 use zolana_tvc_protocol::constants::TVC_APP_PROOF_TYPE;
 use zolana_tvc_protocol::types::ServiceInfo;
 
@@ -35,7 +35,6 @@ pub use local_prover::{LocalProver, POLICY_PATH};
 
 pub use network::{Net, NET};
 pub use operations::OPERATIONS;
-pub use spr_tvc_enclave::Release as DiscoveryConfig;
 
 pub(crate) const APP: App = App {
     operations: &OPERATIONS,
@@ -62,14 +61,13 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn ready(info: ServiceInfo, ephemeral: P256Pair, quorum: P256Pair) -> Self {
-        let quorum = Arc::new(quorum);
+    pub fn ready(service: Service) -> Self {
         Self {
-            info: Arc::new(info),
+            info: service.info,
             runtime: Arc::new(Runtime {
-                ephemeral: Arc::new(ephemeral),
-                custody: Arc::new(custody::TurnkeyCustody::new(Arc::clone(&quorum))),
-                quorum,
+                ephemeral: service.ephemeral,
+                custody: Arc::new(custody::TurnkeyCustody::new(Arc::clone(&service.quorum))),
+                quorum: service.quorum,
                 provisioning_public: NET.provisioning,
                 grant_public: NET.grant,
                 prover: operations::ProverTrust::image(),
@@ -78,24 +76,9 @@ impl AppState {
     }
 }
 
-/// Load QOS-owned state from the canonical paths and bind discovery to the
-/// approved manifest. Failures are deliberately free of key material.
-pub fn load_qos_state(config: DiscoveryConfig) -> io::Result<AppState> {
-    if config.release_id.is_empty() || config.quorum_key_id.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "release and quorum key identifiers must not be empty",
-        ));
-    }
-    let qos = spr_tvc_enclave::load_qos_state()?;
-    let info = config.service_info(
-        &APP,
-        qos.manifest_digest,
-        qos.executable_digest,
-        &qos.quorum,
-        &qos.ephemeral,
-    );
-    Ok(AppState::ready(info, qos.ephemeral, qos.quorum))
+/// Loads the QOS keys and binds discovery to the approved manifest.
+pub fn load_qos_state(release: Release) -> io::Result<AppState> {
+    Service::load(release, &APP).map(AppState::ready)
 }
 
 pub fn router(state: AppState) -> Router {
@@ -115,7 +98,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::header::CONTENT_TYPE;
     use axum::http::{Request, StatusCode};
-    use http_body_util::BodyExt as _;
+    use spr_tvc_enclave::testing::{self, body};
     use tower::ServiceExt as _;
     use zolana_tvc_protocol::encoding::parse_strict_json;
 
@@ -124,19 +107,9 @@ mod tests {
     fn app() -> Router {
         let quorum = P256Pair::generate().unwrap();
         let ephemeral = P256Pair::generate().unwrap();
-        let config = DiscoveryConfig {
-            security_domain_id: [0x11; 32],
-            release_id: "tvc-pet-test".to_owned(),
-            quorum_key_id: "quorum-test".to_owned(),
-            quorum_key_epoch: 1,
-        };
-        let info = config.service_info(&APP, [0x22; 32], [0x33; 32], &quorum, &ephemeral);
-        router(AppState::ready(info, ephemeral, quorum))
-    }
-
-    async fn body(response: axum::http::Response<Body>) -> String {
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        String::from_utf8(bytes.to_vec()).unwrap()
+        let info =
+            testing::release().service_info(&APP, [0x22; 32], [0x33; 32], &quorum, &ephemeral);
+        router(AppState::ready(Service::new(info, ephemeral, quorum)))
     }
 
     #[tokio::test]
@@ -147,7 +120,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let info: ServiceInfo = parse_strict_json(&body(response).await).unwrap();
-        assert_eq!(info.network, NET.network);
+        assert_eq!(info.network, spr_tvc_enclave::NETWORK);
         assert_eq!(info.supported_operations, OPERATIONS);
         assert_eq!(info.proof_type, TVC_APP_PROOF_TYPE);
     }

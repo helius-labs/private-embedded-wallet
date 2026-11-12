@@ -18,9 +18,8 @@ use zolana_tvc_protocol::encoding::decode_lower_hex_array;
 use zolana_tvc_protocol::types::OperationKind;
 
 use crate::custody::{Custody, CustodyError, RawSignature, WalletKey};
-use crate::network::NET;
 use crate::operations::ProverTrust;
-use crate::{AppState, DiscoveryConfig, Runtime, OPERATIONS};
+use crate::{AppState, Runtime, OPERATIONS};
 
 const TESTKIT_JSON: &str = include_str!("../../../packages/tvc-wallet/src/local-testkit.json");
 /// The testkit fixture's own format version, which the TypeScript testkit
@@ -121,7 +120,7 @@ impl LocalProverTrust {
             Self::StandIn(anchors) => {
                 let signer = testkit_prover_keys().0.verifying_key().to_bytes();
                 ProverTrust {
-                    signers: PolicySigners::new(NET.network.as_str(), vec![signer], 1)
+                    signers: PolicySigners::new(spr_tvc_enclave::NETWORK.as_str(), vec![signer], 1)
                         .expect("testkit policy signer"),
                     anchors,
                 }
@@ -140,7 +139,7 @@ pub fn local_unattested_state(
     prover: LocalProverTrust,
 ) -> AppState {
     let testkit = testkit();
-    let config = DiscoveryConfig {
+    let config = spr_tvc_enclave::Release {
         security_domain_id: sha256(testkit.security_domain_label.as_bytes()),
         release_id: testkit.release_id.clone(),
         quorum_key_id: testkit.quorum_key_id.clone(),

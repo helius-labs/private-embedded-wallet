@@ -33,6 +33,7 @@ transaction signatures are base58. A network is `devnet` or `mainnet`.
 | `ZOLANA_TVC_PROVISIONING_AUTH_V1` | `JCS(descriptor)` without `provisioning_signature` | What the provisioning key signs |
 | `ZOLANA_TVC_RELEASE_POLICY_V1` | `JCS(policy)` | What a release authority signs |
 | `ZOLANA_TVC_WALLET_GRANT_V1` | `JCS(grant)` without `signature` | What the grant key signs |
+| `SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1` | `JCS(request)` without a `Decrypt`'s `signature` | A decryption-service `request_digest` |
 
 ## Envelope
 
@@ -187,8 +188,8 @@ timestamps, and no operation changes state. The answer is an
 `spr.tvc.decryption_service.v1`, the request digest
 `H(SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
 `signature`, the operation as `Service` followed by its name below, and the
-digest of the sealed master seed. A refused request gets the generic
-`InvalidRequest`.
+digest of the sealed master seed under `ZOLANA_TVC_SEALED_SEED_DIGEST_V1`. A
+refused request gets the generic `InvalidRequest`.
 
 | Operation | Sealed master seed | Returns |
 | --- | --- | --- |

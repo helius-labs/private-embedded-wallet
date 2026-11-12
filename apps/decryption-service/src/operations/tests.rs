@@ -1,25 +1,19 @@
-use std::sync::Arc;
-
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
 use ed25519_dalek::{Signer as _, SigningKey};
-use http_body_util::BodyExt as _;
 use qos_p256::P256Pair;
 use solana_pubkey::Pubkey;
 use spr_keypair::viewing_key::random_salt;
 use spr_keypair::{NullifierKey, ViewingKey, X25519Pubkey};
-use spr_tvc_enclave::{Release, NETWORK};
+use spr_tvc_enclave::{testing, NETWORK};
 use tower::ServiceExt as _;
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::crypto::{
-    public_key_uncompressed, qos_decrypt, qos_encrypt, verify_p256_message, QosP256Public,
-};
+use zolana_tvc_protocol::crypto::public_key_uncompressed;
 use zolana_tvc_protocol::decryption_service::decrypt_message;
-use zolana_tvc_protocol::digest::{result_digest, sealed_seed_digest};
+use zolana_tvc_protocol::digest::sealed_seed_digest;
 use zolana_tvc_protocol::encoding::{jcs_serialize, parse_strict_json};
 use zolana_tvc_protocol::types::{
-    DecryptItem, DecryptLabel, EncryptedRequest, EncryptedResponse, Network, ServiceInfo,
-    WalletGrant,
+    DecryptItem, DecryptLabel, EncryptedRequest, Network, ServiceInfo, WalletGrant,
 };
 
 use super::*;
@@ -37,19 +31,10 @@ fn other(network: Network) -> Network {
 fn service_on(network: Network, quorum_seed: u8) -> Service {
     let quorum = P256Pair::from_master_seed(&Zeroizing::new([quorum_seed; 32])).unwrap();
     let ephemeral = P256Pair::generate().unwrap();
-    let release = Release {
-        security_domain_id: [0x11; 32],
-        release_id: "service-test".to_owned(),
-        quorum_key_id: "quorum-test".to_owned(),
-        quorum_key_epoch: 1,
-    };
-    let mut info = release.service_info(&APP, [0x22; 32], [0x33; 32], &quorum, &ephemeral);
+    let mut info =
+        testing::release().service_info(&APP, [0x22; 32], [0x33; 32], &quorum, &ephemeral);
     info.network = network;
-    Service {
-        info: Arc::new(info),
-        ephemeral: Arc::new(ephemeral),
-        quorum: Arc::new(quorum),
-    }
+    Service::new(info, ephemeral, quorum)
 }
 
 fn service() -> Service {
@@ -78,46 +63,19 @@ fn request(
 }
 
 fn envelope(service: &Service, request: &ServiceRequest) -> EncryptedRequest {
-    let quorum = QosP256Public::from_bytes(&service.info.quorum_public_key).unwrap();
-    EncryptedRequest {
-        version: API_VERSION,
-        quorum_key_id: service.info.quorum_key_id.clone(),
-        quorum_key_epoch: service.info.quorum_key_epoch,
-        ciphertext: qos_encrypt(
-            &quorum.encryption,
-            jcs_serialize(request).unwrap().as_bytes(),
-        )
-        .unwrap(),
-        wallet_grant: None,
-    }
+    testing::encrypt_request(&service.info, &jcs_serialize(request).unwrap(), None)
 }
 
-/// Opens an answer as a client does: checks the App Proof, then decrypts.
-/// Returns the result and the sealed-seed digest the proof names.
+/// Opens an answer as a client does. Returns the result and the sealed-seed digest the proof names.
 fn open(service: &Service, request: &ServiceRequest, response: &str) -> (ServiceResult, [u8; 32]) {
-    let response: EncryptedResponse = parse_strict_json(response).unwrap();
-    assert_eq!(response.request_id, request.request_id);
-    let proof = response.tvc_app_proof;
-    assert_eq!(proof.public_key, service.info.ephemeral_public_key);
-    let ephemeral = QosP256Public::from_bytes(&proof.public_key).unwrap();
-    verify_p256_message(
-        &ephemeral.signing,
-        proof.proof_payload.as_bytes(),
-        &proof.signature,
-    )
-    .unwrap();
-    let payload: OperationProofPayload = parse_strict_json(&proof.proof_payload).unwrap();
+    let (payload, plaintext) = testing::open_response(&service.info, response, &RESPONSE_SECRET);
     assert_eq!(payload.r#type, SERVICE_PROOF_TYPE);
+    assert_eq!(payload.request_id, request.request_id);
     assert_eq!(
         payload.request_digest,
         service_request_digest(request).unwrap()
     );
-    assert_eq!(
-        payload.result_digest,
-        result_digest(&response.encrypted_result)
-    );
     assert_eq!(payload.operation, request.operation.kind());
-    let plaintext = qos_decrypt(&RESPONSE_SECRET, &response.encrypted_result).unwrap();
     (
         parse_strict_json(std::str::from_utf8(&plaintext).unwrap()).unwrap(),
         payload.sealed_seed_digest,
@@ -414,14 +372,13 @@ fn a_request_is_bound_to_the_running_release() {
 }
 
 #[tokio::test]
-async fn the_router_advertises_and_serves_the_three_operations() {
+async fn the_router_advertises_the_operations_and_serves_them() {
     let service = service();
     let response = router(service.clone())
         .oneshot(Request::get("/v1/info").body(Body::empty()).unwrap())
         .await
         .unwrap();
-    let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    let info: ServiceInfo = parse_strict_json(std::str::from_utf8(&bytes).unwrap()).unwrap();
+    let info: ServiceInfo = parse_strict_json(&testing::body(response).await).unwrap();
     assert_eq!(info.supported_operations, OPERATIONS);
     assert_eq!(info.proof_type, SERVICE_PROOF_TYPE);
 
@@ -437,7 +394,6 @@ async fn the_router_advertises_and_serves_the_three_operations() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    let (result, _) = open(&service, &request, std::str::from_utf8(&bytes).unwrap());
+    let (result, _) = open(&service, &request, &testing::body(response).await);
     assert!(matches!(result, ServiceResult::Genesis { .. }));
 }
