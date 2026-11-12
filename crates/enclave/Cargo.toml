@@ -1,0 +1,26 @@
+[package]
+name = "spr-tvc-enclave"
+version = "0.1.0"
+description = "What every TVC application here serves around its own operations"
+edition = "2021"
+rust-version = "1.98"
+license = "AGPL-3.0-only"
+publish = false
+
+[dependencies]
+axum = { version = "=0.8.8", default-features = false, features = ["http1", "tokio"] }
+clap = { version = "=4.5.53", features = ["derive"] }
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa"] }
+qos_core = { version = "=0.12.1", default-features = false }
+qos_p256 = { version = "=0.12.1", default-features = false }
+serde = "=1.0.228"
+strum = { version = "=0.28.0", features = ["derive"] }
+tokio = { version = "=1.48.0", default-features = false, features = ["macros", "net", "signal"] }
+zeroize = "=1.9.0"
+spr-keypair = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297afa13e8bfb6edadf6408304ef3fc2f8c676" }
+zolana-tvc-protocol = { path = "../protocol" }
+
+[dev-dependencies]
+http-body-util = "=0.1.3"
+tokio = { version = "=1.48.0", default-features = false, features = ["rt"] }
+tower = { version = "=0.5.3", features = ["util"] }

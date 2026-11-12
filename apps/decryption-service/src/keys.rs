@@ -4,24 +4,22 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use spr_keypair::{NullifierKey, ViewingKey};
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::decryption_service::{
-    ADDRESS_LEN, NULLIFIER_SECRET_LEN, VIEWING_SECRET_LEN,
-};
+use zolana_tvc_protocol::decryption_service::{ADDRESS_LEN, NULLIFIER_SECRET_LEN};
 
 const VIEWING_KEY_LABEL: &[u8] = b"TSPP/decryption-service/view_key/x25519/v1";
 const NULLIFIER_KEY_LABEL: &[u8] = b"TSPP/decryption-service/nf_key/v1";
 
-pub(super) const MASTER_SEED_LEN: usize = 32;
+pub(crate) const MASTER_SEED_LEN: usize = 32;
 
-pub(super) struct ServiceKeys {
+pub(crate) struct ServiceKeys {
     pub viewing: ViewingKey,
     pub nullifier: NullifierKey,
 }
 
 /// HKDF-SHA256 over the master seed, one Expand per key with the address in the info.
-pub(super) fn derive(seed: &[u8; MASTER_SEED_LEN], address: &[u8; ADDRESS_LEN]) -> ServiceKeys {
+pub(crate) fn derive(seed: &[u8; MASTER_SEED_LEN], address: &[u8; ADDRESS_LEN]) -> ServiceKeys {
     let hkdf = Hkdf::<Sha256>::new(None, seed);
-    let mut viewing = Zeroizing::new([0u8; VIEWING_SECRET_LEN]);
+    let mut viewing = Zeroizing::new([0u8; 32]);
     hkdf.expand_multi_info(&[VIEWING_KEY_LABEL, address], viewing.as_mut_slice())
         .expect("32 bytes of output");
     let mut nullifier = Zeroizing::new([0u8; NULLIFIER_SECRET_LEN]);

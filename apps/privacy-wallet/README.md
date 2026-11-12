@@ -11,7 +11,6 @@ Routes:
 - `POST /v1/ping`: QOS connection challenge.
 - `POST /v1/operations`: `Bootstrap`, `Decrypt`, `Derive`, `TransactionKeys`,
   `Prove`, specified in [`crates/protocol`](../../crates/protocol/README.md).
-- `POST /v1/decryption-service`: the [decryption service](#decryption-service-prototype).
 
 Module map: `operations/` (request validation, `bootstrap.rs`, `keys.rs` for
 the three derivation operations, `prove.rs` for completing a prover request
@@ -62,54 +61,6 @@ the network's signed policy, as the enclave image does. Clients of that network
 provers under its policy; the custody and QOS keys stay local and unattested.
 
 The `local-dev` feature is never enabled in the enclave binary.
-
-## Decryption service (prototype)
-
-Lets a Solana address receive private transfers before its owner registers a
-wallet. The enclave derives one viewing key and one nullifier key per address,
-its service keys, from a master seed sealed to the Quorum key. The requests,
-results and signed messages are specified in
-[`crates/protocol`](../../crates/protocol/README.md#decryption-service).
-
-1. An operator runs `Genesis` once and publishes the sealed master seed. Every
-   later request presents it.
-2. A sender calls `PublicKeys` for an address and encrypts a transfer to the
-   keys it returns.
-3. The owner signs, with the address, a message that names the batch of
-   outputs and a viewing key of the owner's own wallet, and calls `Decrypt`.
-   The enclave opens every output with the service viewing key and returns
-   the plaintexts and the service nullifier secret, encrypted to the named
-   key. The client keeps a plaintext only when its commitment equals the
-   indexed one.
-
-`Claim` is the other design, kept to compare the two: after a signature that
-names only the wallet viewing key, it returns both service secrets, and the
-wallet opens later transfers itself.
-
-The code is `src/decryption_service/`: `mod.rs` (the four operations),
-`keys.rs` (the derivation), `seed.rs` (the master seed, encrypted to the
-Quorum key and signed by it), `owner.rs` (which addresses have keys, the
-owner's signature, sealing an answer). It opens the request envelope, opens
-ciphertexts and builds the proof-carrying response with the wallet
-operations' own functions. It reads no wallet descriptor or grant and reaches
-no service.
-
-The local testkit serves the route. Nothing calls it yet but its tests, which
-decrypt an output encrypted as a sender encrypts it:
-
-```sh
-cargo test -p zolana-tvc-privacy-wallet --all-features decryption_service
-```
-
-Not there yet:
-
-- `/v1/info` and the release policy do not name its operations.
-- No wallet operation opens a sealed answer, so a wallet whose viewing key
-  lives in this enclave cannot read one.
-- No gateway route and no client.
-- The master seed has no copy outside the Quorum key, and no release step
-  pins the result of `Genesis`.
-- `Decrypt` and `Claim` are both served; one of them is to go.
 
 ## Release
 

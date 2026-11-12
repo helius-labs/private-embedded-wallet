@@ -67,37 +67,11 @@ const MAINNET: Net = Net {
     policy_threshold: 1,
 };
 
-const SPR_NETWORK: &str = match option_env!("SPR_NETWORK") {
-    Some(network) => network,
-    None => "devnet",
-};
-
-const _: () = assert!(
-    eq(SPR_NETWORK, "devnet") || eq(SPR_NETWORK, "mainnet"),
-    "SPR_NETWORK must be devnet or mainnet"
-);
-
 /// The network this image was built for.
-pub const NET: &Net = if eq(SPR_NETWORK, "mainnet") {
-    &MAINNET
-} else {
-    &DEVNET
+pub const NET: &Net = match spr_tvc_enclave::NETWORK {
+    Network::Mainnet => &MAINNET,
+    Network::Devnet => &DEVNET,
 };
-
-const fn eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut i = 0;
-    while i < a.len() {
-        if a[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
 
 #[cfg(test)]
 mod tests {

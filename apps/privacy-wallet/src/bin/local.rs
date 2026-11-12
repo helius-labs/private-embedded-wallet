@@ -8,8 +8,7 @@ use clap::Parser;
 use qos_p256::P256Pair;
 use zeroize::Zeroizing;
 use zolana_tvc_privacy_wallet::{
-    local_testkit_qos_seeds, local_unattested_state, router, shutdown_signal, LocalProver,
-    LocalProverTrust, NET,
+    local_testkit_qos_seeds, local_unattested_state, router, LocalProver, LocalProverTrust, NET,
 };
 
 #[derive(Debug, Parser)]
@@ -93,8 +92,5 @@ async fn main() -> io::Result<()> {
         });
         state
     };
-    let listener = tokio::net::TcpListener::bind(address).await?;
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
+    spr_tvc_enclave::serve(address, router(state)).await
 }

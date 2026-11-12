@@ -1,6 +1,8 @@
 [workspace]
 members = [
+    "apps/decryption-service",
     "apps/privacy-wallet",
+    "crates/enclave",
     "crates/protocol",
 ]
 exclude = [

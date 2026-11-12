@@ -740,6 +740,7 @@ fn state() -> AppState {
     };
     AppState {
         info: Arc::new(config.service_info(
+            &crate::APP,
             [0x33; 32],
             [0x44; 32],
             &runtime.quorum,

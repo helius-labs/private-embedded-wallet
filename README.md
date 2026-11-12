@@ -20,8 +20,10 @@ Helius API key.
 | Path | Purpose |
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
+| [`apps/decryption-service`](apps/decryption-service) | Prototype TVC application: decryption for addresses without a registered wallet. |
 | [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet`: one-request sessions with Boot Proofs, enrollment, and wallet grants. |
 | [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the Turnkey session key as the client key, the five operations, `SprEmbeddedWalletKeys` for the Zolana SDK. |
+| [`crates/enclave`](crates/enclave) | What both TVC applications serve around their operations: routes, the request envelope, the proof-carrying response, the pool cipher. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
 | [`examples/typescript-client`](examples/typescript-client) | The client on a Turnkey API key, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: per-network releases, service keys, the localnet for `just headless-e2e`. |

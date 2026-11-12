@@ -1,64 +1,63 @@
-//! The decryption service: service keys for addresses without a registered wallet.
+//! The encrypted operation endpoint.
 
 use axum::body::Body;
 use axum::http::Response;
 use axum::response::IntoResponse;
+use spr_tvc_enclave::{http, open_ciphertexts, open_envelope, respond, Failure, Service};
 use zeroize::Zeroizing;
 use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::crypto::parse_uncompressed_sec1;
 use zolana_tvc_protocol::decryption_service::{
-    claim_message, decrypt_items_digest, decrypt_message, parse_service_request,
-    service_request_digest, DecryptedOutputs, ServiceOperation, ServiceRequest, ServiceResult,
-    SEALED_KEYS_INFO, SEALED_OUTPUTS_INFO, SERVICE_PROOF_TYPE,
+    decrypt_items_digest, decrypt_message, parse_service_request, service_request_digest,
+    DecryptedOutputs, ServiceOperation, ServiceRequest, ServiceResult, SERVICE_PROOF_TYPE,
 };
 use zolana_tvc_protocol::encoding::jcs_serialize;
-use zolana_tvc_protocol::types::OperationProofPayload;
+use zolana_tvc_protocol::types::{OperationKind, OperationProofPayload};
 
-use crate::http::{self, PublicError};
-use crate::operations::{open_ciphertexts, open_envelope, respond, Failure};
-use crate::AppState;
+use crate::{keys, owner, seed};
 
-mod keys;
-mod owner;
-mod seed;
-#[cfg(test)]
-mod tests;
+/// Every operation this application serves.
+pub const OPERATIONS: [OperationKind; 3] = [
+    OperationKind::ServiceGenesis,
+    OperationKind::ServicePublicKeys,
+    OperationKind::ServiceDecrypt,
+];
 
-pub(crate) fn handle(state: &AppState, body: &[u8]) -> Response<Body> {
-    match execute(state, body) {
+pub(crate) fn handle(service: &Service, body: &[u8]) -> Response<Body> {
+    match execute(service, body) {
         Ok(response) => http::ok(response),
-        Err(Failure::Invalid) => PublicError::InvalidRequest.into_response(),
-        Err(_) => PublicError::Unavailable.into_response(),
+        Err(failure) => failure.into_response(),
     }
 }
 
-fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
-    let (grant, plaintext) = open_envelope(state, body)?;
+fn execute(service: &Service, body: &[u8]) -> Result<String, Failure> {
+    let (grant, plaintext) = open_envelope(&service.info, &service.quorum, body)?;
     let request = parse_service_request(&plaintext).map_err(|_| Failure::Invalid)?;
-    if grant.is_some() || !targets_running_release(&request, state) {
+    if grant.is_some() || !targets_running_release(&request, service) {
         return Err(Failure::Invalid);
     }
     parse_uncompressed_sec1(&request.client_response_public_key).map_err(|_| Failure::Invalid)?;
 
-    let (result, sealed_seed_digest) = run(&request, state)?;
+    let (result, sealed_seed_digest) = run(&request, service)?;
+    let proof = OperationProofPayload {
+        r#type: SERVICE_PROOF_TYPE.to_owned(),
+        version: API_VERSION,
+        request_id: request.request_id,
+        request_digest: service_request_digest(&request).map_err(|_| Failure::Invalid)?,
+        result_digest: [0; 32],
+        operation: request.operation.kind(),
+        sealed_seed_digest,
+    };
     respond(
-        &state.runtime,
-        OperationProofPayload {
-            r#type: SERVICE_PROOF_TYPE.to_owned(),
-            version: API_VERSION,
-            request_id: request.request_id,
-            request_digest: service_request_digest(&request).map_err(|_| Failure::Invalid)?,
-            result_digest: [0; 32],
-            operation: request.operation.kind(),
-            sealed_seed_digest,
-        },
+        &service.ephemeral,
+        proof,
         &request.client_response_public_key,
         &result,
     )
 }
 
-fn targets_running_release(request: &ServiceRequest, state: &AppState) -> bool {
-    let info = &state.info;
+fn targets_running_release(request: &ServiceRequest, service: &Service) -> bool {
+    let info = &service.info;
     request.version == API_VERSION
         && request.target_release_id == info.release_id
         && request.target_manifest_digest == info.manifest_digest
@@ -68,16 +67,15 @@ fn targets_running_release(request: &ServiceRequest, state: &AppState) -> bool {
 }
 
 /// Returns the result and the digest of the sealed master seed it came from.
-fn run(request: &ServiceRequest, state: &AppState) -> Result<(ServiceResult, [u8; 32]), Failure> {
-    let network = state.info.network;
+fn run(request: &ServiceRequest, service: &Service) -> Result<(ServiceResult, [u8; 32]), Failure> {
     let presented = request.sealed_master_seed.as_deref();
-    let unseal = || seed::unseal(presented.ok_or(Failure::Invalid)?, state);
+    let unseal = || seed::unseal(presented.ok_or(Failure::Invalid)?, service);
     match &request.operation {
         ServiceOperation::Genesis => {
             if presented.is_some() {
                 return Err(Failure::Invalid);
             }
-            let (sealed_master_seed, digest) = seed::generate(state)?;
+            let (sealed_master_seed, digest) = seed::generate(service)?;
             Ok((ServiceResult::Genesis { sealed_master_seed }, digest))
         }
         ServiceOperation::PublicKeys { address } => {
@@ -98,7 +96,7 @@ fn run(request: &ServiceRequest, state: &AppState) -> Result<(ServiceResult, [u8
             let signer = owner::authorized(authorization, |signer| {
                 decrypt_message(
                     signer,
-                    network,
+                    service.info.network,
                     &authorization.wallet_viewing_public_key,
                     &batch,
                 )
@@ -111,24 +109,11 @@ fn run(request: &ServiceRequest, state: &AppState) -> Result<(ServiceResult, [u8
             let outputs =
                 Zeroizing::new(jcs_serialize(&outputs).map_err(|_| Failure::Unavailable)?);
             let aad = [signer, batch].concat();
-            let result = owner::seal(authorization, SEALED_OUTPUTS_INFO, &aad, outputs.as_bytes())?;
-            Ok((result, digest))
-        }
-        ServiceOperation::Claim { authorization } => {
-            let (seed, digest) = unseal()?;
-            let signer = owner::authorized(authorization, |signer| {
-                claim_message(signer, network, &authorization.wallet_viewing_public_key)
-            })?;
-            let keys = keys::derive(&seed, &signer);
-            let secrets = Zeroizing::new(
-                [
-                    keys.viewing.secret_bytes().as_slice(),
-                    keys.nullifier.secret().as_slice(),
-                ]
-                .concat(),
-            );
-            let result = owner::seal(authorization, SEALED_KEYS_INFO, &signer, &secrets)?;
+            let result = owner::seal(authorization, &aad, outputs.as_bytes())?;
             Ok((result, digest))
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

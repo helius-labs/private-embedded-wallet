@@ -9,17 +9,14 @@ use crate::encoding::{self, decimal_u64, encode_lower_hex, hex};
 use crate::error::TvcError;
 use crate::types::{DecryptItem, Network, OperationKind};
 
-pub const SERVICE_PATH: &str = "/v1/decryption-service";
 pub const SERVICE_PROOF_TYPE: &str = "spr.tvc.decryption_service.v1";
 pub const SERVICE_REQUEST_DIGEST_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1";
 pub const DECRYPT_ITEMS_DIGEST_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_ITEMS_V1";
 
-/// Label of the message that authorizes a `Decrypt`, and of one for a `Claim`.
+/// Label of the message that authorizes a `Decrypt`.
 pub const DECRYPT_LABEL: &str = "TSPP/decryption-service/decrypt/v1";
-pub const CLAIM_LABEL: &str = "TSPP/decryption-service/claim/v1";
-/// HPKE info of a `Decrypt` answer, and of a `Claim` answer.
+/// HPKE info of a `Decrypt` answer.
 pub const SEALED_OUTPUTS_INFO: &[u8] = b"TSPP/decryption-service/sealed_outputs/v1";
-pub const SEALED_KEYS_INFO: &[u8] = b"TSPP/decryption-service/sealed_keys/v1";
 
 pub const ADDRESS_LEN: usize = 32;
 pub const X25519_PUBLIC_KEY_LEN: usize = 33;
@@ -28,7 +25,7 @@ pub const NULLIFIER_SECRET_LEN: usize = 31;
 
 const OFFCHAIN_MESSAGE_MAGIC: &[u8; 16] = b"\xffsolana offchain";
 
-/// The plaintext of an `EncryptedRequest` posted to [`SERVICE_PATH`].
+/// The plaintext of an `EncryptedRequest` to the decryption service.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceRequest {
@@ -51,7 +48,7 @@ pub struct ServiceRequest {
     pub operation: ServiceOperation,
 }
 
-/// The owner of the base58 `signer` lets `wallet_viewing_public_key` read an answer.
+/// The owner of the base58 `signer` lets `wallet_viewing_public_key` read one batch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnerAuthorization {
@@ -74,8 +71,6 @@ pub enum ServiceOperation {
         authorization: OwnerAuthorization,
         items: Vec<DecryptItem>,
     },
-    /// Releases the signer's service secrets.
-    Claim { authorization: OwnerAuthorization },
 }
 
 impl ServiceOperation {
@@ -84,7 +79,6 @@ impl ServiceOperation {
             Self::Genesis => OperationKind::ServiceGenesis,
             Self::PublicKeys { .. } => OperationKind::ServicePublicKeys,
             Self::Decrypt { .. } => OperationKind::ServiceDecrypt,
-            Self::Claim { .. } => OperationKind::ServiceClaim,
         }
     }
 }
@@ -102,7 +96,7 @@ pub enum ServiceResult {
         #[serde(with = "hex")]
         nullifier_public_key: [u8; 32],
     },
-    /// The answer to a `Decrypt` or a `Claim`, HPKE to the authorized viewing key.
+    /// The answer to a `Decrypt`: a `DecryptedOutputs`, HPKE to the authorized viewing key.
     Sealed {
         #[serde(with = "hex")]
         enc: [u8; 32],
@@ -143,64 +137,30 @@ pub fn decrypt_items_digest(items: &[DecryptItem]) -> Result<[u8; 32], TvcError>
     ))
 }
 
-/// A Solana off-chain message v0, format 0, one signer, domain `SHA-256(label)`.
-fn owner_message(
-    label: &str,
-    signer: &[u8; ADDRESS_LEN],
-    network: Network,
-    wallet_viewing_public_key: &[u8; X25519_PUBLIC_KEY_LEN],
-    items_digest: Option<&[u8; 32]>,
-) -> Vec<u8> {
-    let mut payload = format!(
-        "{label}/{network}/{}",
-        encode_lower_hex(wallet_viewing_public_key)
-    );
-    if let Some(digest) = items_digest {
-        payload.push('/');
-        payload.push_str(&encode_lower_hex(digest));
-    }
-    let length = u16::try_from(payload.len()).expect("the payload is short");
-    let mut message = Vec::with_capacity(85 + payload.len());
-    message.extend_from_slice(OFFCHAIN_MESSAGE_MAGIC);
-    message.push(0);
-    message.extend_from_slice(&Sha256::digest(label.as_bytes()));
-    message.push(0);
-    message.push(1);
-    message.extend_from_slice(signer);
-    message.extend_from_slice(&length.to_le_bytes());
-    message.extend_from_slice(payload.as_bytes());
-    message
-}
-
-/// What an owner signs to have one batch opened for a wallet viewing key.
+/// What an owner signs to have one batch opened for a wallet viewing key: a
+/// Solana off-chain message v0, format 0, one signer, domain `SHA-256(DECRYPT_LABEL)`.
 pub fn decrypt_message(
     signer: &[u8; ADDRESS_LEN],
     network: Network,
     wallet_viewing_public_key: &[u8; X25519_PUBLIC_KEY_LEN],
     items_digest: &[u8; 32],
 ) -> Vec<u8> {
-    owner_message(
-        DECRYPT_LABEL,
-        signer,
-        network,
-        wallet_viewing_public_key,
-        Some(items_digest),
-    )
-}
-
-/// What an owner signs to release the service secrets to a wallet viewing key.
-pub fn claim_message(
-    signer: &[u8; ADDRESS_LEN],
-    network: Network,
-    wallet_viewing_public_key: &[u8; X25519_PUBLIC_KEY_LEN],
-) -> Vec<u8> {
-    owner_message(
-        CLAIM_LABEL,
-        signer,
-        network,
-        wallet_viewing_public_key,
-        None,
-    )
+    let payload = format!(
+        "{DECRYPT_LABEL}/{network}/{}/{}",
+        encode_lower_hex(wallet_viewing_public_key),
+        encode_lower_hex(items_digest)
+    );
+    let length = u16::try_from(payload.len()).expect("the payload is short");
+    let mut message = Vec::with_capacity(85 + payload.len());
+    message.extend_from_slice(OFFCHAIN_MESSAGE_MAGIC);
+    message.push(0);
+    message.extend_from_slice(&Sha256::digest(DECRYPT_LABEL.as_bytes()));
+    message.push(0);
+    message.push(1);
+    message.extend_from_slice(signer);
+    message.extend_from_slice(&length.to_le_bytes());
+    message.extend_from_slice(payload.as_bytes());
+    message
 }
 
 #[cfg(test)]
@@ -220,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn owner_messages_are_solana_offchain_messages() {
+    fn the_decrypt_message_is_a_solana_offchain_message() {
         let digest = decrypt_items_digest(&[item(0)]).unwrap();
         let message = decrypt_message(&[7; 32], Network::Mainnet, &[4; 33], &digest);
         let payload = format!(
@@ -236,22 +196,9 @@ mod tests {
         expected.extend_from_slice(payload.as_bytes());
         assert_eq!(message, expected);
 
-        let claim = claim_message(&[7; 32], Network::Mainnet, &[4; 33]);
-        assert!(claim.ends_with(
-            format!(
-                "TSPP/decryption-service/claim/v1/mainnet/{}",
-                "04".repeat(33)
-            )
-            .as_bytes()
-        ));
         assert_ne!(
-            claim[17..49],
-            message[17..49],
-            "separate application domains"
-        );
-        assert_ne!(
-            claim,
-            claim_message(&[7; 32], Network::Devnet, &[4; 33]),
+            message,
+            decrypt_message(&[7; 32], Network::Devnet, &[4; 33], &digest),
             "a message names its network"
         );
     }

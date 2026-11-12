@@ -10,12 +10,13 @@ use hpke::{Deserializable, Kem, OpModeS, Serializable};
 use rand_core::{OsRng, UnwrapErr};
 use solana_pubkey::Pubkey;
 use spr_keypair::X25519Pubkey;
-use zolana_tvc_protocol::decryption_service::{OwnerAuthorization, ServiceResult, ADDRESS_LEN};
-
-use crate::operations::Failure;
+use spr_tvc_enclave::Failure;
+use zolana_tvc_protocol::decryption_service::{
+    OwnerAuthorization, ServiceResult, ADDRESS_LEN, SEALED_OUTPUTS_INFO,
+};
 
 /// The key of an address a key can sign for: on the curve, not of small order.
-pub(super) fn signer(address: &str) -> Result<VerifyingKey, Failure> {
+pub(crate) fn signer(address: &str) -> Result<VerifyingKey, Failure> {
     Pubkey::from_str(address)
         .ok()
         .and_then(|address| VerifyingKey::from_bytes(&address.to_bytes()).ok())
@@ -24,7 +25,7 @@ pub(super) fn signer(address: &str) -> Result<VerifyingKey, Failure> {
 }
 
 /// The signer's address, once it signed the message built for it. Strict Ed25519.
-pub(super) fn authorized(
+pub(crate) fn authorized(
     authorization: &OwnerAuthorization,
     message: impl FnOnce(&[u8; ADDRESS_LEN]) -> Vec<u8>,
 ) -> Result<[u8; ADDRESS_LEN], Failure> {
@@ -39,9 +40,8 @@ pub(super) fn authorized(
 }
 
 /// HPKE base mode to the wallet viewing key; a non-canonical or low-order key fails.
-pub(super) fn seal(
+pub(crate) fn seal(
     authorization: &OwnerAuthorization,
-    info: &[u8],
     aad: &[u8],
     plaintext: &[u8],
 ) -> Result<ServiceResult, Failure> {
@@ -52,7 +52,7 @@ pub(super) fn seal(
     let (enc, ciphertext) = hpke::single_shot_seal::<AesGcm256, HkdfSha256, X25519HkdfSha256, _>(
         &OpModeS::Base,
         &recipient,
-        info,
+        SEALED_OUTPUTS_INFO,
         plaintext,
         aad,
         &mut UnwrapErr(OsRng),

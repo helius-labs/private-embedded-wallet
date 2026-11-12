@@ -147,6 +147,7 @@ pub fn local_unattested_state(
         quorum_key_epoch: 1,
     };
     let info = config.service_info(
+        &crate::APP,
         sha256(testkit.manifest_label.as_bytes()),
         sha256(testkit.executable_label.as_bytes()),
         &quorum,

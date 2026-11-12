@@ -3987,6 +3987,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "spr-tvc-decryption-service"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "borsh",
+ "clap",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "hpke",
+ "http-body-util",
+ "p256 0.13.2",
+ "qos_p256",
+ "rand_core 0.9.5",
+ "sha2 0.10.9",
+ "solana-pubkey",
+ "spr-keypair",
+ "spr-tvc-enclave",
+ "tokio",
+ "tower",
+ "zeroize",
+ "zolana-tvc-protocol",
+]
+
+[[package]]
+name = "spr-tvc-enclave"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "http-body-util",
+ "p256 0.13.2",
+ "qos_core",
+ "qos_p256",
+ "serde",
+ "spr-keypair",
+ "strum",
+ "tokio",
+ "tower",
+ "zeroize",
+ "zolana-tvc-protocol",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4986,22 +5030,18 @@ dependencies = [
  "clap",
  "ed25519-dalek",
  "hex",
- "hkdf",
- "hpke",
  "http-body-util",
  "p256 0.13.2",
  "qos_core",
  "qos_p256",
- "rand_core 0.9.5",
  "reqwest",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "solana-pubkey",
  "spr-keypair",
  "spr-prover-tee",
  "spr-transaction",
- "strum",
+ "spr-tvc-enclave",
  "tokio",
  "tower",
  "turnkey_api_key_stamper",
