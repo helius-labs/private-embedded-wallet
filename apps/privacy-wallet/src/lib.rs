@@ -4,6 +4,7 @@
 //! and answers five encrypted operations: bootstrap the identity, decrypt
 //! ciphertexts, derive nullifiers and merge values, mint per-transaction
 //! viewing keys, and complete a prover request sealed to an attested prover.
+//! It also serves the decryption service, for addresses without a wallet.
 //! The client does
 //! everything else with the Zolana SDK, including signing. Boot Proof
 //! verification is the relying party's job.
@@ -27,6 +28,7 @@ use zolana_tvc_protocol::constants::{
     API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, MAX_ENCRYPTED_RESPONSE_BYTES, TVC_APP_PROOF_SCHEME,
     TVC_APP_PROOF_TYPE, TVC_QOS_PING_PROOF_TYPE,
 };
+use zolana_tvc_protocol::decryption_service::SERVICE_PATH;
 use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
     parse_qos_ping_challenge, parse_qos_ping_request, AppProof, HealthResponse, HealthStatus,
@@ -36,6 +38,7 @@ use zolana_tvc_protocol::types::{
 use crate::http::PublicError;
 
 mod custody;
+mod decryption_service;
 mod http;
 mod network;
 mod operations;
@@ -185,11 +188,14 @@ async fn dispatch(State(state): State<AppState>, request: Request<Body>) -> Resp
     };
 
     match (parts.method.as_str(), parts.uri.path()) {
-        ("POST", "/v1/ping" | "/v1/operations") if !has_json_content_type(&parts.headers) => {
+        ("POST", "/v1/ping" | "/v1/operations" | SERVICE_PATH)
+            if !has_json_content_type(&parts.headers) =>
+        {
             PublicError::InvalidRequest.into_response()
         }
         ("POST", "/v1/ping") => handle_ping(&state, &body),
         ("POST", "/v1/operations") => operations::handle(&state, &body).await,
+        ("POST", SERVICE_PATH) => decryption_service::handle(&state, &body),
         ("GET", "/health") => match jcs_serialize(&HealthResponse {
             status: HealthStatus::Healthy,
         }) {
@@ -200,7 +206,7 @@ async fn dispatch(State(state): State<AppState>, request: Request<Body>) -> Resp
             Ok(body) => http::ok(body),
             Err(_) => PublicError::InvalidRequest.into_response(),
         },
-        (_, "/v1/ping" | "/v1/operations" | "/health" | "/v1/info") => {
+        (_, "/v1/ping" | "/v1/operations" | SERVICE_PATH | "/health" | "/v1/info") => {
             PublicError::MethodNotAllowed.into_response()
         }
         _ => PublicError::NotFound.into_response(),

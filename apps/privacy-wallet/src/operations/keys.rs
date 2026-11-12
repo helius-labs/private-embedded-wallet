@@ -24,13 +24,12 @@ fn check_batch<T>(items: &[T]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// The viewing key `public_key` names. This wallet holds one, so a request
-/// under any other key is not a request about this wallet.
-fn viewing_key<'a>(roles: &'a Roles, public_key: &[u8]) -> Result<&'a ViewingKey, Failure> {
-    if roles.viewing_key.pubkey().as_bytes() != public_key {
+/// `viewing` when `public_key` names it.
+fn named<'a>(viewing: &'a ViewingKey, public_key: &[u8]) -> Result<&'a ViewingKey, Failure> {
+    if viewing.pubkey().as_bytes() != public_key {
         return Err(Failure::Invalid);
     }
-    Ok(&roles.viewing_key)
+    Ok(viewing)
 }
 
 /// A tagged X25519 public key, `0x04 || u` with a canonical `u`.
@@ -43,12 +42,15 @@ fn x25519(bytes: &[u8]) -> Result<X25519Pubkey, Failure> {
 /// unauthenticated and never fails on content, so every item answers; a
 /// ciphertext that was not for this wallet answers with bytes that do not
 /// decode, which the client detects against the indexed commitment.
-pub(super) fn decrypt(roles: &Roles, items: &[DecryptItem]) -> Result<OperationResult, Failure> {
+pub(crate) fn open_ciphertexts(
+    viewing: &ViewingKey,
+    items: &[DecryptItem],
+) -> Result<Vec<Vec<u8>>, Failure> {
     check_batch(items)?;
-    let plaintexts = items
+    items
         .iter()
         .map(|item| {
-            let viewing = viewing_key(roles, &item.viewing_public_key)?;
+            let viewing = named(viewing, &item.viewing_public_key)?;
             let transaction_key = x25519(&item.transaction_viewing_public_key)?;
             let salt: Salt = item
                 .salt
@@ -69,8 +71,13 @@ pub(super) fn decrypt(roles: &Roles, items: &[DecryptItem]) -> Result<OperationR
             }
             .map_err(|_| Failure::Invalid)
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(OperationResult::Decrypt { plaintexts })
+        .collect()
+}
+
+pub(super) fn decrypt(roles: &Roles, items: &[DecryptItem]) -> Result<OperationResult, Failure> {
+    Ok(OperationResult::Decrypt {
+        plaintexts: open_ciphertexts(&roles.viewing_key, items)?,
+    })
 }
 
 pub(super) fn derive(roles: &Roles, items: &[DeriveItem]) -> Result<OperationResult, Failure> {
@@ -121,7 +128,7 @@ pub(super) fn transaction_keys(
     let secrets = items
         .iter()
         .map(|item| {
-            let viewing = viewing_key(roles, &item.viewing_public_key)?;
+            let viewing = named(&roles.viewing_key, &item.viewing_public_key)?;
             viewing
                 .get_transaction_viewing_key(&item.first_nullifier)
                 .map(|key| *key.secret_bytes())

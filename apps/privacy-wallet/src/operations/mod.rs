@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::body::Body;
 use axum::http::Response;
 use axum::response::IntoResponse;
+use serde::Serialize;
 use solana_pubkey::Pubkey;
 use zeroize::Zeroizing;
 use zolana_tvc_protocol::constants::{
@@ -27,6 +28,7 @@ use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
 use zolana_tvc_protocol::types::{
     parse_encrypted_request, parse_operation_request, AppProof, EncryptedResponse, FailureStage,
     Operation, OperationKind, OperationProofPayload, OperationRequest, OperationResult,
+    WalletGrant,
 };
 use zolana_tvc_protocol::{client_key_id, verify_wallet_grant};
 
@@ -43,6 +45,7 @@ mod sealed;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use keys::open_ciphertexts;
 #[cfg(any(test, feature = "local-dev"))]
 pub(crate) use prove::sign_policy;
 pub(crate) use prove::ProverTrust;
@@ -97,14 +100,18 @@ pub(crate) async fn handle(state: &AppState, body: &[u8]) -> Response<Body> {
     }
 }
 
-async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
-    let runtime = &state.runtime;
+/// Opens a request's envelope. Returns its grant and its canonical JSON plaintext.
+pub(crate) fn open_envelope(
+    state: &AppState,
+    body: &[u8],
+) -> Result<(Option<WalletGrant>, Zeroizing<String>), Failure> {
     let body = std::str::from_utf8(body).map_err(|_| Failure::Invalid)?;
     let encrypted = parse_encrypted_request(body).map_err(|_| Failure::Invalid)?;
     check_encrypted_request_bindings(&encrypted, &state.info).map_err(|_| Failure::Invalid)?;
 
     let plaintext = Zeroizing::new(
-        runtime
+        state
+            .runtime
             .quorum
             .decrypt(&encrypted.ciphertext)
             .map_err(|_| Failure::Invalid)?,
@@ -113,9 +120,15 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
     if !is_rfc8785(plaintext) {
         return Err(Failure::Invalid);
     }
-    let request = parse_operation_request(plaintext).map_err(|_| Failure::Invalid)?;
+    Ok((encrypted.wallet_grant, Zeroizing::new(plaintext.to_owned())))
+}
+
+async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
+    let runtime = &state.runtime;
+    let (grant, plaintext) = open_envelope(state, body)?;
+    let request = parse_operation_request(&plaintext).map_err(|_| Failure::Invalid)?;
     let wallet = validate(&request, state)?;
-    let grant = encrypted.wallet_grant.as_ref().ok_or(Failure::Invalid)?;
+    let grant = grant.as_ref().ok_or(Failure::Invalid)?;
     verify_wallet_grant(
         grant,
         &runtime.grant_public,
@@ -146,32 +159,44 @@ async fn execute(state: &AppState, body: &[u8]) -> Result<String, Failure> {
         Err(failure) => return Err(failure),
     };
 
-    let result_plaintext =
-        Zeroizing::new(jcs_serialize(&result).map_err(|_| Failure::Unavailable)?);
-    let encrypted_result = qos_encrypt(
+    respond(
+        runtime,
+        OperationProofPayload {
+            r#type: TVC_APP_PROOF_TYPE.to_owned(),
+            version: API_VERSION,
+            request_id: request.request_id,
+            request_digest: request_hash,
+            result_digest: [0; 32],
+            operation: request.operation.kind(),
+            sealed_seed_digest: proof_seed_digest,
+        },
         &request.client_response_public_key,
-        result_plaintext.as_bytes(),
+        &result,
     )
-    .map_err(|_| Failure::Unavailable)?;
+}
+
+/// Encrypts `result` to the response key under a signed App Proof; sets `proof.result_digest`.
+pub(crate) fn respond<T: Serialize>(
+    runtime: &Runtime,
+    mut proof: OperationProofPayload,
+    client_response_public_key: &[u8],
+    result: &T,
+) -> Result<String, Failure> {
+    let result_plaintext = Zeroizing::new(jcs_serialize(result).map_err(|_| Failure::Unavailable)?);
+    let encrypted_result = qos_encrypt(client_response_public_key, result_plaintext.as_bytes())
+        .map_err(|_| Failure::Unavailable)?;
     if encrypted_result.len() as u64 > MAX_ENCRYPTED_RESPONSE_BYTES {
         return Err(Failure::Unavailable);
     }
 
-    let proof_payload = jcs_serialize(&OperationProofPayload {
-        r#type: TVC_APP_PROOF_TYPE.to_owned(),
-        version: API_VERSION,
-        request_id: request.request_id,
-        request_digest: request_hash,
-        result_digest: result_digest(&encrypted_result),
-        operation: request.operation.kind(),
-        sealed_seed_digest: proof_seed_digest,
-    })
-    .map_err(|_| Failure::Unavailable)?;
+    proof.result_digest = result_digest(&encrypted_result);
+    let request_id = proof.request_id;
+    let proof_payload = jcs_serialize(&proof).map_err(|_| Failure::Unavailable)?;
     let signature = sign_ephemeral_low_s(&runtime.ephemeral, proof_payload.as_bytes())
         .map_err(|_| Failure::Unavailable)?;
     jcs_serialize(&EncryptedResponse {
         version: API_VERSION,
-        request_id: request.request_id,
+        request_id,
         encrypted_result,
         tvc_app_proof: AppProof {
             scheme: TVC_APP_PROOF_SCHEME.to_owned(),

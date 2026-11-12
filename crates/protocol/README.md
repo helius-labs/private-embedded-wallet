@@ -168,6 +168,84 @@ stops within that hour of its grants no longer being issued, whatever else it
 holds. The grant travels outside the ciphertext so a gateway in front of the
 enclave can check it before forwarding.
 
+## Decryption service
+
+`POST /v1/decryption-service` lets a Solana address receive private transfers
+before its owner registers a wallet. The enclave derives one viewing key and
+one nullifier key per address, its service keys, from a master seed. A sender
+asks for the public keys and encrypts to them. The owner later signs with the
+address, and the enclave answers encrypted to a viewing key of the owner's own
+wallet.
+
+A request is an `EncryptedRequest` without a wallet grant. Its plaintext is a
+`ServiceRequest`: a request id, the release pins of an `OperationRequest`, the
+sealed master seed, a one-time response public key and the operation. It has
+no wallet descriptor, client authorization or timestamps, and no operation
+changes state. The answer is an `EncryptedResponse` whose App Proof has the
+type `spr.tvc.decryption_service.v1`, the request digest
+`H(SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))`, the operation as
+`Service` followed by its name below, and the digest of the sealed master
+seed. Any refusal is the generic `InvalidRequest`.
+
+| Operation | Sealed master seed | Returns |
+| --- | --- | --- |
+| `Genesis` | forbidden | A fresh master seed, sealed to the Quorum key. |
+| `PublicKeys { address }` | required | The address's service viewing and nullifier public keys. |
+| `Decrypt { authorization, items }` | required | `Sealed`: one plaintext per item and the nullifier secret. |
+| `Claim { authorization }` | required | `Sealed`: the viewing secret and the nullifier secret. |
+
+`Decrypt` keeps the service viewing secret in the enclave; `Claim` releases
+it.
+
+Service keys are HKDF-SHA256 over the master seed with an empty salt, one
+Expand per key: info `TSPP/decryption-service/view_key/x25519/v1 || address`
+for the 32-byte viewing secret, which is then clamped, and
+`TSPP/decryption-service/nf_key/v1 || address` for the 31-byte nullifier
+secret. `address` is the 32 raw bytes. Only an address that is a point on the
+Ed25519 curve outside the small-order subgroup has service keys, since no key
+can sign for any other.
+
+An `authorization` names the base58 `signer`, a `wallet_viewing_public_key`
+and the signer's Ed25519 `signature`, verified strictly, over a Solana
+off-chain message v0 (format 0, one signer) whose application domain is the
+SHA-256 of its label and whose payload is:
+
+| Operation | Payload |
+| --- | --- |
+| `Decrypt` | `TSPP/decryption-service/decrypt/v1/<network>/<hex of the viewing key>/<hex of the items digest>` |
+| `Claim` | `TSPP/decryption-service/claim/v1/<network>/<hex of the viewing key>` |
+
+The items digest is `H(SPR_TVC_DECRYPTION_SERVICE_ITEMS_V1, JCS(items))`, so a
+`Decrypt` signature covers one batch. A signature says which key may read the
+answer; it is not a secret, and anyone may send the request.
+
+`Sealed` is HPKE base mode, DHKEM(X25519, HKDF-SHA256), HKDF-SHA256,
+AES-256-GCM, to `wallet_viewing_public_key`, which must be a canonical
+`0x04 || u` and not of low order. The wallet opens it with that key's secret.
+A wallet whose viewing key lives in this enclave cannot yet: no wallet
+operation opens a `Sealed` answer.
+
+| Operation | Info | AAD | Plaintext |
+| --- | --- | --- | --- |
+| `Decrypt` | `TSPP/decryption-service/sealed_outputs/v1` | signer address, then items digest | JCS of `{ nullifier_secret, plaintexts }` |
+| `Claim` | `TSPP/decryption-service/sealed_keys/v1` | signer address | viewing secret, then nullifier secret |
+
+`Decrypt` takes the items of the wallet `Decrypt` operation, each naming the
+signer's service viewing public key, and answers every one: the pool cipher is
+unauthenticated, so the client adopts a plaintext only when its commitment
+equals the indexed one.
+
+The master seed is 32 random bytes that `Genesis` returns encrypted to the
+Quorum key, with the Quorum key's signature over
+`SPR_TVC_DECRYPTION_SERVICE_SEED_V1 || ciphertext`. Anyone can encrypt a seed
+of their own to the Quorum key, so the enclave opens only a blob that carries
+this signature, and only under the Quorum key id and epoch and the network it
+was sealed for. The blob is not secret outside the enclave; a client pins it
+and checks that every App Proof names its digest. Anyone may run `Genesis`: a
+seed matters only once clients pin it.
+
+`/v1/info` and the release policy do not name these operations yet.
+
 ## Release policy
 
 A release policy names a release: its id, the network, the TVC

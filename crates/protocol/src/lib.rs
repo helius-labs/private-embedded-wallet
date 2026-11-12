@@ -9,6 +9,7 @@
 pub mod auth;
 pub mod constants;
 pub mod crypto;
+pub mod decryption_service;
 pub mod digest;
 pub mod encoding;
 pub mod error;

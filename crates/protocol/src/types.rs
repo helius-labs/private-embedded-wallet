@@ -34,8 +34,8 @@ impl Display for Network {
     }
 }
 
-/// What a request asks for, as advertised by `/v1/info`, granted by a
-/// descriptor, and named in the App Proof.
+/// What a request asks for, as named in the App Proof. `/v1/info` advertises and a
+/// descriptor grants the wallet operations; `Service*` are the decryption service's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum OperationKind {
@@ -44,6 +44,10 @@ pub enum OperationKind {
     Derive,
     TransactionKeys,
     Prove,
+    ServiceGenesis,
+    ServicePublicKeys,
+    ServiceDecrypt,
+    ServiceClaim,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
