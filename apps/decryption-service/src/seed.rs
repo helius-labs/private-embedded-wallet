@@ -6,7 +6,6 @@ use rand_core::{OsRng, RngCore as _, UnwrapErr};
 use spr_tvc_enclave::{Failure, Service};
 use zeroize::{Zeroize, Zeroizing};
 use zolana_tvc_protocol::decryption_service::MASTER_SEED_SIGNATURE_DOMAIN;
-use zolana_tvc_protocol::digest::sealed_seed_digest;
 
 use crate::keys::MASTER_SEED_LEN;
 
@@ -70,13 +69,19 @@ fn seal(
     .map_err(|_| Failure::Unavailable)
 }
 
-/// Draws a master seed and seals it. Returns the wire bytes and their digest.
-pub(crate) fn generate(service: &Service) -> Result<(Vec<u8>, [u8; 32]), Failure> {
+/// Draws a master seed.
+pub(crate) fn draw() -> Zeroizing<[u8; MASTER_SEED_LEN]> {
     let mut seed = Zeroizing::new([0; MASTER_SEED_LEN]);
     UnwrapErr(OsRng).fill_bytes(seed.as_mut_slice());
-    let bytes = seal(service, &seed, &service.quorum)?;
-    let digest = sealed_seed_digest(&bytes);
-    Ok((bytes, digest))
+    seed
+}
+
+/// Seals `seed` for the running release under its Quorum key.
+pub(crate) fn seal_here(
+    service: &Service,
+    seed: &[u8; MASTER_SEED_LEN],
+) -> Result<Vec<u8>, Failure> {
+    seal(service, seed, &service.quorum)
 }
 
 /// What anyone can build from the public Quorum key: a known seed, sealed.
@@ -85,11 +90,11 @@ pub(crate) fn forged(service: &Service, seed: [u8; MASTER_SEED_LEN]) -> Vec<u8> 
     seal(service, &seed, &P256Pair::generate().unwrap()).unwrap()
 }
 
-/// Opens a blob this release's Quorum key signed. Returns the seed and the blob's digest.
+/// Opens a blob this release's Quorum key signed.
 pub(crate) fn unseal(
     bytes: &[u8],
     service: &Service,
-) -> Result<(Zeroizing<[u8; MASTER_SEED_LEN]>, [u8; 32]), Failure> {
+) -> Result<Zeroizing<[u8; MASTER_SEED_LEN]>, Failure> {
     let info = &service.info;
     let quorum = &service.quorum;
     let sealed = SealedMasterSeed::try_from_slice(bytes).map_err(|_| Failure::Invalid)?;
@@ -110,5 +115,5 @@ pub(crate) fn unseal(
     {
         return Err(Failure::Invalid);
     }
-    Ok((Zeroizing::new(contents.seed), sealed_seed_digest(bytes)))
+    Ok(Zeroizing::new(contents.seed))
 }

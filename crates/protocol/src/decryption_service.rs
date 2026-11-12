@@ -13,6 +13,8 @@ pub const SERVICE_PROOF_TYPE: &str = "spr.tvc.decryption_service.v1";
 pub const SERVICE_REQUEST_DIGEST_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1";
 /// What the Quorum key signs, before the sealed master seed's ciphertext.
 pub const MASTER_SEED_SIGNATURE_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_SEED_V1";
+/// Names a backup holder set: its threshold, then its holders' keys in order.
+pub const BACKUP_SET_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_BACKUP_SET_V1";
 
 /// Label of the message that authorizes a `Decrypt`.
 pub const DECRYPT_LABEL: &str = "TSPP/decryption-service/decrypt/v1";
@@ -38,7 +40,7 @@ pub struct ServiceRequest {
     pub quorum_key_id: String,
     #[serde(with = "decimal_u64")]
     pub quorum_key_epoch: u64,
-    /// Absent on `Genesis`, required otherwise.
+    /// Absent on `Genesis` and `Restore`, required otherwise.
     #[serde(with = "hex")]
     pub sealed_master_seed: Option<Vec<u8>>,
     #[serde(with = "hex")]
@@ -60,6 +62,13 @@ pub enum ServiceOperation {
         signature: [u8; 64],
         items: Vec<DecryptItem>,
     },
+    /// Splits the master seed among the release's backup holders.
+    Backup,
+    /// Rebuilds the master seed from backup shares, each a QOS envelope to the Quorum key.
+    Restore {
+        #[serde(with = "hex")]
+        shares: Vec<Vec<u8>>,
+    },
 }
 
 impl ServiceOperation {
@@ -68,6 +77,8 @@ impl ServiceOperation {
             Self::Genesis => OperationKind::ServiceGenesis,
             Self::PublicKeys { .. } => OperationKind::ServicePublicKeys,
             Self::Decrypt { .. } => OperationKind::ServiceDecrypt,
+            Self::Backup => OperationKind::ServiceBackup,
+            Self::Restore { .. } => OperationKind::ServiceRestore,
         }
     }
 }
@@ -75,7 +86,8 @@ impl ServiceOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
 pub enum ServiceResult {
-    Genesis {
+    /// The answer to `Genesis` and `Restore`.
+    MasterSeed {
         #[serde(with = "hex")]
         sealed_master_seed: Vec<u8>,
     },
@@ -86,6 +98,49 @@ pub enum ServiceResult {
         nullifier_public_key: [u8; 32],
     },
     Decrypt(DecryptedOutputs),
+    Backup {
+        #[serde(with = "hex")]
+        set_id: [u8; 32],
+        threshold: u8,
+        shares: Vec<HolderShare>,
+    },
+}
+
+/// A [`BackupShare`] as JSON, in a QOS envelope to one holder's encryption key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HolderShare {
+    #[serde(with = "hex")]
+    pub holder_public_key: Vec<u8>,
+    #[serde(with = "hex")]
+    pub ciphertext: Vec<u8>,
+}
+
+/// One Shamir share of the master seed, and the set it belongs to.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[serde(deny_unknown_fields)]
+pub struct BackupShare {
+    pub version: u8,
+    #[serde(with = "hex")]
+    pub set_id: [u8; 32],
+    pub threshold: u8,
+    #[serde(with = "hex")]
+    pub share: Vec<u8>,
+}
+
+impl std::fmt::Debug for BackupShare {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BackupShare(..)")
+    }
+}
+
+/// `H(BACKUP_SET_DOMAIN, threshold || holder keys)`.
+pub fn backup_set_id(threshold: u8, holder_public_keys: &[Vec<u8>]) -> [u8; 32] {
+    let mut payload = vec![threshold];
+    for key in holder_public_keys {
+        payload.extend_from_slice(key);
+    }
+    domain_separated_hash(BACKUP_SET_DOMAIN, &payload)
 }
 
 /// One plaintext per item, in order, and the secret that spends them.

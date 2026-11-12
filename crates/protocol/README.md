@@ -187,15 +187,17 @@ timestamps, and no operation changes state. The answer is an
 `EncryptedResponse` whose App Proof has the type
 `spr.tvc.decryption_service.v1`, the request digest
 `H(SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
-`signature`, the operation as `Service` followed by its name below, and the
-digest of the sealed master seed under `ZOLANA_TVC_SEALED_SEED_DIGEST_V1`. A
-refused request gets the generic `InvalidRequest`.
+`signature`, the operation as `Service` followed by its name below, and, in
+`sealed_seed_digest`, the commitment of the master seed it used. A refused
+request gets the generic `InvalidRequest`.
 
-| Operation | Sealed master seed | Returns |
-| --- | --- | --- |
-| `Genesis` | forbidden | A fresh master seed, sealed to the Quorum key. |
-| `PublicKeys { address }` | required | The address's service viewing and nullifier public keys. |
-| `Decrypt { signer, signature, items }` | required | One plaintext per item, in order, and the nullifier secret. |
+| Operation | Sealed master seed | Pinned commitment | Returns |
+| --- | --- | --- | --- |
+| `Genesis` | forbidden | forbidden | `MasterSeed`: a fresh master seed, sealed. |
+| `Backup` | required | optional | `Backup`: the seed split among the release's backup holders. |
+| `Restore { shares }` | forbidden | required | `MasterSeed`: the seed rebuilt from backup shares, sealed. |
+| `PublicKeys { address }` | required | required | The address's service viewing and nullifier public keys. |
+| `Decrypt { signer, signature, items }` | required | required | One plaintext per item, in order, and the nullifier secret. |
 
 Service keys are HKDF-SHA256 over the master seed with an empty salt, one
 Expand per key: info `TSPP/decryption-service/view_key/x25519/v1 || address`
@@ -219,14 +221,30 @@ signer's service viewing public key, and answers every one: the pool cipher is
 unauthenticated, so the client adopts a plaintext only when its commitment
 equals the indexed one.
 
-The master seed is 32 random bytes that `Genesis` returns encrypted to the
-Quorum key, with the Quorum key's signature over
-`SPR_TVC_DECRYPTION_SERVICE_SEED_V1 || ciphertext`. Anyone can encrypt a seed
-of their own to the Quorum key, so the enclave opens only a blob that carries
-this signature, and only under the Quorum key id and epoch and the network it
-was sealed for. The blob is not secret outside the enclave; a client pins it
-and checks that every App Proof names its digest. Anyone may run `Genesis`: a
-seed matters only once clients pin it.
+The master seed is 32 random bytes, sealed: encrypted to the Quorum key, with
+the Quorum key's signature over `SPR_TVC_DECRYPTION_SERVICE_SEED_V1 ||
+ciphertext`. Anyone can encrypt a seed of their own to the Quorum key, so the
+enclave opens only a blob that carries this signature, and only under the
+Quorum key id and epoch and the network it was sealed for. The sealed seed is
+not secret outside the enclave; clients send it with each request.
+
+Its commitment, `HKDF-Expand(prk, "TSPP/decryption-service/commitment/v1", 32)`
+with the `prk` of the service keys, names it under any Quorum key. A release
+pins it with `--seed-commitment`, a QOS manifest argument the release policy
+covers, and then opens no other seed. A release without one serves only
+`Genesis` and `Backup`: it bootstraps the seed that later releases pin.
+
+`Backup` splits the seed with Shamir's scheme among the holders the release
+names with `--backup-holder` (uncompressed P-256 encryption keys, in order)
+and `--backup-threshold`. Each holder's share is a JCS `BackupShare` (`version`
+1, `set_id`, `threshold`, `share`) in a QOS envelope to that holder. `set_id`
+is `H(SPR_TVC_DECRYPTION_SERVICE_BACKUP_SET_V1, threshold || holder keys)`.
+Every `Backup` draws new shares, which do not combine with another run's.
+
+`Restore` takes at least `threshold` shares of one set, each re-encrypted by
+its holder to the running Quorum key, rebuilds the seed, and seals it only if
+its commitment is the pinned one. It does not read the release's own holder
+set, so shares of an earlier set restore under a new one.
 
 ## Release policy
 

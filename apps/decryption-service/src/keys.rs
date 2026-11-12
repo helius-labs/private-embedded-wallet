@@ -8,6 +8,7 @@ use zolana_tvc_protocol::decryption_service::{ADDRESS_LEN, NULLIFIER_SECRET_LEN}
 
 const VIEWING_KEY_LABEL: &[u8] = b"TSPP/decryption-service/view_key/x25519/v1";
 const NULLIFIER_KEY_LABEL: &[u8] = b"TSPP/decryption-service/nf_key/v1";
+const COMMITMENT_LABEL: &[u8] = b"TSPP/decryption-service/commitment/v1";
 
 pub(crate) const MASTER_SEED_LEN: usize = 32;
 
@@ -29,6 +30,15 @@ pub(crate) fn derive(seed: &[u8; MASTER_SEED_LEN], address: &[u8; ADDRESS_LEN]) 
         viewing: ViewingKey::from_bytes(&viewing),
         nullifier: NullifierKey::from_secret(*nullifier),
     }
+}
+
+/// A public name for the seed that survives sealing it under another key.
+pub(crate) fn commitment(seed: &[u8; MASTER_SEED_LEN]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    Hkdf::<Sha256>::new(None, seed)
+        .expand(COMMITMENT_LABEL, &mut out)
+        .expect("32 bytes of output");
+    out
 }
 
 #[cfg(test)]
@@ -63,6 +73,10 @@ mod tests {
                 "35236554a7963d61dcccaa23074d5f27e5e0e2295f055c54fcc8f66b767e4d",
                 "0cc1419c0a0cad87eae0f0708e01227c8ae90c43581c4965f40cab6157fcce8a",
             ]
+        );
+        assert_eq!(
+            hex::encode(commitment(&[0x5a; 32])),
+            "144c27271acce32db90afd371a1e15978970a0044d32e7a62adb21fb16fe7e80"
         );
     }
 }

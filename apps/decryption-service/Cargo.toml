@@ -13,6 +13,7 @@ borsh = { version = "=1.7.0", features = ["derive"] }
 clap = { version = "=4.5.53", features = ["derive"] }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
 hkdf = "=0.12.4"
+qos_crypto = { version = "=0.12.2", default-features = false }
 qos_p256 = { version = "=0.12.1", default-features = false }
 rand_core = { version = "=0.9.5", features = ["os_rng"] }
 sha2 = "=0.10.9"

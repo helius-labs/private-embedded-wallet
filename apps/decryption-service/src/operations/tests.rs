@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
 use ed25519_dalek::{Signer as _, SigningKey};
@@ -8,16 +10,18 @@ use spr_keypair::{NullifierKey, ViewingKey, X25519Pubkey};
 use spr_tvc_enclave::{testing, NETWORK};
 use tower::ServiceExt as _;
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::crypto::public_key_uncompressed;
-use zolana_tvc_protocol::decryption_service::decrypt_message;
-use zolana_tvc_protocol::digest::sealed_seed_digest;
+use zolana_tvc_protocol::crypto::{
+    public_key_uncompressed, qos_decrypt, qos_encrypt, QosP256Public,
+};
+use zolana_tvc_protocol::decryption_service::{decrypt_message, HolderShare};
 use zolana_tvc_protocol::encoding::{jcs_serialize, parse_strict_json};
 use zolana_tvc_protocol::types::{
     DecryptItem, DecryptLabel, EncryptedRequest, Network, ServiceInfo, WalletGrant,
 };
 
 use super::*;
-use crate::{router, APP};
+use crate::custody::Custody;
+use crate::{router, State, APP};
 
 const RESPONSE_SECRET: [u8; 32] = [0x42; 32];
 
@@ -28,26 +32,57 @@ fn other(network: Network) -> Network {
     }
 }
 
-fn service_on(network: Network, quorum_seed: u8) -> Service {
+fn holder_secret(index: u8) -> [u8; 32] {
+    [0x61 + index; 32]
+}
+
+fn holder_key(index: u8) -> Vec<u8> {
+    let secret = p256::SecretKey::from_slice(&holder_secret(index)).unwrap();
+    public_key_uncompressed(&secret.public_key()).to_vec()
+}
+
+/// Custody with holders `0..holders` and `threshold`, serving the seed `pinned`.
+fn custody(pinned: Option<[u8; 32]>, holders: u8, threshold: u8) -> Custody {
+    Custody {
+        seed_commitment: pinned,
+        backup_holders: (0..holders).map(holder_key).collect(),
+        backup_threshold: Some(threshold),
+    }
+}
+
+fn state_on(network: Network, quorum_seed: u8, custody: Custody) -> State {
     let quorum = P256Pair::from_master_seed(&Zeroizing::new([quorum_seed; 32])).unwrap();
     let ephemeral = P256Pair::generate().unwrap();
     let mut info =
         testing::release().service_info(&APP, [0x22; 32], [0x33; 32], &quorum, &ephemeral);
     info.network = network;
-    Service::new(info, ephemeral, quorum)
+    State {
+        service: Service::new(info, ephemeral, quorum),
+        custody: Arc::new(custody),
+    }
 }
 
-fn service() -> Service {
-    service_on(NETWORK, 1)
+/// A release that pins no seed, with a 2-of-3 backup.
+fn bootstrap() -> State {
+    state_on(NETWORK, 1, custody(None, 3, 2))
+}
+
+/// A release serving a seed its bootstrap release drew, and that seed sealed.
+fn seeded() -> (State, Vec<u8>) {
+    let (sealed, commitment) = genesis(&bootstrap());
+    (
+        state_on(NETWORK, 1, custody(Some(commitment), 3, 2)),
+        sealed,
+    )
 }
 
 fn request(
-    service: &Service,
+    state: &State,
     sealed_master_seed: Option<Vec<u8>>,
     operation: ServiceOperation,
 ) -> ServiceRequest {
     let response_secret = p256::SecretKey::from_slice(&RESPONSE_SECRET).unwrap();
-    let info = &service.info;
+    let info = &state.service.info;
     ServiceRequest {
         version: API_VERSION,
         request_id: [0x77; 32],
@@ -62,13 +97,14 @@ fn request(
     }
 }
 
-fn envelope(service: &Service, request: &ServiceRequest) -> EncryptedRequest {
-    testing::encrypt_request(&service.info, &jcs_serialize(request).unwrap(), None)
+fn envelope(state: &State, request: &ServiceRequest) -> EncryptedRequest {
+    testing::encrypt_request(&state.service.info, &jcs_serialize(request).unwrap(), None)
 }
 
-/// Opens an answer as a client does. Returns the result and the sealed-seed digest the proof names.
-fn open(service: &Service, request: &ServiceRequest, response: &str) -> (ServiceResult, [u8; 32]) {
-    let (payload, plaintext) = testing::open_response(&service.info, response, &RESPONSE_SECRET);
+/// Opens an answer as a client does. Returns the result and the seed commitment the proof names.
+fn open(state: &State, request: &ServiceRequest, response: &str) -> (ServiceResult, [u8; 32]) {
+    let (payload, plaintext) =
+        testing::open_response(&state.service.info, response, &RESPONSE_SECRET);
     assert_eq!(payload.r#type, SERVICE_PROOF_TYPE);
     assert_eq!(payload.request_id, request.request_id);
     assert_eq!(
@@ -82,31 +118,36 @@ fn open(service: &Service, request: &ServiceRequest, response: &str) -> (Service
     )
 }
 
-fn call(service: &Service, request: &ServiceRequest) -> Result<ServiceResult, Failure> {
-    let body = jcs_serialize(&envelope(service, request)).unwrap();
-    let response = execute(service, body.as_bytes())?;
-    let (result, digest) = open(service, request, &response);
-    if let Some(sealed) = &request.sealed_master_seed {
-        assert_eq!(digest, sealed_seed_digest(sealed));
+fn call(state: &State, request: &ServiceRequest) -> Result<ServiceResult, Failure> {
+    let body = jcs_serialize(&envelope(state, request)).unwrap();
+    let response = execute(state, body.as_bytes())?;
+    let (result, commitment) = open(state, request, &response);
+    if let Some(pinned) = state.custody.seed_commitment {
+        assert_eq!(commitment, pinned);
     }
     Ok(result)
 }
 
-fn refused(service: &Service, request: &ServiceRequest) {
-    assert_eq!(call(service, request).unwrap_err(), Failure::Invalid);
+fn refused(state: &State, request: &ServiceRequest) {
+    assert_eq!(call(state, request).unwrap_err(), Failure::Invalid);
 }
 
-fn genesis(service: &Service) -> Vec<u8> {
-    let request = request(service, None, ServiceOperation::Genesis);
-    let ServiceResult::Genesis { sealed_master_seed } = call(service, &request).unwrap() else {
-        panic!("expected a Genesis result");
+/// A seed `state` drew, sealed, and its commitment.
+fn genesis(state: &State) -> (Vec<u8>, [u8; 32]) {
+    let request = request(state, None, ServiceOperation::Genesis);
+    let body = jcs_serialize(&envelope(state, &request)).unwrap();
+    let response = execute(state, body.as_bytes()).unwrap();
+    let (ServiceResult::MasterSeed { sealed_master_seed }, commitment) =
+        open(state, &request, &response)
+    else {
+        panic!("expected a MasterSeed result");
     };
-    sealed_master_seed
+    (sealed_master_seed, commitment)
 }
 
-fn public_keys(service: &Service, seed: &[u8], owner: &SigningKey) -> ServiceRequest {
+fn public_keys(state: &State, seed: &[u8], owner: &SigningKey) -> ServiceRequest {
     request(
-        service,
+        state,
         Some(seed.to_vec()),
         ServiceOperation::PublicKeys {
             address: base58(owner),
@@ -118,12 +159,12 @@ fn base58(owner: &SigningKey) -> String {
     Pubkey::new_from_array(owner.verifying_key().to_bytes()).to_string()
 }
 
-/// The service viewing and nullifier public keys of `owner`.
-fn service_keys(service: &Service, seed: &[u8], owner: &SigningKey) -> ([u8; 33], [u8; 32]) {
+/// The state viewing and nullifier public keys of `owner`.
+fn service_keys(state: &State, seed: &[u8], owner: &SigningKey) -> ([u8; 33], [u8; 32]) {
     let ServiceResult::PublicKeys {
         viewing_public_key,
         nullifier_public_key,
-    } = call(service, &public_keys(service, seed, owner)).unwrap()
+    } = call(state, &public_keys(state, seed, owner)).unwrap()
     else {
         panic!("expected a PublicKeys result");
     };
@@ -132,14 +173,14 @@ fn service_keys(service: &Service, seed: &[u8], owner: &SigningKey) -> ([u8; 33]
 
 /// A `Decrypt` request for `items` that `owner` signed for `network`.
 fn decrypt(
-    service: &Service,
+    state: &State,
     seed: &[u8],
     owner: &SigningKey,
     network: Network,
     items: Vec<DecryptItem>,
 ) -> ServiceRequest {
     let mut request = request(
-        service,
+        state,
         Some(seed.to_vec()),
         ServiceOperation::Decrypt {
             signer: base58(owner),
@@ -182,11 +223,10 @@ fn sent(viewing_public_key: [u8; 33], named: [u8; 33], plaintext: &[u8], slot: u
 
 #[test]
 fn the_owner_decrypts_what_a_sender_encrypted_to_the_service_keys() {
-    let service = service();
-    let seed = genesis(&service);
+    let (state, seed) = seeded();
     let owner = SigningKey::from_bytes(&[5; 32]);
-    let (viewing, nullifier) = service_keys(&service, &seed, &owner);
-    let (stranger, _) = service_keys(&service, &seed, &SigningKey::from_bytes(&[9; 32]));
+    let (viewing, nullifier) = service_keys(&state, &seed, &owner);
+    let (stranger, _) = service_keys(&state, &seed, &SigningKey::from_bytes(&[9; 32]));
     assert_ne!(viewing, stranger);
 
     // The second output is for another key, as a dummy under the owner's tag is.
@@ -194,8 +234,8 @@ fn the_owner_decrypts_what_a_sender_encrypted_to_the_service_keys() {
         sent(viewing, viewing, b"ten usdc", 3),
         sent(stranger, viewing, b"not ours", 4),
     ];
-    let request = decrypt(&service, &seed, &owner, NETWORK, items);
-    let ServiceResult::Decrypt(outputs) = call(&service, &request).unwrap() else {
+    let request = decrypt(&state, &seed, &owner, NETWORK, items);
+    let ServiceResult::Decrypt(outputs) = call(&state, &request).unwrap() else {
         panic!("expected a Decrypt result");
     };
 
@@ -212,17 +252,16 @@ fn the_owner_decrypts_what_a_sender_encrypted_to_the_service_keys() {
 
 #[test]
 fn a_decrypt_needs_the_owner_signature_over_this_request_and_network() {
-    let service = service();
-    let seed = genesis(&service);
+    let (state, seed) = seeded();
     let owner = SigningKey::from_bytes(&[5; 32]);
-    let (viewing, _) = service_keys(&service, &seed, &owner);
+    let (viewing, _) = service_keys(&state, &seed, &owner);
     let items = vec![sent(viewing, viewing, b"ten usdc", 0)];
-    let valid = decrypt(&service, &seed, &owner, NETWORK, items.clone());
-    assert!(call(&service, &valid).is_ok());
+    let valid = decrypt(&state, &seed, &owner, NETWORK, items.clone());
+    assert!(call(&state, &valid).is_ok());
 
     refused(
-        &service,
-        &decrypt(&service, &seed, &owner, other(NETWORK), items),
+        &state,
+        &decrypt(&state, &seed, &owner, other(NETWORK), items),
     );
 
     // The signature is for one request: its signer, items, response key and id.
@@ -254,9 +293,9 @@ fn a_decrypt_needs_the_owner_signature_over_this_request_and_network() {
     for edit in edits {
         let mut request = valid.clone();
         edit(&mut request);
-        let body = jcs_serialize(&envelope(&service, &request)).unwrap();
+        let body = jcs_serialize(&envelope(&state, &request)).unwrap();
         assert_eq!(
-            execute(&service, body.as_bytes()).unwrap_err(),
+            execute(&state, body.as_bytes()).unwrap_err(),
             Failure::Invalid
         );
     }
@@ -264,20 +303,18 @@ fn a_decrypt_needs_the_owner_signature_over_this_request_and_network() {
 
 #[test]
 fn a_batch_holds_items_under_the_signers_service_viewing_key() {
-    let service = service();
-    let seed = genesis(&service);
+    let (state, seed) = seeded();
     let owner = SigningKey::from_bytes(&[5; 32]);
-    let (viewing, _) = service_keys(&service, &seed, &owner);
-    let (stranger, _) = service_keys(&service, &seed, &SigningKey::from_bytes(&[9; 32]));
+    let (viewing, _) = service_keys(&state, &seed, &owner);
+    let (stranger, _) = service_keys(&state, &seed, &SigningKey::from_bytes(&[9; 32]));
     for items in [Vec::new(), vec![sent(viewing, stranger, b"ten usdc", 0)]] {
-        refused(&service, &decrypt(&service, &seed, &owner, NETWORK, items));
+        refused(&state, &decrypt(&state, &seed, &owner, NETWORK, items));
     }
 }
 
 #[test]
 fn only_an_address_a_key_can_sign_for_has_service_keys() {
-    let service = service();
-    let seed = genesis(&service);
+    let (state, seed) = seeded();
     let off_curve = (0u8..=255)
         .map(|byte| [byte; 32])
         .find(|bytes| ed25519_dalek::VerifyingKey::from_bytes(bytes).is_err())
@@ -291,9 +328,9 @@ fn only_an_address_a_key_can_sign_for_has_service_keys() {
         "not base58!".to_owned(),
     ] {
         refused(
-            &service,
+            &state,
             &request(
-                &service,
+                &state,
                 Some(seed.clone()),
                 ServiceOperation::PublicKeys { address },
             ),
@@ -302,41 +339,161 @@ fn only_an_address_a_key_can_sign_for_has_service_keys() {
 }
 
 #[test]
-fn a_sealed_seed_is_one_this_enclave_drew_for_its_quorum_key_and_network() {
-    let service = service();
-    let seed = genesis(&service);
-    assert_ne!(seed, genesis(&service), "every Genesis draws another seed");
+fn a_release_serves_only_its_pinned_seed() {
+    let (state, seed) = seeded();
     let owner = SigningKey::from_bytes(&[5; 32]);
-    let with = |service: &Service, sealed: Option<Vec<u8>>| {
-        let mut request = public_keys(service, &seed, &owner);
+    let with = |state: &State, sealed: Option<Vec<u8>>| {
+        let mut request = public_keys(state, &seed, &owner);
         request.sealed_master_seed = sealed;
         request
     };
+    assert!(call(&state, &with(&state, Some(seed.clone()))).is_ok());
 
+    let (another, _) = genesis(&bootstrap());
     let mut tampered = seed.clone();
     *tampered.last_mut().unwrap() ^= 1;
-    refused(&service, &with(&service, None));
-    refused(&service, &with(&service, Some(tampered)));
+    refused(&state, &with(&state, None));
+    refused(&state, &with(&state, Some(another)));
+    refused(&state, &with(&state, Some(tampered)));
     // Anyone can encrypt a seed they know to the Quorum key; only the enclave signs one.
     refused(
-        &service,
-        &with(&service, Some(seed::forged(&service, [9; 32]))),
+        &state,
+        &with(&state, Some(seed::forged(&state.service, [9; 32]))),
     );
-    refused(
-        &service,
-        &request(&service, Some(seed.clone()), ServiceOperation::Genesis),
-    );
-    for elsewhere in [service_on(NETWORK, 2), service_on(other(NETWORK), 1)] {
+    refused(&state, &request(&state, None, ServiceOperation::Genesis));
+    let pinned = state.custody.seed_commitment;
+    for elsewhere in [
+        state_on(NETWORK, 2, custody(pinned, 3, 2)),
+        state_on(other(NETWORK), 1, custody(pinned, 3, 2)),
+    ] {
         refused(&elsewhere, &with(&elsewhere, Some(seed.clone())));
     }
 }
 
 #[test]
+fn a_release_without_a_pinned_seed_only_draws_and_backs_up() {
+    let state = bootstrap();
+    let (seed, _) = genesis(&state);
+    let (another, _) = genesis(&state);
+    assert_ne!(seed, another, "every Genesis draws another seed");
+    let owner = SigningKey::from_bytes(&[5; 32]);
+    refused(&state, &public_keys(&state, &seed, &owner));
+    refused(&state, &decrypt(&state, &seed, &owner, NETWORK, Vec::new()));
+    assert_eq!(backup(&state, &seed).len(), 3);
+}
+
+/// What `state` gives each holder for `seed`.
+fn backup(state: &State, seed: &[u8]) -> Vec<HolderShare> {
+    let request = request(state, Some(seed.to_vec()), ServiceOperation::Backup);
+    let ServiceResult::Backup { shares, .. } = call(state, &request).unwrap() else {
+        panic!("expected a Backup result");
+    };
+    shares
+}
+
+/// Holder `index` opens its share and encrypts it to `state`'s Quorum key.
+fn hand_over(share: &HolderShare, index: u8, state: &State) -> Vec<u8> {
+    assert_eq!(share.holder_public_key, holder_key(index));
+    let plaintext = qos_decrypt(&holder_secret(index), &share.ciphertext).unwrap();
+    let quorum = QosP256Public::from_bytes(&state.service.info.quorum_public_key).unwrap();
+    qos_encrypt(&quorum.encryption, &plaintext).unwrap()
+}
+
+fn restore(state: &State, shares: Vec<Vec<u8>>) -> Result<Vec<u8>, Failure> {
+    let request = request(state, None, ServiceOperation::Restore { shares });
+    let ServiceResult::MasterSeed { sealed_master_seed } = call(state, &request)? else {
+        panic!("expected a MasterSeed result");
+    };
+    Ok(sealed_master_seed)
+}
+
+#[test]
+fn the_seed_survives_a_new_quorum_key_through_its_backup() {
+    let (state, seed) = seeded();
+    let owner = SigningKey::from_bytes(&[5; 32]);
+    let keys = service_keys(&state, &seed, &owner);
+    let shares = backup(&state, &seed);
+
+    // Another Quorum key, as after a rotation or in another account.
+    let moved = state_on(NETWORK, 2, custody(state.custody.seed_commitment, 3, 2));
+    refused(&moved, &public_keys(&moved, &seed, &owner));
+    let two = |a: u8, b: u8, set: &[HolderShare], to: &State| {
+        vec![
+            hand_over(&set[usize::from(a)], a, to),
+            hand_over(&set[usize::from(b)], b, to),
+        ]
+    };
+    let resealed = restore(&moved, two(0, 2, &shares, &moved)).unwrap();
+    assert_eq!(service_keys(&moved, &resealed, &owner), keys);
+
+    // One share is below the threshold.
+    let one = vec![hand_over(&shares[1], 1, &moved)];
+    assert_eq!(restore(&moved, one).unwrap_err(), Failure::Invalid);
+    // Shares of two backups do not combine into the pinned seed.
+    let second = backup(&state, &seed);
+    let mixed = vec![
+        hand_over(&shares[0], 0, &moved),
+        hand_over(&second[1], 1, &moved),
+    ];
+    assert_eq!(restore(&moved, mixed).unwrap_err(), Failure::Invalid);
+    // A release pinned to another seed refuses this one.
+    let (_, other_commitment) = genesis(&bootstrap());
+    let elsewhere = state_on(NETWORK, 2, custody(Some(other_commitment), 3, 2));
+    let shares_there = two(0, 1, &shares, &elsewhere);
+    assert_eq!(
+        restore(&elsewhere, shares_there).unwrap_err(),
+        Failure::Invalid
+    );
+}
+
+#[test]
+fn old_shares_restore_under_a_larger_holder_set() {
+    let (state, seed) = seeded();
+    let shares = backup(&state, &seed);
+    let larger = state_on(NETWORK, 2, custody(state.custody.seed_commitment, 5, 3));
+    let old = vec![
+        hand_over(&shares[1], 1, &larger),
+        hand_over(&shares[2], 2, &larger),
+    ];
+    let resealed = restore(&larger, old).unwrap();
+    assert_eq!(backup(&larger, &resealed).len(), 5);
+}
+
+#[test]
+fn a_backup_needs_holders() {
+    let (state, seed) = seeded();
+    let without = state_on(
+        NETWORK,
+        1,
+        Custody {
+            seed_commitment: state.custody.seed_commitment,
+            ..Custody::default()
+        },
+    );
+    refused(
+        &without,
+        &request(&without, Some(seed), ServiceOperation::Backup),
+    );
+}
+
+#[test]
+fn custody_needs_a_threshold_from_two_to_the_holder_count() {
+    assert!(Custody::default().check().is_ok());
+    assert!(custody(None, 3, 2).check().is_ok());
+    assert!(custody(None, 3, 3).check().is_ok());
+    for (holders, threshold) in [(3, 1), (3, 4), (0, 2)] {
+        assert!(custody(None, holders, threshold).check().is_err());
+    }
+    let mut no_threshold = custody(None, 3, 2);
+    no_threshold.backup_threshold = None;
+    assert!(no_threshold.check().is_err());
+}
+
+#[test]
 fn a_request_is_bound_to_the_running_release() {
-    let service = service();
-    let seed = genesis(&service);
-    let base = public_keys(&service, &seed, &SigningKey::from_bytes(&[5; 32]));
-    assert!(call(&service, &base).is_ok());
+    let (state, seed) = seeded();
+    let base = public_keys(&state, &seed, &SigningKey::from_bytes(&[5; 32]));
+    assert!(call(&state, &base).is_ok());
 
     let edits: [fn(&mut ServiceRequest); 7] = [
         |r| r.version = 2,
@@ -350,10 +507,10 @@ fn a_request_is_bound_to_the_running_release() {
     for edit in edits {
         let mut request = base.clone();
         edit(&mut request);
-        refused(&service, &request);
+        refused(&state, &request);
     }
 
-    let mut with_grant = envelope(&service, &base);
+    let mut with_grant = envelope(&state, &base);
     with_grant.wallet_grant = Some(WalletGrant {
         version: API_VERSION,
         descriptor_digest: [0; 32],
@@ -365,7 +522,7 @@ fn a_request_is_bound_to_the_running_release() {
     });
     for body in [jcs_serialize(&with_grant).unwrap(), "{}".to_owned()] {
         assert_eq!(
-            execute(&service, body.as_bytes()).unwrap_err(),
+            execute(&state, body.as_bytes()).unwrap_err(),
             Failure::Invalid
         );
     }
@@ -373,8 +530,8 @@ fn a_request_is_bound_to_the_running_release() {
 
 #[tokio::test]
 async fn the_router_advertises_the_operations_and_serves_them() {
-    let service = service();
-    let response = router(service.clone())
+    let state = bootstrap();
+    let response = router(state.clone())
         .oneshot(Request::get("/v1/info").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -382,9 +539,9 @@ async fn the_router_advertises_the_operations_and_serves_them() {
     assert_eq!(info.supported_operations, OPERATIONS);
     assert_eq!(info.proof_type, SERVICE_PROOF_TYPE);
 
-    let request = request(&service, None, ServiceOperation::Genesis);
-    let body = jcs_serialize(&envelope(&service, &request)).unwrap();
-    let response = router(service.clone())
+    let request = request(&state, None, ServiceOperation::Genesis);
+    let body = jcs_serialize(&envelope(&state, &request)).unwrap();
+    let response = router(state.clone())
         .oneshot(
             Request::post("/v1/operations")
                 .header(CONTENT_TYPE, "application/json")
@@ -394,6 +551,6 @@ async fn the_router_advertises_the_operations_and_serves_them() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let (result, _) = open(&service, &request, &testing::body(response).await);
-    assert!(matches!(result, ServiceResult::Genesis { .. }));
+    let (result, _) = open(&state, &request, &testing::body(response).await);
+    assert!(matches!(result, ServiceResult::MasterSeed { .. }));
 }

@@ -3997,6 +3997,7 @@ dependencies = [
  "hex",
  "hkdf",
  "p256 0.13.2",
+ "qos_crypto",
  "qos_p256",
  "rand_core 0.9.5",
  "sha2 0.10.9",
