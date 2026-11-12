@@ -3996,7 +3996,6 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "hkdf",
- "hpke",
  "http-body-util",
  "p256 0.13.2",
  "qos_p256",

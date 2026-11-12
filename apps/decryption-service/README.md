@@ -11,12 +11,10 @@ message are specified in
    later request presents it.
 2. A sender calls `PublicKeys` for an address and encrypts a transfer to the
    keys it returns.
-3. The owner signs, with the address, a message that names the batch of
-   outputs and a viewing key of the owner's own wallet, and calls `Decrypt`.
-   The enclave opens every output with the service viewing key and returns
-   the plaintexts and the service nullifier secret, encrypted to the named
-   key. The client keeps a plaintext only when its commitment equals the
-   indexed one.
+3. The owner signs a `Decrypt` request with the address. The enclave opens
+   every output in it with the service viewing key and returns the plaintexts
+   and the service nullifier secret. The client keeps a plaintext only when
+   its commitment equals the indexed one.
 
 It is its own application, apart from the privacy wallet: its own Quorum key,
 release and `/v1/info`. The two share
@@ -25,8 +23,8 @@ the proof-carrying response and the pool cipher.
 
 Module map: `operations.rs` (the three operations), `keys.rs` (the
 derivation), `seed.rs` (the master seed, encrypted to the Quorum key and
-signed by it), `owner.rs` (which addresses have keys, the owner's signature,
-sealing an answer). It reaches no service.
+signed by it), `owner.rs` (which addresses have keys, the owner's signature).
+It reaches no service.
 
 ```sh
 cargo test -p spr-tvc-decryption-service
@@ -40,5 +38,3 @@ Not there yet:
 - A local testkit binary, a gateway route and a client.
 - A copy of the master seed outside the Quorum key, and a release step that
   pins the result of `Genesis`.
-- A wallet operation that opens a sealed answer for a wallet whose viewing
-  key lives in the wallet enclave.

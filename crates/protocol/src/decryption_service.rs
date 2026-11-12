@@ -5,22 +5,18 @@ use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::digest::domain_separated_hash;
-use crate::encoding::{self, decimal_u64, encode_lower_hex, hex};
-use crate::error::TvcError;
+use crate::encoding::{self, canonicalize_json_value, decimal_u64, encode_lower_hex, hex};
+use crate::error::{ErrorCode, TvcError};
 use crate::types::{DecryptItem, Network, OperationKind};
 
 pub const SERVICE_PROOF_TYPE: &str = "spr.tvc.decryption_service.v1";
 pub const SERVICE_REQUEST_DIGEST_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1";
-pub const DECRYPT_ITEMS_DIGEST_DOMAIN: &[u8] = b"SPR_TVC_DECRYPTION_SERVICE_ITEMS_V1";
 
 /// Label of the message that authorizes a `Decrypt`.
 pub const DECRYPT_LABEL: &str = "TSPP/decryption-service/decrypt/v1";
-/// HPKE info of a `Decrypt` answer.
-pub const SEALED_OUTPUTS_INFO: &[u8] = b"TSPP/decryption-service/sealed_outputs/v1";
 
 pub const ADDRESS_LEN: usize = 32;
 pub const X25519_PUBLIC_KEY_LEN: usize = 33;
-pub const VIEWING_SECRET_LEN: usize = 32;
 pub const NULLIFIER_SECRET_LEN: usize = 31;
 
 const OFFCHAIN_MESSAGE_MAGIC: &[u8; 16] = b"\xffsolana offchain";
@@ -48,17 +44,6 @@ pub struct ServiceRequest {
     pub operation: ServiceOperation,
 }
 
-/// The owner of the base58 `signer` lets `wallet_viewing_public_key` read one batch.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OwnerAuthorization {
-    pub signer: String,
-    #[serde(with = "hex")]
-    pub wallet_viewing_public_key: [u8; X25519_PUBLIC_KEY_LEN],
-    #[serde(with = "hex")]
-    pub signature: [u8; 64],
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
 pub enum ServiceOperation {
@@ -66,9 +51,12 @@ pub enum ServiceOperation {
     Genesis,
     /// The service public keys of a base58 address.
     PublicKeys { address: String },
-    /// Opens `items` with the signer's service viewing key.
+    /// Opens `items` with the service viewing key of the base58 `signer`, whose
+    /// Ed25519 `signature` is over [`decrypt_message`] for this request.
     Decrypt {
-        authorization: OwnerAuthorization,
+        signer: String,
+        #[serde(with = "hex")]
+        signature: [u8; 64],
         items: Vec<DecryptItem>,
     },
 }
@@ -96,13 +84,7 @@ pub enum ServiceResult {
         #[serde(with = "hex")]
         nullifier_public_key: [u8; 32],
     },
-    /// The answer to a `Decrypt`: a `DecryptedOutputs`, HPKE to the authorized viewing key.
-    Sealed {
-        #[serde(with = "hex")]
-        enc: [u8; 32],
-        #[serde(with = "hex")]
-        ciphertext: Vec<u8>,
-    },
+    Decrypt(DecryptedOutputs),
 }
 
 /// One plaintext per item, in order, and the secret that spends them.
@@ -115,40 +97,41 @@ pub struct DecryptedOutputs {
     pub plaintexts: Vec<Vec<u8>>,
 }
 
+impl std::fmt::Debug for DecryptedOutputs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DecryptedOutputs(..)")
+    }
+}
+
 pub fn parse_service_request(json: &str) -> Result<ServiceRequest, TvcError> {
     encoding::parse_strict_json(json)
 }
 
-/// `H(SERVICE_REQUEST_DIGEST_DOMAIN, JCS(request))`.
+/// `H(SERVICE_REQUEST_DIGEST_DOMAIN, JCS(request))`, without a `Decrypt`'s signature.
 pub fn service_request_digest(request: &ServiceRequest) -> Result<[u8; 32], TvcError> {
-    let canonical = encoding::jcs_serialize(request)?;
+    let mut value = encoding::to_canonical_value(request)?;
+    value
+        .get_mut("operation")
+        .and_then(|operation| operation.as_object_mut())
+        .ok_or_else(|| TvcError::new(ErrorCode::InvalidCanonicalJson))?
+        .remove("signature");
+    let canonical = canonicalize_json_value(&value)?;
     Ok(domain_separated_hash(
         SERVICE_REQUEST_DIGEST_DOMAIN,
         canonical.as_bytes(),
     ))
 }
 
-/// `H(DECRYPT_ITEMS_DIGEST_DOMAIN, JCS(items))`.
-pub fn decrypt_items_digest(items: &[DecryptItem]) -> Result<[u8; 32], TvcError> {
-    let canonical = encoding::jcs_serialize(&items)?;
-    Ok(domain_separated_hash(
-        DECRYPT_ITEMS_DIGEST_DOMAIN,
-        canonical.as_bytes(),
-    ))
-}
-
-/// What an owner signs to have one batch opened for a wallet viewing key: a
-/// Solana off-chain message v0, format 0, one signer, domain `SHA-256(DECRYPT_LABEL)`.
+/// What an owner signs to authorize one `Decrypt` request: a Solana off-chain
+/// message v0, format 0, one signer, domain `SHA-256(DECRYPT_LABEL)`.
 pub fn decrypt_message(
     signer: &[u8; ADDRESS_LEN],
     network: Network,
-    wallet_viewing_public_key: &[u8; X25519_PUBLIC_KEY_LEN],
-    items_digest: &[u8; 32],
+    request_digest: &[u8; 32],
 ) -> Vec<u8> {
     let payload = format!(
-        "{DECRYPT_LABEL}/{network}/{}/{}",
-        encode_lower_hex(wallet_viewing_public_key),
-        encode_lower_hex(items_digest)
+        "{DECRYPT_LABEL}/{network}/{}",
+        encode_lower_hex(request_digest)
     );
     let length = u16::try_from(payload.len()).expect("the payload is short");
     let mut message = Vec::with_capacity(85 + payload.len());
@@ -168,51 +151,8 @@ mod tests {
     use super::*;
     use crate::types::DecryptLabel;
 
-    fn item(slot_index: u64) -> DecryptItem {
-        DecryptItem {
-            ciphertext: vec![1, 2, 3],
-            viewing_public_key: vec![4; 33],
-            transaction_viewing_public_key: vec![4; 33],
-            salt: vec![0; 16],
-            slot_index,
-            label: DecryptLabel::Transfer,
-        }
-    }
-
-    #[test]
-    fn the_decrypt_message_is_a_solana_offchain_message() {
-        let digest = decrypt_items_digest(&[item(0)]).unwrap();
-        let message = decrypt_message(&[7; 32], Network::Mainnet, &[4; 33], &digest);
-        let payload = format!(
-            "TSPP/decryption-service/decrypt/v1/mainnet/{}/{}",
-            "04".repeat(33),
-            encode_lower_hex(&digest)
-        );
-        let mut expected = b"\xffsolana offchain\0".to_vec();
-        expected.extend_from_slice(&Sha256::digest(b"TSPP/decryption-service/decrypt/v1"));
-        expected.extend_from_slice(&[0, 1]);
-        expected.extend_from_slice(&[7; 32]);
-        expected.extend_from_slice(&(payload.len() as u16).to_le_bytes());
-        expected.extend_from_slice(payload.as_bytes());
-        assert_eq!(message, expected);
-
-        assert_ne!(
-            message,
-            decrypt_message(&[7; 32], Network::Devnet, &[4; 33], &digest),
-            "a message names its network"
-        );
-    }
-
-    #[test]
-    fn the_items_digest_covers_content_and_order() {
-        let digest = decrypt_items_digest(&[item(0), item(1)]).unwrap();
-        assert_ne!(digest, decrypt_items_digest(&[item(1), item(0)]).unwrap());
-        assert_ne!(digest, decrypt_items_digest(&[item(0)]).unwrap());
-    }
-
-    #[test]
-    fn a_request_parses_strictly_and_digests_canonically() {
-        let request = ServiceRequest {
+    fn request(operation: ServiceOperation) -> ServiceRequest {
+        ServiceRequest {
             version: 1,
             request_id: [1; 32],
             target_release_id: "release".to_owned(),
@@ -222,19 +162,69 @@ mod tests {
             quorum_key_epoch: 1,
             sealed_master_seed: None,
             client_response_public_key: vec![4; 65],
-            operation: ServiceOperation::PublicKeys {
-                address: "11111111111111111111111111111111".to_owned(),
-            },
-        };
+            operation,
+        }
+    }
+
+    fn decrypt(signature: [u8; 64], slot_index: u64) -> ServiceOperation {
+        ServiceOperation::Decrypt {
+            signer: "11111111111111111111111111111111".to_owned(),
+            signature,
+            items: vec![DecryptItem {
+                ciphertext: vec![1, 2, 3],
+                viewing_public_key: vec![4; 33],
+                transaction_viewing_public_key: vec![4; 33],
+                salt: vec![0; 16],
+                slot_index,
+                label: DecryptLabel::Transfer,
+            }],
+        }
+    }
+
+    #[test]
+    fn the_decrypt_message_is_a_solana_offchain_message() {
+        let message = decrypt_message(&[7; 32], Network::Mainnet, &[9; 32]);
+        let payload = format!(
+            "TSPP/decryption-service/decrypt/v1/mainnet/{}",
+            "09".repeat(32)
+        );
+        let mut expected = b"\xffsolana offchain\0".to_vec();
+        expected.extend_from_slice(&Sha256::digest(b"TSPP/decryption-service/decrypt/v1"));
+        expected.extend_from_slice(&[0, 1]);
+        expected.extend_from_slice(&[7; 32]);
+        expected.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        expected.extend_from_slice(payload.as_bytes());
+        assert_eq!(message, expected);
+        assert_ne!(
+            message,
+            decrypt_message(&[7; 32], Network::Devnet, &[9; 32]),
+            "a message names its network"
+        );
+    }
+
+    #[test]
+    fn the_request_digest_covers_everything_but_the_signature() {
+        let digest = service_request_digest(&request(decrypt([0; 64], 0))).unwrap();
+        assert_eq!(
+            digest,
+            service_request_digest(&request(decrypt([1; 64], 0))).unwrap()
+        );
+        assert_ne!(
+            digest,
+            service_request_digest(&request(decrypt([0; 64], 1))).unwrap()
+        );
+        let mut other_key = request(decrypt([0; 64], 0));
+        other_key.client_response_public_key = vec![5; 65];
+        assert_ne!(digest, service_request_digest(&other_key).unwrap());
+    }
+
+    #[test]
+    fn a_request_parses_strictly() {
+        let request = request(ServiceOperation::PublicKeys {
+            address: "11111111111111111111111111111111".to_owned(),
+        });
         let json = encoding::jcs_serialize(&request).unwrap();
         assert_eq!(parse_service_request(&json).unwrap(), request);
         assert!(parse_service_request(&json.replacen('{', r#"{"extra":1,"#, 1)).is_err());
-
-        let mut other = request.clone();
-        other.operation = ServiceOperation::Genesis;
-        assert_ne!(
-            service_request_digest(&request).unwrap(),
-            service_request_digest(&other).unwrap()
-        );
     }
 }
