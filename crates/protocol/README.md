@@ -174,30 +174,33 @@ enclave can check it before forwarding.
 A second application, with its own Quorum key and release. It lets a Solana
 address receive private transfers before its owner registers a wallet. The
 enclave derives one viewing key and one nullifier key per address, its service
-keys, from a master seed. A sender asks for the public keys and encrypts to
-them. The owner later signs a request with the address, and the enclave opens
-its batch of outputs. The service viewing secret never leaves the enclave.
+keys, from a master seed it derives from its Quorum key. A sender asks for the
+public keys and encrypts to them. The owner later signs a request with the
+address, and the enclave opens its batch of outputs. The service viewing
+secret never leaves the enclave.
 
-The application serves the same routes as the wallet. A request to
-`POST /v1/operations` is an `EncryptedRequest` without a wallet grant. Its
-plaintext is a `ServiceRequest`: a request id, the release pins of an
-`OperationRequest`, the sealed master seed, a one-time response public key and
-the operation. It has no wallet descriptor, client authorization or
-timestamps, and no operation changes state. The answer is an
-`EncryptedResponse` whose App Proof has the type
-`spr.tvc.decryption_service.v1`, the request digest
+The application serves the same routes as the wallet. A request to `POST
+/v1/operations` is an `EncryptedRequest` without a wallet grant. Its plaintext
+is a `ServiceRequest`: a request id, the release pins of an
+`OperationRequest`, a one-time response public key and the operation. It has
+no wallet descriptor, client authorization or timestamps, and no operation
+changes state. The answer is an `EncryptedResponse` whose App Proof has the
+type `spr.tvc.decryption_service.v1`, the request digest
 `H(SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
-`signature`, the operation as `Service` followed by its name below, and, in
-`sealed_seed_digest`, the commitment of the master seed it used. A refused
-request gets the generic `InvalidRequest`.
+`signature`, the operation as `Service` followed by its name below, and 32
+zero bytes as `sealed_seed_digest`. A refused request gets the generic
+`InvalidRequest`.
 
-| Operation | Sealed master seed | Pinned commitment | Returns |
-| --- | --- | --- | --- |
-| `Genesis` | forbidden | forbidden | `MasterSeed`: a fresh master seed, sealed. |
-| `Backup` | required | optional | `Backup`: the seed split among the release's backup holders. |
-| `Restore { shares }` | forbidden | required | `MasterSeed`: the seed rebuilt from backup shares, sealed. |
-| `PublicKeys { address }` | required | required | The address's service viewing and nullifier public keys. |
-| `Decrypt { signer, signature, items }` | required | required | One plaintext per item, in order, and the nullifier secret. |
+| Operation | Returns |
+| --- | --- |
+| `PublicKeys { address }` | The address's service viewing and nullifier public keys. |
+| `Decrypt { signer, signature, items }` | One plaintext per item, in order, and the nullifier secret. |
+
+The master seed is
+`HKDF-Expand(HKDF-Extract(∅, quorum master seed), "TSPP/decryption-service/seed/v1", 32)`,
+so it is the same in every release and replica under the Quorum key, and
+clients name it by the Quorum public key the release policy pins. It is as
+durable as the Quorum key's shares.
 
 Service keys are HKDF-SHA256 over the master seed with an empty salt, one
 Expand per key: info `TSPP/decryption-service/view_key/x25519/v1 || address`
@@ -220,31 +223,6 @@ answer. The signature is not a secret.
 signer's service viewing public key, and answers every one: the pool cipher is
 unauthenticated, so the client adopts a plaintext only when its commitment
 equals the indexed one.
-
-The master seed is 32 random bytes, sealed: encrypted to the Quorum key, with
-the Quorum key's signature over `SPR_TVC_DECRYPTION_SERVICE_SEED_V1 ||
-ciphertext`. Anyone can encrypt a seed of their own to the Quorum key, so the
-enclave opens only a blob that carries this signature, and only under the
-Quorum key id and epoch and the network it was sealed for. The sealed seed is
-not secret outside the enclave; clients send it with each request.
-
-Its commitment, `HKDF-Expand(prk, "TSPP/decryption-service/commitment/v1", 32)`
-with the `prk` of the service keys, names it under any Quorum key. A release
-pins it with `--seed-commitment`, a QOS manifest argument the release policy
-covers, and then opens no other seed. A release without one serves only
-`Genesis` and `Backup`: it bootstraps the seed that later releases pin.
-
-`Backup` splits the seed with Shamir's scheme among the holders the release
-names with `--backup-holder` (uncompressed P-256 encryption keys, in order)
-and `--backup-threshold`. Each holder's share is a JCS `BackupShare` (`version`
-1, `set_id`, `threshold`, `share`) in a QOS envelope to that holder. `set_id`
-is `H(SPR_TVC_DECRYPTION_SERVICE_BACKUP_SET_V1, threshold || holder keys)`.
-Every `Backup` draws new shares, which do not combine with another run's.
-
-`Restore` takes at least `threshold` shares of one set, each re-encrypted by
-its holder to the running Quorum key, rebuilds the seed, and seals it only if
-its commitment is the pinned one. It does not read the release's own holder
-set, so shares of an earlier set restore under a new one.
 
 ## Release policy
 

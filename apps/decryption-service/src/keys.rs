@@ -1,6 +1,7 @@
 //! The service keys of an address.
 
 use hkdf::Hkdf;
+use qos_p256::P256Pair;
 use sha2::Sha256;
 use spr_keypair::{NullifierKey, ViewingKey};
 use zeroize::Zeroizing;
@@ -8,9 +9,18 @@ use zolana_tvc_protocol::decryption_service::{ADDRESS_LEN, NULLIFIER_SECRET_LEN}
 
 const VIEWING_KEY_LABEL: &[u8] = b"TSPP/decryption-service/view_key/x25519/v1";
 const NULLIFIER_KEY_LABEL: &[u8] = b"TSPP/decryption-service/nf_key/v1";
-const COMMITMENT_LABEL: &[u8] = b"TSPP/decryption-service/commitment/v1";
+const MASTER_SEED_LABEL: &[u8] = b"TSPP/decryption-service/seed/v1";
 
 pub(crate) const MASTER_SEED_LEN: usize = 32;
+
+/// The master seed, derived from the Quorum key so that it lives and is recovered with it.
+pub(crate) fn master_seed(quorum: &P256Pair) -> Zeroizing<[u8; MASTER_SEED_LEN]> {
+    let mut seed = Zeroizing::new([0u8; MASTER_SEED_LEN]);
+    Hkdf::<Sha256>::new(None, quorum.to_master_seed().as_slice())
+        .expand(MASTER_SEED_LABEL, seed.as_mut_slice())
+        .expect("32 bytes of output");
+    seed
+}
 
 pub(crate) struct ServiceKeys {
     pub viewing: ViewingKey,
@@ -30,15 +40,6 @@ pub(crate) fn derive(seed: &[u8; MASTER_SEED_LEN], address: &[u8; ADDRESS_LEN]) 
         viewing: ViewingKey::from_bytes(&viewing),
         nullifier: NullifierKey::from_secret(*nullifier),
     }
-}
-
-/// A public name for the seed that survives sealing it under another key.
-pub(crate) fn commitment(seed: &[u8; MASTER_SEED_LEN]) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    Hkdf::<Sha256>::new(None, seed)
-        .expand(COMMITMENT_LABEL, &mut out)
-        .expect("32 bytes of output");
-    out
 }
 
 #[cfg(test)]
@@ -74,9 +75,10 @@ mod tests {
                 "0cc1419c0a0cad87eae0f0708e01227c8ae90c43581c4965f40cab6157fcce8a",
             ]
         );
+        let quorum = P256Pair::from_master_seed(&Zeroizing::new([0x5a; 32])).unwrap();
         assert_eq!(
-            hex::encode(commitment(&[0x5a; 32])),
-            "144c27271acce32db90afd371a1e15978970a0044d32e7a62adb21fb16fe7e80"
+            hex::encode(master_seed(&quorum).as_slice()),
+            "324d90caf8a817fc7860be3d9e975f9fe977764a751f612d3195b5370a87bbc4"
         );
     }
 }

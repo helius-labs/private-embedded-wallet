@@ -44,11 +44,8 @@ pub enum OperationKind {
     Derive,
     TransactionKeys,
     Prove,
-    ServiceGenesis,
     ServicePublicKeys,
     ServiceDecrypt,
-    ServiceBackup,
-    ServiceRestore,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
