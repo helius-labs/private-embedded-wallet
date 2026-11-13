@@ -209,6 +209,19 @@ async function readOperationAnswer(response: Response, maxBytes: bigint, signal?
   return readAnswer(response, unavailable ? "OperationUnavailable" : "OperationRejected", maxBytes, signal);
 }
 
+/** Posts one encrypted request to the enclave's own ingress. */
+export async function sendToEnclave(
+  endpoint: URL,
+  request: EncryptedRequestWire,
+  transport: SprEmbeddedWalletTransport,
+  maxAnswerBytes: bigint,
+  signal?: AbortSignal,
+): Promise<OperationAnswer> {
+  const url = endpointUrl(endpoint, "/v1/operations");
+  const response = await postJson(transport, url, canonicalizeJsonValue(request), signal);
+  return { responseText: await readOperationAnswer(response, maxAnswerBytes, signal) };
+}
+
 /** Sends one encrypted request, whose enclave answer may take up to `maxAnswerBytes`. */
 export async function sendOperation(
   backend: SprEmbeddedWalletBackend,
@@ -219,11 +232,8 @@ export async function sendOperation(
   signal?: AbortSignal,
 ): Promise<OperationAnswer> {
   switch (backend.kind) {
-    case "enclave": {
-      const url = endpointUrl(backend.endpoint, "/v1/operations");
-      const response = await postJson(transport, url, canonicalizeJsonValue(request), signal);
-      return { responseText: await readOperationAnswer(response, maxAnswerBytes, signal) };
-    }
+    case "enclave":
+      return sendToEnclave(backend.endpoint, request, transport, maxAnswerBytes, signal);
     case "gateway": {
       const url = gatewayUrl(backend.endpoint, "operations");
       const response = await postJson(transport, url, canonicalizeJsonValue({ descriptor, request }), signal);

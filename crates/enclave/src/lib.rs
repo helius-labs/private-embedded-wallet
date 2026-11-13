@@ -4,6 +4,8 @@
 
 mod cipher;
 pub mod http;
+#[cfg(feature = "local-dev")]
+pub mod local;
 mod release;
 mod request;
 mod service;

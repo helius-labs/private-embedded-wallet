@@ -25,6 +25,8 @@ export type LocalUnattestedConnectionConfig = {
   readonly expectedQuorumPublicKey: string;
   readonly expectedEphemeralPublicKey: string;
   readonly expectedOperations: readonly OperationKind[];
+  /** The privacy wallet's by default. */
+  readonly expectedProofType?: string;
   readonly nowMs?: () => bigint;
   readonly transport?: SprEmbeddedWalletTransport;
 };
@@ -54,7 +56,7 @@ export async function connectLocalUnattestedTvc(
     info.executable_digest !== config.expectedExecutableDigest ||
     info.quorum_key_id !== config.expectedQuorumKeyId ||
     info.quorum_key_epoch !== "1" ||
-    info.proof_type !== TVC_APP_PROOF_TYPE ||
+    info.proof_type !== (config.expectedProofType ?? TVC_APP_PROOF_TYPE) ||
     info.quorum_public_key !== config.expectedQuorumPublicKey ||
     info.ephemeral_public_key !== config.expectedEphemeralPublicKey ||
     info.supported_operations.length !== config.expectedOperations.length ||

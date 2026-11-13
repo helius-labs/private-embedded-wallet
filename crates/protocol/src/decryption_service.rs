@@ -182,6 +182,16 @@ mod tests {
         expected.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         expected.extend_from_slice(payload.as_bytes());
         assert_eq!(message, expected);
+        // The TypeScript client checks the same vector.
+        assert_eq!(
+            encode_lower_hex(&message),
+            concat!(
+                "ff736f6c616e61206f6666636861696e005be1ef179167714826436f2f8f69579bd2bd3f7b3ad3cf18e4a0b6a1a0700e",
+                "27000107070707070707070707070707070707070707070707070707070707070707076b00545350502f646563727970",
+                "74696f6e2d736572766963652f646563727970742f76312f6d61696e6e65742f30393039303930393039303930393039",
+                "303930393039303930393039303930393039303930393039303930393039303930393039303930393039303930393039"
+            )
+        );
         assert_ne!(
             message,
             decrypt_message(&[7; 32], Network::Devnet, &[9; 32]),
@@ -192,6 +202,11 @@ mod tests {
     #[test]
     fn the_request_digest_covers_everything_but_the_signature() {
         let digest = service_request_digest(&request(decrypt([0; 64], 0))).unwrap();
+        // The TypeScript client checks the same vector.
+        assert_eq!(
+            encode_lower_hex(&digest),
+            "b5c277a4d791edfc9e76ae31add50ce8b7977cc11b233d0e5f6ce02612c37760"
+        );
         assert_eq!(
             digest,
             service_request_digest(&request(decrypt([1; 64], 0))).unwrap()

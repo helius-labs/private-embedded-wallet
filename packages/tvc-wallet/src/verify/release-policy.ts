@@ -96,6 +96,7 @@ export function verifySignedReleasePolicy(
 export function bindDiscoveryToPolicy(
   info: ServiceInfo,
   signed: SignedReleasePolicy,
+  proofType: string = TVC_APP_PROOF_TYPE,
 ): void {
   const policy = signed.policy;
   if (info.network !== policy.network) {
@@ -104,7 +105,7 @@ export function bindDiscoveryToPolicy(
   if (info.version !== API_VERSION) {
     throw new SprEmbeddedWalletError("UnsupportedVersion");
   }
-  if (info.proof_type !== TVC_APP_PROOF_TYPE) {
+  if (info.proof_type !== proofType) {
     throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   if (info.release_id !== policy.releaseId) {

@@ -240,9 +240,29 @@ fn a_batch_holds_items_under_the_signers_service_viewing_key() {
     let owner = SigningKey::from_bytes(&[5; 32]);
     let (viewing, _) = service_keys(&service, &owner);
     let (stranger, _) = service_keys(&service, &SigningKey::from_bytes(&[9; 32]));
-    for items in [Vec::new(), vec![sent(viewing, stranger, b"ten usdc", 0)]] {
-        refused(&service, &decrypt(&service, &owner, NETWORK, items));
-    }
+    let named_for_another = vec![sent(viewing, stranger, b"ten usdc", 0)];
+    refused(
+        &service,
+        &decrypt(&service, &owner, NETWORK, named_for_another),
+    );
+}
+
+#[test]
+fn a_decrypt_of_nothing_returns_the_nullifier_secret() {
+    let service = service();
+    let owner = SigningKey::from_bytes(&[5; 32]);
+    let (_, nullifier) = service_keys(&service, &owner);
+    let request = decrypt(&service, &owner, NETWORK, Vec::new());
+    let ServiceResult::Decrypt(outputs) = call(&service, &request).unwrap() else {
+        panic!("expected a Decrypt result");
+    };
+    assert!(outputs.plaintexts.is_empty());
+    assert_eq!(
+        NullifierKey::from_secret(outputs.nullifier_secret)
+            .pubkey()
+            .unwrap(),
+        nullifier
+    );
 }
 
 #[test]

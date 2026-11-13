@@ -4018,6 +4018,7 @@ dependencies = [
  "qos_core",
  "qos_p256",
  "serde",
+ "serde_json",
  "spr-keypair",
  "strum",
  "tokio",

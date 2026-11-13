@@ -31,12 +31,23 @@ signature). It reaches no service.
 
 ```sh
 cargo test -p spr-tvc-decryption-service
+cargo run -p spr-tvc-decryption-service --features local-dev --bin spr-tvc-decryption-service-local
 ```
 
-The tests decrypt an output encrypted as a sender encrypts it.
+The tests decrypt an output encrypted as a sender encrypts it. The second
+command is the unattested local testkit on `127.0.0.1:44030`, under the same
+pinned keys as the privacy wallet's.
+
+The client is `@heliuslabs/spr-embedded-wallet/decryption-service`
+([`packages/tvc-wallet`](../../packages/tvc-wallet/README.md#decryption-service)).
+`just headless-e2e` runs
+[`unregistered_recipient.ts`](../../examples/typescript-client/examples/unregistered_recipient.ts)
+against the testkit: a transfer to an address without a wallet, opened through
+the service and swept to the owner's own wallet.
 
 Not there yet:
 
 - An enclave image, a release policy and a Turnkey application with a local
   Quorum key and its operators.
-- A local testkit binary, a gateway route and a client.
+- A gateway route. Until then a client needs a Turnkey API key of the
+  application's organization to fetch Boot Proofs.

@@ -194,7 +194,7 @@ zero bytes as `sealed_seed_digest`. A refused request gets the generic
 | Operation | Returns |
 | --- | --- |
 | `PublicKeys { address }` | The address's service viewing and nullifier public keys. |
-| `Decrypt { signer, signature, items }` | One plaintext per item, in order, and the nullifier secret. |
+| `Decrypt { signer, signature, items }` | One plaintext per item, in order, and the nullifier secret. `items` may be empty. |
 
 The master seed is
 `HKDF-Expand(HKDF-Extract(∅, quorum master seed), "TSPP/decryption-service/seed/v1", 32)`,

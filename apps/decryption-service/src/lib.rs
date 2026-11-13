@@ -22,6 +22,12 @@ pub fn load_qos_state(release: Release) -> io::Result<Service> {
     Service::load(release, &APP)
 }
 
+/// The explicitly unattested local service, under the testkit's pinned keys.
+#[cfg(feature = "local-dev")]
+pub fn local_unattested_service() -> Service {
+    spr_tvc_enclave::local::service(&APP)
+}
+
 pub fn router(service: Service) -> Router {
     spr_tvc_enclave::router(service.clone(), move |body| {
         let service = service.clone();

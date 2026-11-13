@@ -29,7 +29,7 @@ mod local_dev;
 #[cfg(feature = "local-dev")]
 mod local_prover;
 #[cfg(feature = "local-dev")]
-pub use local_dev::{local_testkit_qos_seeds, local_unattested_state, LocalProverTrust};
+pub use local_dev::{local_unattested_state, LocalProverTrust};
 #[cfg(feature = "local-dev")]
 pub use local_prover::{LocalProver, POLICY_PATH};
 

@@ -165,7 +165,7 @@ export function checkProve(operation: ProveOperation): ProveOperation {
   return operation;
 }
 
-function checkHexList(values: unknown, count: number, bytes?: number): asserts values is string[] {
+export function checkHexList(values: unknown, count: number, bytes?: number): asserts values is string[] {
   if (!Array.isArray(values) || values.length !== count) {
     throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }

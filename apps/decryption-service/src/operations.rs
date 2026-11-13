@@ -87,9 +87,15 @@ fn run(
             let signer =
                 owner::authorized(signer, signature, service.info.network, request_digest)?;
             let keys = keys::derive(&seed, &signer);
+            // No item: the owner asks for the nullifier secret alone.
+            let plaintexts = if items.is_empty() {
+                Vec::new()
+            } else {
+                open_ciphertexts(&keys.viewing, items)?
+            };
             Ok(ServiceResult::Decrypt(DecryptedOutputs {
                 nullifier_secret: *keys.nullifier.secret(),
-                plaintexts: open_ciphertexts(&keys.viewing, items)?,
+                plaintexts,
             }))
         }
     }

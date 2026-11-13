@@ -830,7 +830,6 @@ mod local {
     //! The whole encrypted path against the testkit's local custody.
 
     use axum::http::StatusCode;
-    use qos_p256::P256Pair;
     use serde::Deserialize;
     use spr_prover_tee::{decrypt_response, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION};
     use spr_tvc_enclave::testing::{encrypt_request, open_response};
@@ -843,9 +842,7 @@ mod local {
     use zolana_tvc_protocol::types::{SealedProverRequest, WalletGrant};
 
     use super::*;
-    use crate::{
-        local_testkit_qos_seeds, local_unattested_state, LocalProver, LocalProverTrust, POLICY_PATH,
-    };
+    use crate::{local_unattested_state, LocalProver, LocalProverTrust, POLICY_PATH};
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -876,14 +873,8 @@ mod local {
                 "../../../../packages/tvc-wallet/src/local-testkit.json"
             ))
             .expect("testkit");
-            let (ephemeral_seed, quorum_seed) = local_testkit_qos_seeds();
             let wallet = test_wallet();
-            let state = local_unattested_state(
-                P256Pair::from_master_seed(&ephemeral_seed.into()).expect("ephemeral"),
-                P256Pair::from_master_seed(&quorum_seed.into()).expect("quorum"),
-                wallet.secret,
-                prover,
-            );
+            let state = local_unattested_state(wallet.secret, prover);
             Self {
                 state,
                 client_secret: decode_lower_hex_array(&keys.client_private_key_hex)

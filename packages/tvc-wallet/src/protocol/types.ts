@@ -6,7 +6,9 @@ import type { API_VERSION } from "./constants.js";
  */
 export type Network = "devnet" | "mainnet";
 
-export type OperationKind = "Bootstrap" | "Decrypt" | "Derive" | "TransactionKeys" | "Prove";
+export type OperationKind =
+  | "Bootstrap" | "Decrypt" | "Derive" | "TransactionKeys" | "Prove"
+  | "ServicePublicKeys" | "ServiceDecrypt";
 
 export type HealthResponse = {
   status: "Healthy";

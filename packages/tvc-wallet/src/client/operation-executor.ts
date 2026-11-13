@@ -45,6 +45,7 @@ import {
   requestGrant,
   sendOperation,
   type EncryptedRequestWire,
+  type OperationAnswer,
 } from "./backend.js";
 import { assertExactObjectKeys } from "./http.js";
 import type { ConnectedTvcRuntime } from "./connection.js";
@@ -166,6 +167,18 @@ function matchingGrant(
 
 type RequestGrant = { readonly wallet_grant?: WalletGrant };
 
+/** One request, complete and signed, and what its answer must prove. */
+export type Exchange = {
+  readonly request: Readonly<{ request_id: string }>;
+  readonly requestDigest: Uint8Array;
+  /** The secret half of the request's `client_response_public_key`. */
+  readonly responseSecret: Uint8Array;
+  readonly operation: OperationKind;
+  readonly proofType: string;
+  readonly grant: RequestGrant;
+  send(request: EncryptedRequestWire, maxAnswerBytes: bigint): Promise<OperationAnswer>;
+};
+
 function encryptedRequest(
   info: ServiceInfo,
   ciphertext: string,
@@ -181,7 +194,7 @@ function encryptedRequest(
 }
 
 /** The size of the request the enclave receives, including anything the backend adds. */
-function enclaveRequestBytes(context: OperationExecutionContext, request: EncryptedRequestWire): number {
+function enclaveRequestBytes(context: ConnectedTvcRuntime, request: EncryptedRequestWire): number {
   return te.encode(canonicalizeJsonValue(request)).length + forwardedRequestBytes(context.backend);
 }
 
@@ -190,6 +203,23 @@ function checkRequestSize(info: ServiceInfo, bytes: number): void {
   if (BigInt(bytes) > BigInt(info.max_encrypted_request_bytes)) {
     throw new SprEmbeddedWalletError("RequestTooLarge");
   }
+}
+
+/**
+ * Refuses a request too large to send before anyone signs it, so a caller can
+ * split the batch. `signed` is the request with its signature at full width.
+ */
+export function checkSignedRequestSize(
+  context: ConnectedTvcRuntime,
+  signed: object,
+  grant: RequestGrant,
+): void {
+  const ciphertextBytes = te.encode(canonicalizeJsonValue(signed)).length +
+    AES_GCM_NONCE_LEN + SEC1_UNCOMPRESSED_LEN + 4 + AES_GCM_TAG_LEN;
+  checkRequestSize(
+    context.info,
+    enclaveRequestBytes(context, encryptedRequest(context.info, "", grant)) + 2 * ciphertextBytes,
+  );
 }
 
 async function prepareRequest(
@@ -239,17 +269,11 @@ async function prepareRequest(
         signature: "",
       },
     };
-    // A raw P-256 signature has a fixed width. Account for it before asking the
-    // signer to sign, so SprEmbeddedWalletKeys can split an oversized batch locally.
-    const signedBytes = te.encode(canonicalizeJsonValue({
+    // A raw P-256 signature has a fixed width.
+    checkSignedRequestSize(context, {
       ...request,
       authorization: { ...request.authorization, signature: "00".repeat(RAW_P256_SIGNATURE_LEN) },
-    })).length;
-    const ciphertextBytes = signedBytes + AES_GCM_NONCE_LEN + SEC1_UNCOMPRESSED_LEN + 4 + AES_GCM_TAG_LEN;
-    checkRequestSize(
-      context.info,
-      enclaveRequestBytes(context, encryptedRequest(context.info, "", requestGrantFields)) + 2 * ciphertextBytes,
-    );
+    }, requestGrantFields);
     const requestDigestBytes = requestDigest(request);
     const digest = clientAuthDigest(requestDigestBytes);
     const signature = await awaitWithSignal(context.operations.signer.signRequest({
@@ -281,8 +305,8 @@ function asAppProof(proof: EncryptedResponse["tvc_app_proof"]): TurnkeyAppProofW
 }
 
 async function verifyOperationProof(
-  context: OperationExecutionContext,
-  request: OperationRequest,
+  context: ConnectedTvcRuntime,
+  exchange: Exchange,
   response: EncryptedResponse,
   bootProof: TurnkeyBootProofWire | undefined,
   signal?: AbortSignal,
@@ -307,16 +331,71 @@ async function verifyOperationProof(
     OPERATION_PROOF_KEYS,
   );
   if (
-    payload.type !== TVC_APP_PROOF_TYPE ||
+    payload.type !== exchange.proofType ||
     payload.version !== API_VERSION ||
-    payload.request_id !== request.request_id ||
-    payload.request_digest !== encodeLowerHex(requestDigest(request)) ||
+    payload.request_id !== exchange.request.request_id ||
+    payload.request_digest !== encodeLowerHex(exchange.requestDigest) ||
     payload.result_digest !== encodeLowerHex(resultDigest(requireHex(response.encrypted_result))) ||
-    payload.operation !== request.operation.type
+    payload.operation !== exchange.operation
   ) {
     throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
   }
   return payload;
+}
+
+/**
+ * Encrypts the request to the Quorum key, sends it, and opens the answer once
+ * its App Proof names this request and its result. Wipes `responseSecret`.
+ */
+export async function sealedExchange(
+  context: ConnectedTvcRuntime,
+  exchange: Exchange,
+  signal?: AbortSignal,
+): Promise<{ plaintext: string; sealedSeedDigest: string }> {
+  try {
+    signal?.throwIfAborted();
+    const quorum = parseQosP256Public(
+      requireHex(context.info.quorum_public_key, QOS_P256_PUBLIC_LEN),
+    );
+    const ciphertext = qosEncrypt(
+      quorum.encryption,
+      te.encode(canonicalizeJsonValue(exchange.request)),
+    );
+    const encrypted = encryptedRequest(context.info, encodeLowerHex(ciphertext), exchange.grant);
+    checkRequestSize(context.info, enclaveRequestBytes(context, encrypted));
+    // The ciphertext is hex, so it cannot exceed twice the byte ceiling;
+    // RESPONSE_ENVELOPE_SLACK covers the surrounding JSON and App Proof.
+    const maxResponseBytes = BigInt(context.info.max_encrypted_response_bytes);
+    const { responseText, bootProof } = await exchange.send(
+      encrypted,
+      maxResponseBytes * 2n + RESPONSE_ENVELOPE_SLACK,
+    );
+    const response = parseStrictJson<EncryptedResponse>(responseText, ENCRYPTED_RESPONSE_KEYS);
+    if (
+      response.version !== API_VERSION ||
+      !bytesEqual(
+        requireHex(response.request_id, SHA256_LEN),
+        requireHex(exchange.request.request_id, SHA256_LEN),
+      )
+    ) {
+      throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
+    }
+    const encryptedResult = requireHex(response.encrypted_result);
+    if (BigInt(encryptedResult.length) > maxResponseBytes) {
+      throw new SprEmbeddedWalletError("ResponseTooLarge");
+    }
+    const proof = await verifyOperationProof(context, exchange, response, bootProof, signal);
+    let plaintext: string;
+    try {
+      plaintext = td.decode(qosDecrypt(exchange.responseSecret, encryptedResult));
+    } catch {
+      throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
+    }
+    if (!isRfc8785(plaintext)) throw new SprEmbeddedWalletError("InvalidCanonicalJson");
+    return { plaintext, sealedSeedDigest: proof.sealed_seed_digest };
+  } finally {
+    exchange.responseSecret.fill(0);
+  }
 }
 
 export async function executeOperationEnvelope(
@@ -331,50 +410,20 @@ export async function executeOperationEnvelope(
     sealedSeed,
     signal,
   );
-  try {
-    signal?.throwIfAborted();
-    const requestBody = canonicalizeJsonValue(request);
-    const quorum = parseQosP256Public(
-      requireHex(context.info.quorum_public_key, QOS_P256_PUBLIC_LEN),
-    );
-    const ciphertext = qosEncrypt(quorum.encryption, te.encode(requestBody));
-    const encrypted = encryptedRequest(context.info, encodeLowerHex(ciphertext), grant);
-    checkRequestSize(context.info, enclaveRequestBytes(context, encrypted));
-    // The ciphertext is hex, so it cannot exceed twice the byte ceiling;
-    // RESPONSE_ENVELOPE_SLACK covers the surrounding JSON and App Proof.
-    const maxResponseBytes = BigInt(context.info.max_encrypted_response_bytes);
-    const { responseText, bootProof } = await sendOperation(
+  return sealedExchange(context, {
+    request,
+    requestDigest: requestDigest(request),
+    responseSecret,
+    operation: operation.type,
+    proofType: TVC_APP_PROOF_TYPE,
+    grant,
+    send: (encrypted, maxAnswerBytes) => sendOperation(
       context.backend,
       encrypted,
       context.operations.descriptor,
       context.transport,
-      maxResponseBytes * 2n + RESPONSE_ENVELOPE_SLACK,
+      maxAnswerBytes,
       signal,
-    );
-    const response = parseStrictJson<EncryptedResponse>(responseText, ENCRYPTED_RESPONSE_KEYS);
-    if (
-      response.version !== API_VERSION ||
-      !bytesEqual(
-        requireHex(response.request_id, SHA256_LEN),
-        requireHex(request.request_id, SHA256_LEN),
-      )
-    ) {
-      throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
-    }
-    const encryptedResult = requireHex(response.encrypted_result);
-    if (BigInt(encryptedResult.length) > maxResponseBytes) {
-      throw new SprEmbeddedWalletError("ResponseTooLarge");
-    }
-    const proof = await verifyOperationProof(context, request, response, bootProof, signal);
-    let plaintext: string;
-    try {
-      plaintext = td.decode(qosDecrypt(responseSecret, encryptedResult));
-    } catch {
-      throw new SprEmbeddedWalletError("InvalidEncryptedEnvelope");
-    }
-    if (!isRfc8785(plaintext)) throw new SprEmbeddedWalletError("InvalidCanonicalJson");
-    return { plaintext, sealedSeedDigest: proof.sealed_seed_digest };
-  } finally {
-    responseSecret.fill(0);
-  }
+    ),
+  }, signal);
 }

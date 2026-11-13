@@ -377,6 +377,35 @@ told, and `EnrollmentRejected` with the gateway's status. The wallet's Turnkey
 sub-organization must be named after the API key's Helius project. See
 [`apps/tvc-gateway`](../../apps/tvc-gateway/README.md#enrollment).
 
+## Decryption service
+
+`@heliuslabs/spr-embedded-wallet/decryption-service` is the client of the
+[decryption service](../../apps/decryption-service/SPEC.md), a second enclave
+application: private transfers to a Solana address before its owner registers
+a wallet.
+
+```ts
+import { createDecryptionService } from "@heliuslabs/spr-embedded-wallet/decryption-service";
+
+const service = createDecryptionService({ network, endpoint, resolveBootProof });
+
+// Sender: the shielded address of a recipient without a registry record.
+const recipient = await service.address(solanaAddress);
+
+// Recipient: the keys of that address, as the SDK's WalletKeys.
+const keys = await service.open(owner, client.proofService);
+const received = new Wallet({ identity: keys.address() });
+await syncWallet({ client, wallet: received, keys });
+```
+
+`owner` is a `@solana/kit` `MessagePartialSigner`. It signs one off-chain
+message in `open` and one for every batch of outputs a sync opens. The service
+returns the nullifier secret, so proofs are made as `LocalKeys` makes them,
+through `client.proofService`. The recipient then moves the balance to its own
+wallet with `buildTransferTransaction`. No release is pinned yet, and
+`resolveBootProof` needs a Turnkey API key of the application's organization
+until tvc-gateway serves the application.
+
 ## Entry points
 
 - `@heliuslabs/spr-embedded-wallet`: `createSprEmbeddedWallet`, `SprEmbeddedWalletTurnkey`,
@@ -384,13 +413,16 @@ sub-organization must be named after the API key's Helius project. See
 - `@heliuslabs/spr-embedded-wallet/protocol`: wire types, `SprEmbeddedWalletError`, hex codecs,
   `clientKeyIdFor`, and `walletEnrollmentMessage`, the Sign-In With Solana
   message the wallet signs to enroll a key with tvc-gateway.
+- `@heliuslabs/spr-embedded-wallet/decryption-service`: `createDecryptionService` and
+  `DECRYPTION_SERVICE_RELEASES`.
 - `@heliuslabs/spr-embedded-wallet/testing`: `createTestSprEmbeddedWallet`, which
   verifies an enclave as `createSprEmbeddedWallet` does against a release and backend
   the caller names (a gateway, or the enclave itself with
   `{ kind: "enclave", endpoint, resolveBootProof, walletGrant }`), with the
   Turnkey session or a descriptor and the signer of its key
   (`createSprRequestSigner`), `createLocalSprEmbeddedWallet`, the loopback-only
-  unattested testkit client for the network the testkit was built for, and
+  unattested testkit client for the network the testkit was built for,
+  `createLocalDecryptionService`, the same for the decryption service, and
   `verifyLiveReplica`, which `scripts/release.mjs` runs on a live replica
   before it signs that replica's release policy. The build fails if testkit
   code becomes reachable from a production entry.

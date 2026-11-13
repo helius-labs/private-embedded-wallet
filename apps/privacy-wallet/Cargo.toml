@@ -12,7 +12,7 @@ autobins = false
 default = []
 # Compile-time-only local harness. The enclave binary and Dockerfile never
 # enable this feature or link the mock custody implementation.
-local-dev = ["dep:ed25519-dalek", "dep:reqwest", "spr-prover-tee/test-fixtures"]
+local-dev = ["dep:ed25519-dalek", "dep:reqwest", "spr-prover-tee/test-fixtures", "spr-tvc-enclave/local-dev"]
 
 [dependencies]
 axum = { version = "=0.8.8", default-features = false, features = ["http1", "tokio"] }

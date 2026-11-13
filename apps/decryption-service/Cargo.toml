@@ -6,6 +6,11 @@ edition = "2021"
 rust-version = "1.98"
 license = "AGPL-3.0-only"
 publish = false
+autobins = false
+
+[features]
+# The unattested local testkit; the enclave binary never enables it.
+local-dev = ["spr-tvc-enclave/local-dev"]
 
 [dependencies]
 axum = { version = "=0.8.8", default-features = false, features = ["http1", "tokio"] }
@@ -26,3 +31,12 @@ hex = "=0.4.3"
 spr-tvc-enclave = { path = "../../crates/enclave", features = ["testing"] }
 p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa"] }
 tower = { version = "=0.5.3", features = ["util"] }
+
+[[bin]]
+name = "spr-tvc-decryption-service"
+path = "src/main.rs"
+
+[[bin]]
+name = "spr-tvc-decryption-service-local"
+path = "src/bin/local.rs"
+required-features = ["local-dev"]

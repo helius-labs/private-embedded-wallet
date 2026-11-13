@@ -15,7 +15,7 @@ import { SprEmbeddedWalletError } from "./error.js";
 
 const te = new TextEncoder();
 
-function domainSeparatedHash(domain: string, payload: Uint8Array): Uint8Array {
+export function domainSeparatedHash(domain: string, payload: Uint8Array): Uint8Array {
   const domainBytes = te.encode(domain);
   const input = new Uint8Array(domainBytes.length + 1 + payload.length);
   input.set(domainBytes, 0);

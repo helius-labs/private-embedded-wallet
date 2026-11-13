@@ -107,7 +107,7 @@ application_domain := SHA-256(decrypt_label)
 
 1. Reject a `signer` as `getPublicKey` rejects a `recipient`.
 2. Rebuild `decrypt_message` and verify `signature` over it with `signer`. Verification is strict: it rejects a non-canonical signature.
-3. Reject an empty `outputs`, more than 256 outputs, and an output whose `viewing_pubkey` is not the signer's service viewing public key.
+3. Reject more than 256 outputs, and an output whose `viewing_pubkey` is not the signer's service viewing public key. A request with no outputs is valid: it returns `nullifier_secret` alone.
 4. Open each output with the signer's `viewing_sk`. The cipher is not authenticated, so every output gives a plaintext, and an output that was not encrypted to this key gives bytes that do not decode.
 5. Return the plaintexts and the signer's `nullifier_secret`.
 
@@ -136,10 +136,14 @@ Open before the service holds funds:
 ## SDK
 
 1. **Send.** Look up the recipient in the registry. Without a record the SDK withdraws to the recipient's address by default. It calls `getPublicKey` and sends under service keys only when the caller asks for it. An address alone does not show whether its owner can open the transfer, so the choice is the sender's.
-2. **Receive.** When sync finds outputs under the wallet's owner tag that the wallet's keys do not open, call `decrypt` for them. Keep a plaintext only when its UTXO hash, computed with the service nullifier public key, equals the fetched output hash.
+2. **Receive.** When sync finds outputs under the wallet's owner tag that the wallet's keys do not open, sync the tag again under the service keys: each output goes to `decrypt`, and a plaintext is kept only when its UTXO hash, computed with the service nullifier public key, equals the fetched output hash.
 3. **Sweep.** Spend the UTXOs with [`transact`](https://github.com/helius-labs/privacy-rings/blob/main/docs/spec.md#transact) to the wallet's own shielded address, and register the wallet's keys so that later senders use them. The proof takes a nullifier secret per input, so one transaction can spend inputs under the service nullifier key and the wallet's own. [`merge_transact`](https://github.com/helius-labs/privacy-rings/blob/main/docs/spec.md#merge_transact) cannot take these UTXOs, because it checks the registered nullifier public key.
 
 A sender can fetch service keys before the recipient registers and send after. The wallet therefore repeats step 2 whenever sync finds such outputs.
+
+A [transaction viewing key](https://github.com/helius-labs/privacy-rings/blob/main/docs/spec.md#transaction-viewing-key) derives from the sender's viewing private key, and the service's stays in the TEE. A wallet that spends under service keys uses a viewing key of its own in its place, with the secret `HKDF-Expand(HKDF-Extract(∅, nullifier_secret), "TSPP/decryption-service/tx_key/v1", L=32)`.
+
+The client, `@heliuslabs/spr-embedded-wallet/decryption-service`, gives the service keys of an address as the SDK's `WalletKeys`: decryption goes to the service, and nullifiers and proofs use the returned `nullifier_secret`. Receive and sweep are then the SDK's sync and transfer.
 
 ## Trust
 

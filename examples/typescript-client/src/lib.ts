@@ -39,7 +39,12 @@ import {
   type SprEmbeddedWalletOpenOptions,
   type SprEmbeddedWalletTurnkey,
 } from "@heliuslabs/spr-embedded-wallet";
-import { createLocalSprEmbeddedWallet, localProverConfig } from "@heliuslabs/spr-embedded-wallet/testing";
+import { createDecryptionService, type DecryptionService } from "@heliuslabs/spr-embedded-wallet/decryption-service";
+import {
+  createLocalDecryptionService,
+  createLocalSprEmbeddedWallet,
+  localProverConfig,
+} from "@heliuslabs/spr-embedded-wallet/testing";
 import { bootstrapWithApproval } from "./bootstrap-approval.js";
 
 export type Client = Awaited<ReturnType<typeof createSprClient>>;
@@ -455,6 +460,30 @@ export async function setup(): Promise<ExampleSetup> {
   return Object.freeze({ zolana, keys, signer });
 }
 
+/**
+ * The decryption service: the local testkit's at
+ * `DECRYPTION_SERVICE_LOCAL_ENDPOINT`, else the network's at
+ * `DECRYPTION_SERVICE_URL`, whose Boot Proofs come from Turnkey with an API key
+ * of the organization that holds the application (`TVC_ORG_ID`,
+ * `TVC_API_KEY_PUBLIC`, `TVC_API_KEY_PRIVATE`).
+ */
+export function decryptionService(): DecryptionService {
+  const network = networkFromEnv();
+  const local = process.env["DECRYPTION_SERVICE_LOCAL_ENDPOINT"]?.trim();
+  if (local) return createLocalDecryptionService({ network, endpoint: new URL(local) });
+  const organizationId = env("TVC_ORG_ID");
+  const turnkey = turnkeyClient(organizationId, {
+    publicKey: env("TVC_API_KEY_PUBLIC"),
+    privateKey: env("TVC_API_KEY_PRIVATE"),
+  });
+  return createDecryptionService({
+    network,
+    endpoint: new URL(env("DECRYPTION_SERVICE_URL")),
+    resolveBootProof: async ({ bootProofLookupKey }) =>
+      (await turnkey.getBootProof({ organizationId, ephemeralKey: bootProofLookupKey })).bootProof,
+  });
+}
+
 /** The stored identity and sealed seed, or `undefined` before the first bootstrap. */
 async function loadWallet(
   path: string,
@@ -511,10 +540,10 @@ export function expectBalance(
   }
 }
 
-/** Sign and confirm an SDK transaction; return its slot for the next indexer sync. */
+/** Sign with every signer and confirm an SDK transaction; return its slot for the next indexer sync. */
 export function sendAndConfirmFactory(
   client: Client,
-  signer: TransactionPartialSigner,
+  ...signers: TransactionPartialSigner[]
 ): (transaction: Transaction) => Promise<ConfirmedTransaction> {
   const sendTransaction = sendTransactionWithoutConfirmingFactory({
     rpc: client.solanaRpc,
@@ -523,7 +552,7 @@ export function sendAndConfirmFactory(
   return async function sendAndConfirm(
     transaction: Transaction,
   ): Promise<ConfirmedTransaction> {
-    const signed = await signTransactionWithSigners([signer], transaction);
+    const signed = await signTransactionWithSigners(signers, transaction);
     assertIsFullySignedTransaction(signed);
     assertIsTransactionWithinSizeLimit(signed);
     await sendTransaction(signed, { commitment: client.commitment });
