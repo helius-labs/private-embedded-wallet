@@ -18,10 +18,10 @@ use super::sealed::{seal, unseal, Roles};
 use super::*;
 use crate::custody::TurnkeyCustody;
 use crate::network::NET;
-use crate::{DiscoveryConfig, Runtime};
+use crate::Runtime;
 
 /// The network the image under test serves, as prover policies name it.
-const NETWORK: &str = NET.network.as_str();
+const NETWORK: &str = spr_tvc_enclave::NETWORK.as_str();
 
 /// A wallet key plus the seed its derivation message signs to.
 struct TestWallet {
@@ -158,7 +158,7 @@ fn descriptor(address: [u8; 32]) -> WalletDescriptor {
     WalletDescriptor {
         version: API_VERSION,
         security_domain_id: [0x11; 32],
-        network: NET.network,
+        network: spr_tvc_enclave::NETWORK,
         turnkey_organization_id: "00000000-0000-0000-0000-00000000000b".to_owned(),
         turnkey_wallet_id: "test".to_owned(),
         address: Pubkey::new_from_array(address).to_string(),
@@ -177,10 +177,10 @@ fn request(operation: Operation, descriptor: WalletDescriptor) -> OperationReque
         request_id: [0x01; 32],
         issued_at_ms: 1_750_000_000_000,
         expires_at_ms: 1_750_000_060_000,
-        target_release_id: "test".to_owned(),
+        target_release_id: "release-test".to_owned(),
         target_manifest_digest: [0x33; 32],
         target_executable_digest: [0x44; 32],
-        quorum_key_id: "quorum".to_owned(),
+        quorum_key_id: "quorum-test".to_owned(),
         quorum_key_epoch: 1,
         wallet_descriptor: descriptor,
         sealed_seed: None,
@@ -254,7 +254,7 @@ fn sealed_seed_hides_the_seed_and_is_bound_to_the_wallet_and_epoch() {
     assert_eq!(failure(unseal(&other_epoch, &runtime)), Failure::Invalid);
 
     // Another wallet's descriptor does not.
-    let other_network = match NET.network {
+    let other_network = match spr_tvc_enclave::NETWORK {
         Network::Devnet => Network::Mainnet,
         Network::Mainnet => Network::Devnet,
     };
@@ -732,14 +732,9 @@ fn prove_binds_only_the_route_of_the_requests_proving_key() {
 /// An enclave running the release [`request`] is bound to.
 fn state() -> AppState {
     let runtime = runtime();
-    let config = DiscoveryConfig {
-        security_domain_id: [0x11; 32],
-        release_id: "test".to_owned(),
-        quorum_key_id: "quorum".to_owned(),
-        quorum_key_epoch: 1,
-    };
     AppState {
-        info: Arc::new(config.service_info(
+        info: Arc::new(spr_tvc_enclave::testing::release().service_info(
+            &crate::APP,
             [0x33; 32],
             [0x44; 32],
             &runtime.quorum,
@@ -760,7 +755,7 @@ fn a_request_bound_to_another_release_or_quorum_key_is_refused() {
     let cases: [(Edit, ErrorCode); 7] = [
         (
             |request| {
-                request.wallet_descriptor.network = match NET.network {
+                request.wallet_descriptor.network = match spr_tvc_enclave::NETWORK {
                     Network::Devnet => Network::Mainnet,
                     Network::Mainnet => Network::Devnet,
                 }
@@ -835,27 +830,19 @@ mod local {
     //! The whole encrypted path against the testkit's local custody.
 
     use axum::http::StatusCode;
-    use qos_p256::P256Pair;
     use serde::Deserialize;
     use spr_prover_tee::{decrypt_response, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION};
+    use spr_tvc_enclave::testing::{encrypt_request, open_response};
     use zolana_tvc_protocol::auth::authorize_operation_request;
     use zolana_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
-    use zolana_tvc_protocol::crypto::{
-        parse_uncompressed_sec1, public_key_uncompressed, qos_decrypt, qos_encrypt,
-        sign_p256_prehash, verify_p256_message, QosP256Public,
-    };
-    use zolana_tvc_protocol::digest::{descriptor_digest, request_digest, result_digest, sha256};
+    use zolana_tvc_protocol::crypto::{public_key_uncompressed, sign_p256_prehash};
+    use zolana_tvc_protocol::digest::{descriptor_digest, request_digest, sha256};
     use zolana_tvc_protocol::encoding::{decode_lower_hex_array, jcs_serialize, parse_strict_json};
     use zolana_tvc_protocol::sign_wallet_grant;
-    use zolana_tvc_protocol::types::{
-        EncryptedRequest, EncryptedResponse, OperationProofPayload, SealedProverRequest,
-        WalletGrant,
-    };
+    use zolana_tvc_protocol::types::{SealedProverRequest, WalletGrant};
 
     use super::*;
-    use crate::{
-        local_testkit_qos_seeds, local_unattested_state, LocalProver, LocalProverTrust, POLICY_PATH,
-    };
+    use crate::{local_unattested_state, LocalProver, LocalProverTrust, POLICY_PATH};
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -886,14 +873,8 @@ mod local {
                 "../../../../packages/tvc-wallet/src/local-testkit.json"
             ))
             .expect("testkit");
-            let (ephemeral_seed, quorum_seed) = local_testkit_qos_seeds();
             let wallet = test_wallet();
-            let state = local_unattested_state(
-                P256Pair::from_master_seed(&ephemeral_seed.into()).expect("ephemeral"),
-                P256Pair::from_master_seed(&quorum_seed.into()).expect("quorum"),
-                wallet.secret,
-                prover,
-            );
+            let state = local_unattested_state(wallet.secret, prover);
             Self {
                 state,
                 client_secret: decode_lower_hex_array(&keys.client_private_key_hex)
@@ -919,7 +900,7 @@ mod local {
             let mut descriptor = WalletDescriptor {
                 version: API_VERSION,
                 security_domain_id: sha256(self.keys.security_domain_label.as_bytes()),
-                network: NET.network,
+                network: spr_tvc_enclave::NETWORK,
                 turnkey_organization_id: self.keys.organization_id.clone(),
                 turnkey_wallet_id: self.keys.wallet_id.clone(),
                 address: Pubkey::new_from_array(self.wallet.public_key).to_string(),
@@ -1018,49 +999,20 @@ mod local {
             request: &OperationRequest,
             wallet_grant: Option<WalletGrant>,
         ) -> Result<OperationResult, Failure> {
-            let quorum =
-                QosP256Public::from_bytes(&self.state.info.quorum_public_key).expect("quorum");
-            let ciphertext = qos_encrypt(
-                &quorum.encryption,
-                jcs_serialize(request).expect("request").as_bytes(),
-            )
-            .expect("encrypt");
-            let body = jcs_serialize(&EncryptedRequest {
-                version: API_VERSION,
-                quorum_key_id: request.quorum_key_id.clone(),
-                quorum_key_epoch: request.quorum_key_epoch,
-                ciphertext,
-                wallet_grant,
-            })
-            .expect("envelope");
+            let request_json = jcs_serialize(request).expect("request");
+            let mut envelope = encrypt_request(&self.state.info, &request_json, wallet_grant);
+            envelope.quorum_key_id = request.quorum_key_id.clone();
+            envelope.quorum_key_epoch = request.quorum_key_epoch;
+            let body = jcs_serialize(&envelope).expect("envelope");
             let response = execute(&self.state, body.as_bytes()).await?;
-            let response: EncryptedResponse = parse_strict_json(&response).expect("response");
-            assert_eq!(response.request_id, request.request_id);
-
-            let proof = response.tvc_app_proof;
-            let ephemeral = QosP256Public::from_bytes(&proof.public_key).expect("ephemeral");
-            assert_eq!(proof.public_key, self.state.info.ephemeral_public_key);
-            verify_p256_message(
-                &ephemeral.signing,
-                proof.proof_payload.as_bytes(),
-                &proof.signature,
-            )
-            .expect("app proof signature");
-            let payload: OperationProofPayload =
-                parse_strict_json(&proof.proof_payload).expect("proof payload");
+            let (payload, plaintext) =
+                open_response(&self.state.info, &response, &self.response_secret);
+            assert_eq!(payload.request_id, request.request_id);
             assert_eq!(
                 payload.request_digest,
                 request_digest(request).expect("digest")
             );
-            assert_eq!(
-                payload.result_digest,
-                result_digest(&response.encrypted_result)
-            );
             assert_eq!(payload.operation, request.operation.kind());
-            parse_uncompressed_sec1(&request.client_response_public_key).expect("response key");
-
-            let plaintext =
-                qos_decrypt(&self.response_secret, &response.encrypted_result).expect("result");
             Ok(
                 parse_strict_json(std::str::from_utf8(plaintext.as_slice()).expect("utf8"))
                     .expect("result"),

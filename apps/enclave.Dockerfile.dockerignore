@@ -1,4 +1,4 @@
-# The build context is the repository root (`just image-privacy-wallet`). The
+# The build context is the repository root (`just image`). The
 # image builds only the Cargo workspace; the TypeScript workspace and prose stay
 # out so unrelated edits do not bust the build cache.
 **/.git
@@ -19,4 +19,4 @@ pnpm-workspace.yaml
 tsconfig.json
 eslint.config.js
 scripts
-apps/privacy-wallet/deploy
+apps/*/deploy

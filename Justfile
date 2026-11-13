@@ -58,7 +58,7 @@ build-ts:
 ci-ts:
     {{pnpm}} ci:ts
 
-# Fresh Zolana localnet plus the Rust testkit, then the client example's SOL and SPL lifecycles; needs a sibling ../zolana checkout.
+# Fresh Zolana localnet plus the Rust testkits, then the client example's SOL and SPL lifecycles and a transfer to an unregistered address; needs a sibling ../zolana checkout.
 headless-e2e port_offset="200":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -78,8 +78,9 @@ headless-e2e port_offset="200":
     indexer_url="http://127.0.0.1:${photon_port}"
     prover_url="http://127.0.0.1:${prover_port}"
     server_pid=""
+    service_pid=""
     cleanup() {
-        if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
+        for pid in $server_pid $service_pid; do kill "$pid" 2>/dev/null || true; done
         for port in "$rpc_port" "$photon_port" "$prover_port"; do
             lsof -ti "tcp:${port}" 2>/dev/null | xargs kill 2>/dev/null || true
         done
@@ -91,32 +92,37 @@ headless-e2e port_offset="200":
     bash scripts/start-localnet.sh "{{port_offset}}" "$wallet_keypair" "$fixture_dir" "$fixture_env"
     source "$fixture_env"
     solana airdrop 10 "$(solana address --keypair "$wallet_keypair")" --url "$rpc_url" >/dev/null
+    healthy() {
+        for _ in $(seq 1 120); do
+            if curl --fail --silent "http://127.0.0.1:$1/health" >/dev/null; then return; fi
+            if ! kill -0 "$2" 2>/dev/null; then wait "$2"; fi
+            sleep 1
+        done
+        curl --fail --silent "http://127.0.0.1:$1/health" >/dev/null
+    }
     cargo run -p zolana-tvc-privacy-wallet --features local-dev --bin zolana-tvc-privacy-wallet-local -- \
         --wallet-keypair "$wallet_keypair" --prover-url "$prover_url" &
     server_pid=$!
-    for _ in $(seq 1 120); do
-        if curl --fail --silent http://127.0.0.1:44020/health >/dev/null; then
-            break
-        fi
-        if ! kill -0 "${server_pid}" 2>/dev/null; then
-            wait "${server_pid}"
-        fi
-        sleep 1
-    done
-    curl --fail --silent http://127.0.0.1:44020/health >/dev/null
+    healthy 44020 "$server_pid"
+    cargo run -p spr-tvc-decryption-service --features local-dev --bin spr-tvc-decryption-service-local &
+    service_pid=$!
+    healthy 44030 "$service_pid"
     export TVC_LOCAL_TESTKIT_ENDPOINT="http://127.0.0.1:44020"
+    export DECRYPTION_SERVICE_LOCAL_ENDPOINT="http://127.0.0.1:44030"
     export TVC_LOCAL_PROVER_URL="http://127.0.0.1:44021"
     export TVC_SOLANA_KEYPAIR_PATH="$wallet_keypair" TVC_WALLET_PATH="$run_dir/wallet.tvc.json"
     export ZOLANA_ENDPOINT="$rpc_url" ZOLANA_INDEXER_URL="$indexer_url" ZOLANA_PROVER_URL="$prover_url"
     export SPL_MINT SPL_ASSET_ID SPL_TOKEN_ACCOUNT
-    for example in deposit_transfer_withdraw spl_deposit_transfer_withdraw; do
+    for example in deposit_transfer_withdraw spl_deposit_transfer_withdraw unregistered_recipient; do
         {{pnpm}} --filter zolana-tvc-typescript-client-example example "examples/$example.ts"
     done
 
 ci: fmt-check lint test check-protocol-fixtures install-ts ci-ts
 
-image-privacy-wallet network="devnet":
-    docker build --platform linux/amd64 --provenance=false --build-arg SPR_NETWORK={{network}} -f apps/privacy-wallet/Dockerfile .
+# One enclave application's image for a network: privacy-wallet or decryption-service.
+image app="privacy-wallet" network="devnet":
+    docker build --platform linux/amd64 --provenance=false --build-arg SPR_NETWORK={{network}} \
+        --build-arg APP_PACKAGE="$(jq -r .package apps/{{app}}/deploy/release.json)" -f apps/enclave.Dockerfile .
 
 image-tvc-gateway:
     docker build --platform linux/amd64 -f apps/tvc-gateway/Dockerfile .
@@ -126,7 +132,7 @@ gateway-e2e: install-ts
     {{pnpm}} build:ts
     {{pnpm}} --filter @zolana/tvc-gateway-e2e e2e
 
-# Deploy a network's published image, sign its release policy and pin it in tvc-wallet's src/releases/<network>.json; see scripts/release.mjs.
+# Deploy a network's published image, sign its release policy and pin it in tvc-wallet; see scripts/release.mjs.
 release network release_id *flags:
     node scripts/release.mjs all {{release_id}} --network {{network}} {{flags}}
 

@@ -32,7 +32,7 @@ prover policy signers.
 
 ```sh
 just check lint test                 # from the repository root
-just image-privacy-wallet mainnet    # linux/amd64 image; prints the /tvc_app SHA-256
+just image privacy-wallet mainnet    # linux/amd64 image; prints the /tvc_app SHA-256
 ```
 
 ## Local testkit

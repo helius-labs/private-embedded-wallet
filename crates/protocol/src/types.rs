@@ -34,8 +34,8 @@ impl Display for Network {
     }
 }
 
-/// What a request asks for, as advertised by `/v1/info`, granted by a
-/// descriptor, and named in the App Proof.
+/// What a request asks for, as advertised by `/v1/info` and named in the App
+/// Proof. `Service*` are the decryption service's; a descriptor grants the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum OperationKind {
@@ -44,6 +44,8 @@ pub enum OperationKind {
     Derive,
     TransactionKeys,
     Prove,
+    ServicePublicKeys,
+    ServiceDecrypt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,14 +146,13 @@ pub enum DecryptLabel {
     RingDeposit,
 }
 
-/// One ciphertext to open with the wallet's viewing key. The result is the
-/// cipher's output, which the client decodes; the enclave interprets nothing.
+/// One ciphertext to open with a viewing key the enclave holds. The client decodes the output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecryptItem {
     #[serde(with = "hex")]
     pub ciphertext: Vec<u8>,
-    /// Which of the wallet's viewing keys opens it; this wallet holds one.
+    /// The viewing key that opens it.
     #[serde(with = "hex")]
     pub viewing_public_key: Vec<u8>,
     #[serde(with = "hex")]

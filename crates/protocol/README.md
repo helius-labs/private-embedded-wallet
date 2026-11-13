@@ -33,6 +33,7 @@ transaction signatures are base58. A network is `devnet` or `mainnet`.
 | `ZOLANA_TVC_PROVISIONING_AUTH_V1` | `JCS(descriptor)` without `provisioning_signature` | What the provisioning key signs |
 | `ZOLANA_TVC_RELEASE_POLICY_V1` | `JCS(policy)` | What a release authority signs |
 | `ZOLANA_TVC_WALLET_GRANT_V1` | `JCS(grant)` without `signature` | What the grant key signs |
+| `SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1` | `JCS(request)` without a `Decrypt`'s `signature` | A decryption-service `request_digest` |
 
 ## Envelope
 
@@ -167,6 +168,61 @@ expired no earlier than 60 s ago, and valid for at most one hour. A client key
 stops within that hour of its grants no longer being issued, whatever else it
 holds. The grant travels outside the ciphertext so a gateway in front of the
 enclave can check it before forwarding.
+
+## Decryption service
+
+A second application, with its own Quorum key and release. It lets a Solana
+address receive private transfers before its owner registers a wallet. The
+enclave derives one viewing key and one nullifier key per address, its service
+keys, from a master seed it derives from its Quorum key. A sender asks for the
+public keys and encrypts to them. The owner later signs a request with the
+address, and the enclave opens its batch of outputs. The service viewing
+secret never leaves the enclave.
+
+The application serves the same routes as the wallet. A request to `POST
+/v1/operations` is an `EncryptedRequest` without a wallet grant. Its plaintext
+is a `ServiceRequest`: a request id, the release pins of an
+`OperationRequest`, a one-time response public key and the operation. It has
+no wallet descriptor, client authorization or timestamps, and no operation
+changes state. The answer is an `EncryptedResponse` whose App Proof has the
+type `spr.tvc.decryption_service.v1`, the request digest
+`H(SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
+`signature`, the operation as `Service` followed by its name below, and 32
+zero bytes as `sealed_seed_digest`. A refused request gets the generic
+`InvalidRequest`.
+
+| Operation | Returns |
+| --- | --- |
+| `PublicKeys { address }` | The address's service viewing and nullifier public keys. |
+| `Decrypt { signer, signature, items }` | One plaintext per item, in order, and the nullifier secret. `items` may be empty. |
+
+The master seed is
+`HKDF-Expand(HKDF-Extract(∅, quorum master seed), "TSPP/decryption-service/seed/v1", 32)`,
+so it is the same in every release and replica under the Quorum key, and
+clients name it by the Quorum public key the release policy pins. It is as
+durable as the Quorum key's shares.
+
+Service keys are HKDF-SHA256 over the master seed with an empty salt, one
+Expand per key: info `TSPP/decryption-service/view_key/x25519/v1 || address`
+for the 32-byte viewing secret, which is then clamped, and
+`TSPP/decryption-service/nf_key/v1 || address` for the 31-byte nullifier
+secret. `address` is the 32 raw bytes. Only an address that is a point on the
+Ed25519 curve outside the small-order subgroup has service keys, since no key
+can sign for any other.
+
+`Decrypt` names the base58 `signer` and carries the signer's Ed25519
+`signature`, verified strictly, over a Solana off-chain message v0 (format 0,
+one signer) whose application domain is
+`SHA-256("TSPP/decryption-service/decrypt/v1")` and whose payload is
+`TSPP/decryption-service/decrypt/v1/<network>/<hex of the request digest>`.
+The request digest covers the items and the response key, so a signature
+authorizes one request and only the holder of that response key reads the
+answer. The signature is not a secret.
+
+`Decrypt` takes the items of the wallet `Decrypt` operation, each naming the
+signer's service viewing public key, and answers every one: the pool cipher is
+unauthenticated, so the client adopts a plaintext only when its commitment
+equals the indexed one.
 
 ## Release policy
 

@@ -7,7 +7,7 @@ use axum::response::IntoResponse;
 
 /// Unauthenticated public errors. These MUST NOT reveal wallet or key existence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
-pub(crate) enum PublicError {
+pub enum PublicError {
     RequestTooLarge,
     MethodNotAllowed,
     NotFound,
@@ -39,7 +39,7 @@ impl IntoResponse for PublicError {
 }
 
 /// `200 OK` with `body`, already serialized JSON.
-pub(crate) fn ok(body: String) -> Response<Body> {
+pub fn ok(body: String) -> Response<Body> {
     json(StatusCode::OK, body)
 }
 

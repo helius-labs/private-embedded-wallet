@@ -5,12 +5,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use clap::Parser;
-use qos_p256::P256Pair;
 use zeroize::Zeroizing;
-use zolana_tvc_privacy_wallet::{
-    local_testkit_qos_seeds, local_unattested_state, router, shutdown_signal, LocalProver,
-    LocalProverTrust, NET,
-};
+use zolana_tvc_privacy_wallet::{local_unattested_state, router, LocalProver, LocalProverTrust};
 
 #[derive(Debug, Parser)]
 #[command(name = "zolana-tvc-privacy-wallet-local")]
@@ -55,31 +51,19 @@ async fn main() -> io::Result<()> {
     let mut wallet_secret = Zeroizing::new([0_u8; 32]);
     wallet_secret.copy_from_slice(&keypair[..32]);
 
-    // Stable test-only QOS keys let the SDK pin the local server instead of
-    // trusting whatever process happens to answer on the loopback port.
-    let (ephemeral_seed, quorum_seed) = local_testkit_qos_seeds();
-    let ephemeral = P256Pair::from_master_seed(&Zeroizing::new(ephemeral_seed))
-        .map_err(|_| io::Error::other("failed to derive local ephemeral key"))?;
-    let quorum = P256Pair::from_master_seed(&Zeroizing::new(quorum_seed))
-        .map_err(|_| io::Error::other("failed to derive local quorum key"))?;
     let address = SocketAddr::new(cli.host, cli.port);
     let state = if cli.live_prover {
-        let state =
-            local_unattested_state(ephemeral, quorum, *wallet_secret, LocalProverTrust::Image);
+        let state = local_unattested_state(*wallet_secret, LocalProverTrust::Image);
         eprintln!(
             "LOCAL DEVELOPMENT ONLY: unattested mock custody listening on {address}, sealing \
              to provers the {} prover policy admits; do not use funds",
-            NET.network
+            spr_tvc_enclave::NETWORK
         );
         state
     } else {
         let prover = LocalProver::new(&cli.prover_url);
-        let state = local_unattested_state(
-            ephemeral,
-            quorum,
-            *wallet_secret,
-            LocalProverTrust::StandIn(prover.anchors()),
-        );
+        let state =
+            local_unattested_state(*wallet_secret, LocalProverTrust::StandIn(prover.anchors()));
         let prover_address = SocketAddr::new(cli.host, cli.prover_tee_port);
         let prover_listener = tokio::net::TcpListener::bind(prover_address).await?;
         eprintln!(
@@ -93,8 +77,5 @@ async fn main() -> io::Result<()> {
         });
         state
     };
-    let listener = tokio::net::TcpListener::bind(address).await?;
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
+    spr_tvc_enclave::serve(address, router(state)).await
 }

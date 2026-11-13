@@ -7,7 +7,7 @@ import { defineConfig } from "tsup";
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url));
 
 function verifyProductionBoundary(): void {
-  const roots = ["dist/index.js", "dist/protocol.js"];
+  const roots = ["dist/index.js", "dist/protocol.js", "dist/decryption-service.js"];
   // Names that exist only in the testkit: its session factory and its pinned
   // key fixture.
   const localTestkitMarkers = /LocalTvcSession|local-testkit/;
@@ -34,6 +34,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     protocol: "src/protocol.ts",
+    "decryption-service": "src/decryption-service.ts",
     testing: "src/testing.ts",
   },
   // ESM only: `@heliuslabs/spr`, which the client imports, ships no CommonJS.

@@ -2,23 +2,7 @@
 
 use zolana_tvc_protocol::constants::API_VERSION;
 use zolana_tvc_protocol::error::{ErrorCode, TvcError};
-use zolana_tvc_protocol::types::{EncryptedRequest, OperationRequest, ServiceInfo};
-
-pub(super) fn check_encrypted_request_bindings(
-    outer: &EncryptedRequest,
-    running: &ServiceInfo,
-) -> Result<(), TvcError> {
-    if outer.version != API_VERSION {
-        return Err(TvcError::new(ErrorCode::UnsupportedVersion));
-    }
-    if outer.quorum_key_id != running.quorum_key_id {
-        return Err(TvcError::new(ErrorCode::ReleaseBindingMismatch));
-    }
-    if outer.quorum_key_epoch != running.quorum_key_epoch {
-        return Err(TvcError::new(ErrorCode::QuorumKeyEpochMismatch));
-    }
-    Ok(())
-}
+use zolana_tvc_protocol::types::{OperationRequest, ServiceInfo};
 
 pub(super) fn check_request_bindings(
     request: &OperationRequest,

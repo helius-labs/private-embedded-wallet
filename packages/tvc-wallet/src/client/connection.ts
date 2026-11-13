@@ -55,6 +55,8 @@ export type SprEmbeddedWalletConnectionConfig = {
   transport?: SprEmbeddedWalletTransport;
   /** Total deadline for each verification or operation, including proof lookup. Defaults to two minutes. */
   requestTimeoutMs?: number;
+  /** The proof type the application advertises; the privacy wallet's by default. */
+  proofType?: string;
 };
 
 /** What one verification established: the release's discovery, bound to the policy, and how to check each answer. */
@@ -197,7 +199,7 @@ export async function connectAndVerifyTvc(
   const challenge = qosPingChallenge(releasePolicy.policy.quorumPublicKey);
   const session = await fetchSession(backend, challenge.body, transport, signal);
   const info = parseServiceInfo(session.infoText);
-  bindDiscoveryToPolicy(info, releasePolicy);
+  bindDiscoveryToPolicy(info, releasePolicy, config.proofType);
   const appProof = verifyQosPingAnswer(session.pingText, challenge);
   await verifyReplica(appProof, session.bootProof, nowMs(), signal);
 

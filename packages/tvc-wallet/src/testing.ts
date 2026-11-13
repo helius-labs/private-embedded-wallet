@@ -17,6 +17,8 @@ import { createLocalSprEmbeddedWalletSession } from "./client/local-session.js";
 import type { SprEmbeddedWalletBackend } from "./client/backend.js";
 import type { SprRequestSigner } from "./client/operation-executor.js";
 import type { SprEmbeddedWalletTransport } from "./client/transport.js";
+import { decryptionServiceFromSession, type DecryptionService } from "./decryption-service/client.js";
+import { SERVICE_PROOF_TYPE } from "./decryption-service/protocol.js";
 import { createSprRequestSigner } from "./platform/signer.js";
 import {
   clientKeyIdFor,
@@ -67,6 +69,16 @@ const LOCAL_GRANT_LIFETIME_MS = 900_000n;
 const LOCAL_DESCRIPTOR_LIFETIME_MS = 86_400_000n;
 const digestLabel = (label: string) => encodeLowerHex(sha256(te.encode(label)));
 const LOCAL_OPERATIONS = localTestkit.operations as readonly OperationKind[];
+/** What a testkit client pins in place of an attestation, whichever application the testkit runs. */
+const LOCAL_RELEASE = {
+  expectedReleaseId: localTestkit.releaseId,
+  expectedSecurityDomainId: digestLabel(localTestkit.securityDomainLabel),
+  expectedManifestDigest: digestLabel(localTestkit.manifestLabel),
+  expectedExecutableDigest: digestLabel(localTestkit.executableLabel),
+  expectedQuorumKeyId: localTestkit.quorumKeyId,
+  expectedQuorumPublicKey: localTestkit.quorumPublicKey,
+  expectedEphemeralPublicKey: localTestkit.ephemeralPublicKey,
+} as const;
 
 export type LocalSprEmbeddedWalletConfig<Account extends SprEmbeddedWalletTurnkeyWalletAccount = SprEmbeddedWalletTurnkeyWalletAccount> = {
   /** The network the testkit was built for (`SPR_NETWORK`, devnet by default). */
@@ -180,13 +192,7 @@ export function createLocalSprEmbeddedWallet<Account extends SprEmbeddedWalletTu
     createLocalSprEmbeddedWalletSession({
       network,
       backend,
-      expectedReleaseId: localTestkit.releaseId,
-      expectedSecurityDomainId: digestLabel(localTestkit.securityDomainLabel),
-      expectedManifestDigest: digestLabel(localTestkit.manifestLabel),
-      expectedExecutableDigest: digestLabel(localTestkit.executableLabel),
-      expectedQuorumKeyId: localTestkit.quorumKeyId,
-      expectedQuorumPublicKey: localTestkit.quorumPublicKey,
-      expectedEphemeralPublicKey: localTestkit.ephemeralPublicKey,
+      ...LOCAL_RELEASE,
       expectedOperations: LOCAL_OPERATIONS,
       ...(config.nowMs === undefined ? {} : { nowMs: config.nowMs }),
       ...(config.transport === undefined ? {} : { transport: config.transport }),
@@ -198,6 +204,21 @@ export function createLocalSprEmbeddedWallet<Account extends SprEmbeddedWalletTu
       prover: proverFor(network, backend.endpoint, config.prover, config.transport),
     },
   );
+}
+
+/** The unattested local decryption service, `spr-tvc-decryption-service-local`, over loopback HTTP. */
+export function createLocalDecryptionService(config: {
+  /** The network the testkit was built for (`SPR_NETWORK`, devnet by default). */
+  readonly network: Network;
+  readonly endpoint: URL;
+}): DecryptionService {
+  return decryptionServiceFromSession(createLocalSprEmbeddedWalletSession({
+    network: requireNetwork(config.network),
+    backend: { kind: "enclave", endpoint: config.endpoint },
+    ...LOCAL_RELEASE,
+    expectedOperations: ["ServicePublicKeys", "ServiceDecrypt"],
+    expectedProofType: SERVICE_PROOF_TYPE,
+  }));
 }
 
 /** The testkit client key's signer. */

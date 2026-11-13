@@ -8,7 +8,6 @@ use zolana_tvc_protocol::types::Network;
 /// network's prover policy, as zolana pins them in
 /// `sdk-libs/client/src/prover/tee/signers.json`.
 pub struct Net {
-    pub network: Network,
     /// Verifies wallet descriptors.
     pub provisioning: [u8; 65],
     /// Verifies wallet grants.
@@ -24,7 +23,6 @@ const POLICY_SIGNER: [u8; 32] = [
 ];
 
 const DEVNET: Net = Net {
-    network: Network::Devnet,
     // The private half is the Secrets Manager secret zolnet-devnet-e/tvc-provisioning-key.
     provisioning: [
         0x04, 0x6e, 0x85, 0x2f, 0x2e, 0xb1, 0xbc, 0x79, 0xe2, 0xed, 0x3c, 0xdb, 0x57, 0xfa, 0x7e,
@@ -46,7 +44,6 @@ const DEVNET: Net = Net {
 };
 
 const MAINNET: Net = Net {
-    network: Network::Mainnet,
     // The private half is the Secrets Manager secret zolnet-mainnet/tvc-provisioning-key.
     provisioning: [
         0x04, 0xf8, 0x7c, 0xa3, 0x4f, 0xcd, 0x2b, 0x78, 0xf5, 0x73, 0x21, 0xc6, 0x62, 0xa6, 0x63,
@@ -67,37 +64,11 @@ const MAINNET: Net = Net {
     policy_threshold: 1,
 };
 
-const SPR_NETWORK: &str = match option_env!("SPR_NETWORK") {
-    Some(network) => network,
-    None => "devnet",
-};
-
-const _: () = assert!(
-    eq(SPR_NETWORK, "devnet") || eq(SPR_NETWORK, "mainnet"),
-    "SPR_NETWORK must be devnet or mainnet"
-);
-
 /// The network this image was built for.
-pub const NET: &Net = if eq(SPR_NETWORK, "mainnet") {
-    &MAINNET
-} else {
-    &DEVNET
+pub const NET: &Net = match spr_tvc_enclave::NETWORK {
+    Network::Mainnet => &MAINNET,
+    Network::Devnet => &DEVNET,
 };
-
-const fn eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut i = 0;
-    while i < a.len() {
-        if a[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
 
 #[cfg(test)]
 mod tests {
@@ -112,18 +83,17 @@ mod tests {
         for (net, network, provisioning, grant) in [
             (
                 &DEVNET,
-                Network::Devnet,
+                "devnet",
                 "046e852f2eb1bc79e2ed3cdb57fa7e2f75720fe53032f6aedcfbdfceb67f635691540564e208ca675f4d8b33291aa1388a0067dadc4f1d04519aab320bbd2cce64",
                 "04d92dfa9ba9aafd471ff9ffbf454b9a11b14858a8c2edb4f79a4ea4b4dba8ca5cac9ec06d9bb5576db72d07e087ac6aadf72e4eb31323aafaf9dbd133d26f4dc7",
             ),
             (
                 &MAINNET,
-                Network::Mainnet,
+                "mainnet",
                 "04f87ca34fcd2b78f57321c662a66395e400744a1951655ed77fbd1482a84e7590359b5f9b157a84489db68b02984c90b641a05deec3cdfd67dd990aecc89a58e0",
                 "048929b53b1b9d0b22be43a306583cdb9233e48da9e260cde61c6f93ceb1e5ea43973c01057c98779d47c03e5a5ed8e2ed1e0bc3d9685bc6deea2474d44fd57d5d",
             ),
         ] {
-            assert_eq!(net.network, network);
             assert_eq!(hex::encode(net.provisioning), provisioning, "{network}");
             assert_eq!(hex::encode(net.grant), grant, "{network}");
             assert_eq!(
@@ -138,7 +108,7 @@ mod tests {
     #[test]
     fn an_image_built_without_spr_network_is_devnet() {
         if option_env!("SPR_NETWORK").is_none() {
-            assert_eq!(NET.network, Network::Devnet);
+            assert_eq!(spr_tvc_enclave::NETWORK, Network::Devnet);
         }
     }
 }

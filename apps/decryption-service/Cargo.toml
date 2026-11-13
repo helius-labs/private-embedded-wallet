@@ -1,0 +1,42 @@
+[package]
+name = "spr-tvc-decryption-service"
+version = "0.1.0"
+description = "Attested decryption for Solana addresses without a registered private wallet"
+edition = "2021"
+rust-version = "1.98"
+license = "AGPL-3.0-only"
+publish = false
+autobins = false
+
+[features]
+# The unattested local testkit; the enclave binary never enables it.
+local-dev = ["spr-tvc-enclave/local-dev"]
+
+[dependencies]
+axum = { version = "=0.8.8", default-features = false, features = ["http1", "tokio"] }
+clap = { version = "=4.5.53", features = ["derive"] }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
+hkdf = "=0.12.4"
+qos_p256 = { version = "=0.12.1", default-features = false }
+sha2 = "=0.10.9"
+solana-pubkey = "=4.2.0"
+tokio = { version = "=1.48.0", default-features = false, features = ["macros", "rt-multi-thread"] }
+zeroize = "=1.9.0"
+spr-keypair = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297afa13e8bfb6edadf6408304ef3fc2f8c676" }
+spr-tvc-enclave = { path = "../../crates/enclave" }
+zolana-tvc-protocol = { path = "../../crates/protocol" }
+
+[dev-dependencies]
+hex = "=0.4.3"
+spr-tvc-enclave = { path = "../../crates/enclave", features = ["testing"] }
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa"] }
+tower = { version = "=0.5.3", features = ["util"] }
+
+[[bin]]
+name = "spr-tvc-decryption-service"
+path = "src/main.rs"
+
+[[bin]]
+name = "spr-tvc-decryption-service-local"
+path = "src/bin/local.rs"
+required-features = ["local-dev"]
