@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Releases the privacy wallet of one network in three phases, each resumable
-// on its own:
+// Releases one enclave application of one network in three phases, each
+// resumable on its own:
 //
 //   build   reads the /tvc_app digest from the network's image that
-//           publish-privacy-wallet-image pushed and writes the deployment
+//           publish-enclave-image pushed and writes the deployment
 //           descriptor
 //   deploy  creates the TVC deployment, approves and provisions it for every
 //           operator, makes it live, and waits for /v1/info to serve it
@@ -11,12 +11,13 @@
 //           pinned QOS PCRs, the manifest digest and Quorum key /v1/info
 //           reports, the Turnkey trust root), then assembles the release
 //           policy from /v1/info, signs it with a one-time authority key, and
-//           pins it in tvc-wallet's src/releases/<network>.json, the file
-//           tvc-gateway reads too
+//           pins it in tvc-wallet: src/releases/<network>.json for the
+//           privacy wallet, the file tvc-gateway reads too
 //
 //   node scripts/release.mjs <build|deploy|policy|all> <release-id>
-//     --network <devnet|mainnet> [--image <reference>] [--unattended]
-//     [--prune-deployments]
+//     --network <devnet|mainnet> [--app <privacy-wallet|decryption-service>]
+//     [--image <reference>] [--unattended] [--prune-deployments]
+//     [--operator-seeds <dir> --quorum-key-metadata <file>]
 //
 // Turnkey is driven through the `tvc` CLI and its active login; the policy
 // phase reads that login's API key to fetch the Boot Proof, and verifies it
@@ -24,10 +25,13 @@
 // interactive: the CLI shows the QOS manifest for each operator to confirm.
 // --unattended approves without that review, on devnet only.
 // --prune-deployments deletes the oldest deployments that are neither live nor
-// this release's until it fits under Turnkey's cap. The constants are in
-// apps/privacy-wallet/deploy/release.json, shared at the top and per network
-// under `networks`; each network's deployment files are in
-// apps/privacy-wallet/deploy/<network>/.
+// this release's until it fits under Turnkey's cap. With a local Quorum key,
+// --operator-seeds holds the key files of the operators who act here
+// (`operator-<n>.seed` for the n-th of `operatorIds`) and
+// --quorum-key-metadata the encrypted shares. The constants are in
+// apps/<app>/deploy/release.json, shared at the top and per network under
+// `networks`; each network's deployment files are in
+// apps/<app>/deploy/<network>/.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createECDH, createPrivateKey, sign } from "node:crypto";
@@ -39,12 +43,26 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const DEPLOY_DIR = join(ROOT, "apps/privacy-wallet/deploy");
 const NETWORKS = ["devnet", "mainnet"];
 /** `API_VERSION` in crates/protocol/src/constants.rs: the release policy and `/v1/info` version. */
 const API_VERSION = 1;
-/** The operations, in the order the enclave advertises them and clients compare them. */
-const OPERATIONS = ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"];
+/**
+ * Each enclave application: its operations, in the order the enclave
+ * advertises them and clients compare them, and its release pins in tvc-wallet.
+ */
+const APPS = {
+  "privacy-wallet": {
+    operations: ["Bootstrap", "Decrypt", "Derive", "TransactionKeys", "Prove"],
+    pins: "packages/tvc-wallet/src/releases",
+  },
+  "decryption-service": {
+    operations: ["ServicePublicKeys", "ServiceDecrypt"],
+    pins: "packages/tvc-wallet/src/decryption-service/releases",
+  },
+};
+/** A `cfg` without an `app` is the privacy wallet's. */
+const appOf = (cfg) => cfg.app ?? "privacy-wallet";
+const deployDir = (cfg) => join(ROOT, "apps", appOf(cfg), "deploy");
 const HEX = (bytes) => new RegExp(`^[0-9a-f]{${2 * bytes}}$`);
 const WAIT_MS = 20 * 60_000;
 /** Turnkey's cap on deployable deployments per TVC app. */
@@ -53,10 +71,10 @@ const DEPLOYABLE_LIMIT = 3;
 const CLIENT_TESTING = join(ROOT, "packages/tvc-wallet/dist/testing.js");
 const TURNKEY_API = "https://api.turnkey.com";
 
-/** The network's release pin in tvc-wallet, which tvc-gateway reads too. */
-const pinPath = (network) => join(ROOT, "packages/tvc-wallet/src/releases", `${network}.json`);
-const descriptorPath = (cfg, releaseId) => join(DEPLOY_DIR, cfg.network, `privacy-wallet-${releaseId}.deployment.json`);
-const recordPath = (cfg, releaseId) => join(DEPLOY_DIR, cfg.network, `privacy-wallet-${releaseId}.deploy.json`);
+/** The network's release pin in tvc-wallet. */
+const pinPath = (cfg) => join(ROOT, APPS[appOf(cfg)].pins, `${cfg.network}.json`);
+const descriptorPath = (cfg, releaseId) => join(deployDir(cfg), cfg.network, `${appOf(cfg)}-${releaseId}.deployment.json`);
+const recordPath = (cfg, releaseId) => join(deployDir(cfg), cfg.network, `${appOf(cfg)}-${releaseId}.deploy.json`);
 
 class ReleaseError extends Error {}
 
@@ -114,8 +132,8 @@ async function waitFor(label, ready) {
  * The shared constants of release.json with those of `network` on top, and
  * `network` itself. A network without an entry has no Turnkey app yet.
  */
-function config(network) {
-  const { networks, ...shared } = readJson(join(DEPLOY_DIR, "release.json"));
+function config(network, app) {
+  const { networks, ...shared } = readJson(join(deployDir({ app }), "release.json"));
   for (const key of ["imageRepository", "qosVersion", "turnkeyTrustRootId"]) {
     if (typeof shared[key] !== "string" || shared[key] === "") fail(`release.json: ${key} is required`);
   }
@@ -139,16 +157,15 @@ function config(network) {
   if (!Array.isArray(net.operatorIds) || net.operatorIds.length === 0) {
     fail(`release.json: networks.${network}.operatorIds is required`);
   }
-  return { ...shared, ...net, network };
+  return { ...shared, ...net, network, app };
 }
 
 function build(releaseId, cfg, image) {
-  if (!image) fail("build needs --image, the reference publish-privacy-wallet-image reports");
-  // The publish workflow tags each image with the network whose prover policy
-  // and keys it was built with.
-  const tag = `${cfg.imageRepository}:privacy-wallet-${cfg.network}-`;
+  if (!image) fail("build needs --image, the reference publish-enclave-image reports");
+  // The publish workflow tags each image with its application and the network it was built for.
+  const tag = `${cfg.imageRepository}:${appOf(cfg)}-${cfg.network}-`;
   if (!image.startsWith(tag) || !/^[^@]+@sha256:[0-9a-f]{64}$/.test(image)) {
-    fail(`--image must be ${tag}<commit>@sha256:<digest>, the ${cfg.network} image publish-privacy-wallet-image reports`);
+    fail(`--image must be ${tag}<commit>@sha256:<digest>, the ${cfg.network} image publish-enclave-image reports`);
   }
   const pivotDigest = capture("docker", ["run", "--rm", "--platform", "linux/amd64", "--entrypoint", "sha256sum", image, "/tvc_app"]).split(" ")[0];
   if (!HEX(32).test(pivotDigest)) fail(`could not read the /tvc_app digest: ${pivotDigest}`);
@@ -210,8 +227,26 @@ async function awaitRelease(releaseId, cfg) {
   return info;
 }
 
+/**
+ * Re-encrypts one operator's share of a local Quorum key to the deployment's
+ * enclave, once tvc has verified its attestation, and posts it.
+ */
+function postLocalShare(deployId, operatorId, { seed, metadata }) {
+  const scratch = mkdtempSync(join(tmpdir(), "spr-tvc-share-"));
+  try {
+    const bundle = join(scratch, "bundle.json");
+    const share = join(scratch, "share.json");
+    tvc("deploy", "provisioning-details", "--deploy-id", deployId, "--provision-bundle-out", bundle);
+    tvc("keys", "re-encrypt-local-share", "--quorum-key-metadata", metadata, "--provision-bundle", bundle,
+      "--operator-seed-path", seed, "--re-encrypted-out", share);
+    tvc("deploy", "post-share", "--re-encrypted-share", share, "--share-operator-id", operatorId);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 /** The deployment record is the phase's progress: a re-run continues where the last one stopped. */
-async function deploy(releaseId, cfg, { unattended, prune }) {
+async function deploy(releaseId, cfg, { unattended, prune, seeds, metadata }) {
   const descriptor = descriptorPath(cfg, releaseId);
   if (!existsSync(descriptor)) fail(`no ${relative(ROOT, descriptor)}: run build first`);
   const path = recordPath(cfg, releaseId);
@@ -223,8 +258,14 @@ async function deploy(releaseId, cfg, { unattended, prune }) {
   const { deployId } = record;
   if (prune) pruneDeployments(cfg, deployId);
 
-  for (const operatorId of cfg.operatorIds.filter((id) => !record.approved.includes(id))) {
-    const approve = ["deploy", "approve", "--deploy-id", deployId, "--operator-id", operatorId];
+  // With a local Quorum key, the operators whose key files are here act; a threshold of them is enough.
+  const seedOf = (operatorId) => join(seeds, `operator-${cfg.operatorIds.indexOf(operatorId) + 1}.seed`);
+  const operatorIds = seeds ? cfg.operatorIds.filter((id) => existsSync(seedOf(id))) : cfg.operatorIds;
+  if (operatorIds.length === 0) fail(`no operator-<n>.seed in ${seeds}`);
+
+  for (const operatorId of operatorIds.filter((id) => !record.approved.includes(id))) {
+    const approve = ["deploy", "approve", "--deploy-id", deployId,
+      ...(seeds ? ["--operator-seed-path", seedOf(operatorId)] : ["--operator-id", operatorId])];
     if (unattended) tvc(...approve, "--dangerous-skip-interactive");
     else run("tvc", approve);
     record.approved.push(operatorId);
@@ -233,18 +274,27 @@ async function deploy(releaseId, cfg, { unattended, prune }) {
 
   // Provisioning hands each operator's share of the Quorum key to the
   // enclave, once its attestation is up and tvc has verified it.
-  const unprovisioned = cfg.operatorIds.filter((id) => !record.provisioned.includes(id));
+  const unprovisioned = operatorIds.filter((id) => !record.provisioned.includes(id));
   if (unprovisioned.length > 0) {
     await waitFor("the provisioning attestation", () => tvcSucceeds("deploy", "provisioning-details", "--deploy-id", deployId));
   }
   for (const operatorId of unprovisioned) {
-    tvc("deploy", "provision", "--deploy-id", deployId, "--operator-id", operatorId);
+    if (seeds) postLocalShare(deployId, operatorId, { seed: seedOf(operatorId), metadata });
+    else tvc("deploy", "provision", "--deploy-id", deployId, "--operator-id", operatorId);
     record.provisioned.push(operatorId);
     save();
   }
 
   if (!record.live) {
-    await waitFor("a ready replica", () => tvc("deploy", "get-status", "--deploy-id", deployId).replicas?.ready > 0);
+    // Turnkey answers the status of a deployment that is still starting with an error at times.
+    await waitFor("a ready replica", () => {
+      try {
+        return tvc("deploy", "get-status", "--deploy-id", deployId).replicas?.ready > 0;
+      } catch (error) {
+        if (error instanceof ReleaseError) return false;
+        throw error;
+      }
+    });
     // An app's first deployment is live once healthy, and Turnkey refuses to set it live again.
     if (liveDeploymentId(cfg) !== deployId) tvc("app", "set-live-deploy", "--deploy-id", deployId);
     record.live = true;
@@ -270,8 +320,9 @@ export function releasePolicy(releaseId, cfg, info, now) {
   if (!HEX(32).test(info.manifest_digest)) fail("/v1/info manifest_digest is not 32-byte hex");
   if (!HEX(32).test(info.executable_digest)) fail("/v1/info executable_digest is not 32-byte hex");
   if (!HEX(130).test(info.quorum_public_key)) fail("/v1/info quorum_public_key is not a QOS public key");
-  if (!Array.isArray(info.supported_operations) || info.supported_operations.join() !== OPERATIONS.join()) {
-    fail(`/v1/info supported_operations are ${info.supported_operations}, expected ${OPERATIONS.join(", ")}`);
+  const { operations } = APPS[appOf(cfg)];
+  if (!Array.isArray(info.supported_operations) || info.supported_operations.join() !== operations.join()) {
+    fail(`/v1/info supported_operations are ${info.supported_operations}, expected ${operations.join(", ")}`);
   }
   return {
     version: API_VERSION,
@@ -284,7 +335,7 @@ export function releasePolicy(releaseId, cfg, info, now) {
     quorumKeyId: cfg.quorumKeyId,
     quorumKeyEpoch: cfg.quorumKeyEpoch,
     quorumPublicKey: info.quorum_public_key,
-    allowedOperations: OPERATIONS,
+    allowedOperations: operations,
     maxEncryptedRequestBytes: Number(info.max_encrypted_request_bytes),
     maxEncryptedResponseBytes: Number(info.max_encrypted_response_bytes),
     turnkeyTrustRootId: cfg.turnkeyTrustRootId,
@@ -429,12 +480,13 @@ export async function verifiedReleaseFile(releaseId, cfg, info, now, { verify = 
 
 async function policy(releaseId, cfg) {
   const info = await awaitRelease(releaseId, cfg);
-  writeJson(pinPath(cfg.network), await verifiedReleaseFile(releaseId, cfg, info, Date.now()));
+  writeJson(pinPath(cfg), await verifiedReleaseFile(releaseId, cfg, info, Date.now()));
 }
 
 const USAGE =
   "usage: node scripts/release.mjs <build|deploy|policy|all> <release-id> --network <devnet|mainnet> " +
-  "[--image <reference>] [--unattended] [--prune-deployments]";
+  `[--app <${Object.keys(APPS).join("|")}>] [--image <reference>] [--unattended] [--prune-deployments] ` +
+  "[--operator-seeds <dir> --quorum-key-metadata <file>]";
 const PHASES = ["build", "deploy", "policy"];
 
 async function main() {
@@ -444,7 +496,10 @@ async function main() {
       allowPositionals: true,
       options: {
         network: { type: "string" },
+        app: { type: "string", default: "privacy-wallet" },
         image: { type: "string" },
+        "operator-seeds": { type: "string" },
+        "quorum-key-metadata": { type: "string" },
         unattended: { type: "boolean", default: false },
         "prune-deployments": { type: "boolean", default: false },
       },
@@ -460,15 +515,21 @@ async function main() {
   if (!NETWORKS.includes(network)) fail(`--network must be devnet or mainnet\n${USAGE}`);
   // Each operator reviews the QOS manifest of a mainnet deployment before approving it.
   if (values.unattended && network === "mainnet") fail("--unattended is refused on mainnet: every approval is reviewed");
-  const cfg = config(network);
+  if (!Object.hasOwn(APPS, values.app)) fail(`--app must be one of ${Object.keys(APPS).join(", ")}\n${USAGE}`);
+  const seeds = values["operator-seeds"];
+  const metadata = values["quorum-key-metadata"];
+  if (Boolean(seeds) !== Boolean(metadata)) fail("--operator-seeds and --quorum-key-metadata go together");
+  const cfg = config(network, values.app);
   for (const step of phase === "all" ? PHASES : [phase]) {
     console.log(`\n== ${step} ${releaseId} (${network})`);
     if (step === "build") build(releaseId, cfg, values.image);
-    if (step === "deploy") await deploy(releaseId, cfg, { unattended: values.unattended, prune: values["prune-deployments"] });
+    if (step === "deploy") {
+      await deploy(releaseId, cfg, { unattended: values.unattended, prune: values["prune-deployments"], seeds, metadata });
+    }
     if (step === "policy") await policy(releaseId, cfg);
   }
   console.log(
-    `\n${releaseId}: done. Commit ${relative(ROOT, join(DEPLOY_DIR, network))} and ${relative(ROOT, pinPath(network))}.`,
+    `\n${releaseId}: done. Commit ${relative(ROOT, join(deployDir(cfg), network))} and ${relative(ROOT, pinPath(cfg))}.`,
   );
 }
 

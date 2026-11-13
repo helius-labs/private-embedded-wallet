@@ -119,8 +119,10 @@ headless-e2e port_offset="200":
 
 ci: fmt-check lint test check-protocol-fixtures install-ts ci-ts
 
-image-privacy-wallet network="devnet":
-    docker build --platform linux/amd64 --provenance=false --build-arg SPR_NETWORK={{network}} -f apps/privacy-wallet/Dockerfile .
+# One enclave application's image for a network: privacy-wallet or decryption-service.
+image app="privacy-wallet" network="devnet":
+    docker build --platform linux/amd64 --provenance=false --build-arg SPR_NETWORK={{network}} \
+        --build-arg APP_PACKAGE="$(jq -r .package apps/{{app}}/deploy/release.json)" -f apps/enclave.Dockerfile .
 
 image-tvc-gateway:
     docker build --platform linux/amd64 -f apps/tvc-gateway/Dockerfile .
@@ -130,7 +132,7 @@ gateway-e2e: install-ts
     {{pnpm}} build:ts
     {{pnpm}} --filter @zolana/tvc-gateway-e2e e2e
 
-# Deploy a network's published image, sign its release policy and pin it in tvc-wallet's src/releases/<network>.json; see scripts/release.mjs.
+# Deploy a network's published image, sign its release policy and pin it in tvc-wallet; see scripts/release.mjs.
 release network release_id *flags:
     node scripts/release.mjs all {{release_id}} --network {{network}} {{flags}}
 

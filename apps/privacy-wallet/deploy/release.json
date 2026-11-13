@@ -1,4 +1,5 @@
 {
+  "package": "zolana-tvc-privacy-wallet",
   "imageRepository": "ghcr.io/helius-labs/zolana-tvc-privacy-wallet",
   "qosVersion": "0.12.1",
   "turnkeyTrustRootId": "aws-nitro-root-g1",

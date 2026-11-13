@@ -1,0 +1,46 @@
+{
+  "name": "spr-decryption-service-devnet",
+  "quorumPublicKey": "04ab0551a063cd66909c1994d014caeedcc2684dac8515429e2d7cf6aa28a9e4349f9eef89d7a345aac552eeeb91b6bfd51a7bc8ba66b0d3f1d0751e4025fab3ec04de006704310da81e513c9810a3ffc972b9dd6cb5599e81833d95710102da221fc310255727dd8e2f296c5d54f55d71ac74625ef7397f89e7b929695cd5ca4428",
+  "enableEgress": false,
+  "manifestSetId": null,
+  "manifestSetParams": {
+    "name": "spr-decryption-service-devnet-manifest-2of3",
+    "threshold": 2,
+    "newOperators": [
+      {
+        "name": "spr-decryption-service-devnet-operator-1",
+        "publicKey": "0432b71900511c19a5fdf42c2c91d5b6e1c91ec0fa4fe89f1858e31cd86b0f84d36866590a037db48e531f93e84f42f958a7498292dc16f5f1b88d58751e889f8304c6a564de3622adf3027960455ef173ea8bb1eb4435bc18ce3547e91e8eeba9f1aacffc0169fe9060383fb704b85bb6b7bfa9d57eff981e66390cac443982837d"
+      },
+      {
+        "name": "spr-decryption-service-devnet-operator-2",
+        "publicKey": "0451364bfdf752a5f7bb5b6dab705fce1bf4b0b55ab01b9770026ccb310ffb823c241c7d52977b771d005293696a3ec42feba5aaca7fb182a8f9eced479c14efc60474624a09ffec79e8b476a51a6fcbf3a81677b66e94d1f6beda148c551528d511727f86d60d84186b8335be52f5c8b1901ddae57e5dc9cc0d044493e45cb1685b"
+      },
+      {
+        "name": "spr-decryption-service-devnet-operator-3",
+        "publicKey": "045a145a4740d9bea462fe1f5b68d028ed3e4a99448021d424ea8337c1e4b5df1a65840945bf414f226edb649a68d3c5541bcbf2fb0739ef1089dfbbdafe0c101704f538a447c3cab3714f6bf286c69a0cd849a21f4a220b16652edf33956c33624bacf10537f96f8013205e09ef74c45a534affe32812891cf0d41f7cea182ca809"
+      }
+    ],
+    "existingOperatorIds": []
+  },
+  "shareSetId": null,
+  "shareSetParams": {
+    "name": "spr-decryption-service-devnet-share-2of3",
+    "threshold": 2,
+    "newOperators": [
+      {
+        "name": "spr-decryption-service-devnet-operator-1",
+        "publicKey": "0432b71900511c19a5fdf42c2c91d5b6e1c91ec0fa4fe89f1858e31cd86b0f84d36866590a037db48e531f93e84f42f958a7498292dc16f5f1b88d58751e889f8304c6a564de3622adf3027960455ef173ea8bb1eb4435bc18ce3547e91e8eeba9f1aacffc0169fe9060383fb704b85bb6b7bfa9d57eff981e66390cac443982837d"
+      },
+      {
+        "name": "spr-decryption-service-devnet-operator-2",
+        "publicKey": "0451364bfdf752a5f7bb5b6dab705fce1bf4b0b55ab01b9770026ccb310ffb823c241c7d52977b771d005293696a3ec42feba5aaca7fb182a8f9eced479c14efc60474624a09ffec79e8b476a51a6fcbf3a81677b66e94d1f6beda148c551528d511727f86d60d84186b8335be52f5c8b1901ddae57e5dc9cc0d044493e45cb1685b"
+      },
+      {
+        "name": "spr-decryption-service-devnet-operator-3",
+        "publicKey": "045a145a4740d9bea462fe1f5b68d028ed3e4a99448021d424ea8337c1e4b5df1a65840945bf414f226edb649a68d3c5541bcbf2fb0739ef1089dfbbdafe0c101704f538a447c3cab3714f6bf286c69a0cd849a21f4a220b16652edf33956c33624bacf10537f96f8013205e09ef74c45a534affe32812891cf0d41f7cea182ca809"
+      }
+    ],
+    "existingOperatorIds": []
+  },
+  "dangerousEnableDebugModeDeployments": false
+}

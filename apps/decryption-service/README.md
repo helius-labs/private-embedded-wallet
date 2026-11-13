@@ -45,9 +45,14 @@ The client is `@heliuslabs/spr-embedded-wallet/decryption-service`
 against the testkit: a transfer to an address without a wallet, opened through
 the service and swept to the owner's own wallet.
 
+Devnet has a Turnkey application,
+[`spr-decryption-service-devnet`](deploy/devnet/spr-decryption-service-devnet.app.json),
+with a local Quorum key split 2-of-3 among three operator key files, which
+stand in for YubiKeys there. [`scripts/release.mjs`](../../scripts/README.md#release)
+releases it with `--app decryption-service`.
+
 Not there yet:
 
-- An enclave image, a release policy and a Turnkey application with a local
-  Quorum key and its operators.
+- A published image and a release: `publish-enclave-image` runs from `main`.
 - A gateway route. Until then a client needs a Turnkey API key of the
   application's organization to fetch Boot Proofs.

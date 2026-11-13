@@ -1,17 +1,22 @@
-# Publishes apps/privacy-wallet into the GHCR package named by `imageRepository`
-# in apps/privacy-wallet/deploy/release.json, tagged with the network whose
-# signed prover policy it accepts and the commit. Turnkey
-# pulls it anonymously, so the package must be public. The release continues
-# on an operator's machine with the reference from the run summary:
-#   just release <network> <release-id> --image <reference>
+# Publishes one enclave application into the GHCR package named by
+# `imageRepository` in its apps/<app>/deploy/release.json, tagged with the
+# network it was built for and the commit. Turnkey pulls it anonymously, so the
+# package must be public. The release continues on an operator's machine with
+# the reference from the run summary:
+#   just release <network> <release-id> --app <app> --image <reference>
 
-name: publish-privacy-wallet-image
+name: publish-enclave-image
 
 on:
   workflow_dispatch:
     inputs:
+      app:
+        description: Enclave application
+        type: choice
+        options: [privacy-wallet, decryption-service]
+        required: true
       network:
-        description: Network whose signed prover policy the image accepts
+        description: Network the image is built for
         type: choice
         options: [devnet, mainnet]
         required: true
@@ -20,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-privacy-wallet-image-${{ inputs.network }}-${{ github.sha }}
+  group: publish-enclave-image-${{ inputs.app }}-${{ inputs.network }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -38,8 +43,12 @@ jobs:
 
       - id: image
         env:
+          APP: ${{ inputs.app }}
           NETWORK: ${{ inputs.network }}
-        run: echo "tag=$(jq -r .imageRepository apps/privacy-wallet/deploy/release.json):privacy-wallet-${NETWORK}-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          release="apps/${APP}/deploy/release.json"
+          echo "tag=$(jq -r .imageRepository "$release"):${APP}-${NETWORK}-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "package=$(jq -r .package "$release")" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -54,15 +63,17 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: apps/privacy-wallet/Dockerfile
+          file: apps/enclave.Dockerfile
           platforms: linux/amd64
           provenance: false
           sbom: false
-          build-args: SPR_NETWORK=${{ inputs.network }}
+          build-args: |
+            SPR_NETWORK=${{ inputs.network }}
+            APP_PACKAGE=${{ steps.image.outputs.package }}
           push: true
           tags: ${{ steps.image.outputs.tag }}
-          cache-from: type=gha,scope=privacy-wallet-${{ inputs.network }}
-          cache-to: type=gha,mode=max,scope=privacy-wallet-${{ inputs.network }}
+          cache-from: type=gha,scope=${{ inputs.app }}-${{ inputs.network }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.app }}-${{ inputs.network }}
 
       - name: Report pinned reference
         env:
@@ -70,7 +81,7 @@ jobs:
         run: |
           pivot_digest="$(docker run --rm --platform linux/amd64 --entrypoint sha256sum "$IMAGE" /tvc_app | cut -d' ' -f1)"
           {
-            echo "### privacy-wallet (${{ inputs.network }})"
+            echo "### ${{ inputs.app }} (${{ inputs.network }})"
             echo '```'
             echo "image:           $IMAGE"
             echo "/tvc_app sha256: $pivot_digest"
