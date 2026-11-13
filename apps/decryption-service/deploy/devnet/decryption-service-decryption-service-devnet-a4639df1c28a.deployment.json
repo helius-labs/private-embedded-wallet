@@ -1,0 +1,25 @@
+{
+  "appId": "67d544db-f727-4c8b-83fe-74a929ac763b",
+  "qosVersion": "0.12.1",
+  "pivotContainerImageUrl": "ghcr.io/helius-labs/spr-tvc-decryption-service:decryption-service-devnet-a4639df1c28a@sha256:716db68534c3d4dd23ca15a9d090659018c0e5f8cdb9cf9ef9e86c9b7872f204",
+  "pivotPath": "/tvc_app",
+  "pivotArgs": [
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "3000",
+    "--security-domain-id",
+    "6d110d0f6ff414817ed4785cf5c2938a780ddbe2929d48abff6596628d2a5122",
+    "--release-id",
+    "decryption-service-devnet-a4639df1c28a",
+    "--quorum-key-id",
+    "local-a3bff1d85778f146",
+    "--quorum-key-epoch",
+    "1"
+  ],
+  "expectedPivotDigest": "69fb88a55c2184bf512f109916670488d0497843177bf5ce90a877e6f6c5a03a",
+  "dangerousDeployDebugMode": false,
+  "healthCheckType": "TVC_HEALTH_CHECK_TYPE_HTTP",
+  "healthCheckPort": 3000,
+  "publicIngressPort": 3000
+}

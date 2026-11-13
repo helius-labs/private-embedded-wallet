@@ -1,1 +1,57 @@
-null
+{
+  "releasePolicy": {
+    "authoritySetId": "decryption-service-devnet-a4639df1c28a-2026-11",
+    "policy": {
+      "acceptedExecutableDigests": [
+        "69fb88a55c2184bf512f109916670488d0497843177bf5ce90a877e6f6c5a03a"
+      ],
+      "acceptedManifestDigests": [
+        "f180b680ba811a70ee42b787581b34b8eff92dc537f4622a4756d7dd87b353a3"
+      ],
+      "allowedOperations": [
+        "ServicePublicKeys",
+        "ServiceDecrypt"
+      ],
+      "expiresAtMs": "1826141650933",
+      "maxEncryptedRequestBytes": 262144,
+      "maxEncryptedResponseBytes": 262144,
+      "network": "devnet",
+      "quorumKeyEpoch": "1",
+      "quorumKeyId": "local-a3bff1d85778f146",
+      "quorumPublicKey": "04ab0551a063cd66909c1994d014caeedcc2684dac8515429e2d7cf6aa28a9e4349f9eef89d7a345aac552eeeb91b6bfd51a7bc8ba66b0d3f1d0751e4025fab3ec04de006704310da81e513c9810a3ffc972b9dd6cb5599e81833d95710102da221fc310255727dd8e2f296c5d54f55d71ac74625ef7397f89e7b929695cd5ca4428",
+      "releaseId": "decryption-service-devnet-a4639df1c28a",
+      "revocationEpoch": "0",
+      "securityDomainId": "6d110d0f6ff414817ed4785cf5c2938a780ddbe2929d48abff6596628d2a5122",
+      "turnkeyProofSchemaVersions": [
+        "turnkey.boot_proof.v1"
+      ],
+      "turnkeyTrustRootId": "aws-nitro-root-g1",
+      "tvcApplicationId": "67d544db-f727-4c8b-83fe-74a929ac763b",
+      "validFromMs": "1794605650933",
+      "version": 1
+    },
+    "signatures": [
+      {
+        "keyId": "decryption-service-devnet-a4639df1c28a-authority-1",
+        "signature": "e5d06597bda3a90b9f42e720de95bad00bcd30e43e23eb49542ffa88a1e588be21360ee732f2c6644e31f2c1a0cf19ce14226ae038c963a8506037870f449929"
+      }
+    ]
+  },
+  "releaseAuthorities": {
+    "authoritySetId": "decryption-service-devnet-a4639df1c28a-2026-11",
+    "keys": [
+      {
+        "keyId": "decryption-service-devnet-a4639df1c28a-authority-1",
+        "publicKey": "04280a2e6db1afe0c9f464e36b33fb89b7c5c7b10b1b99300236d0455579ea8d6e5ccc2d83545628113f194d59fb8c81f0c14b7006aa254e1c6aa2516a5474215c"
+      }
+    ],
+    "minimumRevocationEpoch": "0",
+    "threshold": 1
+  },
+  "qosIdentityPcrs": {
+    "0": "a16c37b49023089be139b667cf87a32c796a9ccacacf9f0c87bf1a2f58546f2b46218ee6c0a17885f8a7d1b8cccff078",
+    "1": "a16c37b49023089be139b667cf87a32c796a9ccacacf9f0c87bf1a2f58546f2b46218ee6c0a17885f8a7d1b8cccff078",
+    "2": "21b9efbc184807662e966d34f390821309eeac6802309798826296bf3e8bec7c10edb30948c90ba67310f7b964fc500a",
+    "3": "321c3cd57bd9dc5549f349c315b93167fca1adbaf19fbb9c548101bae757970fe269e530ba684826e2f5fb043319a20f"
+  }
+}

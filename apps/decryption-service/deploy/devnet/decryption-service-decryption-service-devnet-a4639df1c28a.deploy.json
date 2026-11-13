@@ -1,0 +1,14 @@
+{
+  "deployId": "c1154443-d548-4378-995e-51dcb28357c5",
+  "approved": [
+    "08092d0e-5d15-4a87-991b-11d859ebb419",
+    "53b11326-19cd-4b2d-8f66-28370a5de181",
+    "bd5c88d7-8e51-4e7f-8ab1-2edba52b88f1"
+  ],
+  "provisioned": [
+    "08092d0e-5d15-4a87-991b-11d859ebb419",
+    "53b11326-19cd-4b2d-8f66-28370a5de181",
+    "bd5c88d7-8e51-4e7f-8ab1-2edba52b88f1"
+  ],
+  "live": true
+}
