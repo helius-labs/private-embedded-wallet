@@ -628,7 +628,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, spr_tvc_protocol::err
     }
     {
         let mut m = info.clone();
-        m.proof_type = "zolana.tvc.other.v1".to_owned();
+        m.proof_type = "spr.tvc.other.v1".to_owned();
         binding_cases.push(("proof_type", m));
     }
     {

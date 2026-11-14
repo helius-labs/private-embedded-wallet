@@ -36,11 +36,7 @@ and TEE prover at `/v1/spr`, all with a Helius API key.
 
 ## Naming
 
-This repository is [`helius-labs/spr-tvc`](https://github.com/helius-labs/spr-tvc).
-Rust crates and binaries use the `spr-tvc-*` prefix. Wire proof types stay
-`zolana.tvc.*` so live enclaves and clients keep matching. Historical
-deployment records under `apps/*/deploy/**/*.deployment.json` still point at
-the previous GHCR image names.
+This repository is [`helius-labs/spr-tvc`](https://github.com/helius-labs/spr-tvc). Rust crates and binaries use the `spr-tvc-*` prefix; wire proof types and digest domains use `spr.tvc.*` / `SPR_TVC_*`. Historical deployment records under `apps/*/deploy/**/*.deployment.json` still point at previous GHCR image names.
 
 ## Responsibility split
 
