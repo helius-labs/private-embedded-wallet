@@ -33,7 +33,7 @@ transaction signatures are base58. A network is `devnet` or `mainnet`.
 | `ZOLANA_TVC_PROVISIONING_AUTH_V1` | `JCS(descriptor)` without `provisioning_signature` | What the provisioning key signs |
 | `ZOLANA_TVC_RELEASE_POLICY_V1` | `JCS(policy)` | What a release authority signs |
 | `ZOLANA_TVC_WALLET_GRANT_V1` | `JCS(grant)` without `signature` | What the grant key signs |
-| `ZOLANA_TVC_DECRYPTION_SERVICE_REQUEST_V1` | `JCS(request)` without a `Decrypt`'s `signature` | A decryption-service `request_digest` |
+| `SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1` | `JCS(request)` without a `Decrypt`'s `signature` | A decryption-service `request_digest` |
 
 ## Envelope
 
@@ -186,7 +186,7 @@ is a `ServiceRequest`: a request id, the release pins of an
 no wallet descriptor, client authorization or timestamps, and no operation
 changes state. The answer is an `EncryptedResponse` whose App Proof has the
 type `spr.tvc.decryption_service.v1`, the request digest
-`H(ZOLANA_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
+`H(SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
 `signature`, the operation as `Service` followed by its name below, and 32
 zero bytes as `sealed_seed_digest`. A refused request gets the generic
 `InvalidRequest`.
