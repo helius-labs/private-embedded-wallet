@@ -18,10 +18,11 @@ Pre-production, for disposable devnet funds. The witness, which holds the
 long-lived nullifier secret, reaches only an attested TEE prover; see
 [Network boundary](#network-boundary).
 
-Helius hosts them on devnet behind gatekeeper: the private wallet at
-`https://devnet.helius-rpc.com/v1/private-wallet` (also on `beta-devnet`), the
-decryption service at `/v1/decryption` on the same host, and the Zolana indexer
-and TEE prover at `/v1/spr`, all with a Helius API key.
+On Helius devnet (and `beta-devnet`), with a Helius API key:
+
+- private wallet: `https://devnet.helius-rpc.com/v1/private-wallet`
+- decryption service: `https://devnet.helius-rpc.com/v1/decryption`
+- indexer and TEE prover: `https://devnet.helius-rpc.com/v1/spr`
 
 | Path | Purpose |
 | --- | --- |
