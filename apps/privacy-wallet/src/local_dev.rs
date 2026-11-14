@@ -11,9 +11,9 @@ use async_trait::async_trait;
 use ed25519_dalek::{Signer as _, SigningKey};
 use serde::Deserialize;
 use spr_prover_tee::{Anchors, PolicySigners};
-use zeroize::Zeroizing;
 use spr_tvc_protocol::encoding::decode_lower_hex_array;
 use spr_tvc_protocol::types::OperationKind;
+use zeroize::Zeroizing;
 
 use crate::custody::{Custody, CustodyError, RawSignature, WalletKey};
 use crate::operations::ProverTrust;

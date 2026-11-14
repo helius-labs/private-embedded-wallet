@@ -209,11 +209,11 @@ pub async fn serve(address: SocketAddr, router: Router) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
-    use tower::ServiceExt as _;
     use spr_tvc_protocol::constants::{QOS_P256_PUBLIC_LEN, RAW_P256_SIGNATURE_LEN};
     use spr_tvc_protocol::crypto::{verify_p256_message, QosP256Public};
     use spr_tvc_protocol::encoding::parse_strict_json;
     use spr_tvc_protocol::types::{OperationKind, QosPingChallenge, QosPingRequest};
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::{App, NETWORK};

@@ -5,8 +5,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use clap::Parser;
-use zeroize::Zeroizing;
 use spr_tvc_privacy_wallet::{local_unattested_state, router, LocalProver, LocalProverTrust};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Parser)]
 #[command(name = "spr-tvc-privacy-wallet-local")]

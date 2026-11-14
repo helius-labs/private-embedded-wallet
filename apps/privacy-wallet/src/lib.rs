@@ -99,8 +99,8 @@ mod tests {
     use axum::http::header::CONTENT_TYPE;
     use axum::http::{Request, StatusCode};
     use spr_tvc_enclave::testing::{self, body};
-    use tower::ServiceExt as _;
     use spr_tvc_protocol::encoding::parse_strict_json;
+    use tower::ServiceExt as _;
 
     use super::*;
 

@@ -4,8 +4,8 @@ use hkdf::Hkdf;
 use qos_p256::P256Pair;
 use sha2::Sha256;
 use spr_keypair::{NullifierKey, ViewingKey};
-use zeroize::Zeroizing;
 use spr_tvc_protocol::decryption_service::{ADDRESS_LEN, NULLIFIER_SECRET_LEN};
+use zeroize::Zeroizing;
 
 const VIEWING_KEY_LABEL: &[u8] = b"TSPP/decryption-service/view_key/x25519/v1";
 const NULLIFIER_KEY_LABEL: &[u8] = b"TSPP/decryption-service/nf_key/v1";

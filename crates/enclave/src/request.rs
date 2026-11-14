@@ -6,7 +6,6 @@ use axum::response::IntoResponse;
 use p256::ecdsa::Signature;
 use qos_p256::P256Pair;
 use serde::Serialize;
-use zeroize::Zeroizing;
 use spr_tvc_protocol::constants::{
     API_VERSION, MAX_ENCRYPTED_RESPONSE_BYTES, TVC_APP_PROOF_SCHEME,
 };
@@ -17,6 +16,7 @@ use spr_tvc_protocol::types::{
     parse_encrypted_request, AppProof, EncryptedResponse, OperationKind, OperationProofPayload,
     ServiceInfo, WalletGrant,
 };
+use zeroize::Zeroizing;
 
 use crate::http::PublicError;
 

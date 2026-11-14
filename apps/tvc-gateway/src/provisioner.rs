@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use serde::Deserialize;
-use zeroize::Zeroizing;
 use spr_tvc_protocol::constants::API_VERSION;
 use spr_tvc_protocol::crypto::{sign_p256_prehash, verify_p256_prehash};
 use spr_tvc_protocol::digest::descriptor_digest;
@@ -12,6 +11,7 @@ use spr_tvc_protocol::{
     ClientGrant, ErrorCode, Network, PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy,
     WalletDescriptor, verify_signed_release_policy,
 };
+use zeroize::Zeroizing;
 
 use crate::config::{ProvisioningConfig, load_signing_key};
 use crate::enrollment::EnrollmentInput;

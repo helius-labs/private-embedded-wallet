@@ -142,9 +142,7 @@ fn merge_request() -> serde_json::Value {
     })
 }
 
-fn seal_case(
-    case: &ProverCase,
-) -> Result<spr_tvc_protocol::types::SealedProverRequest, Failure> {
+fn seal_case(case: &ProverCase) -> Result<spr_tvc_protocol::types::SealedProverRequest, Failure> {
     prove::seal(
         &merge_request(),
         &[0x0a; 32],
