@@ -113,7 +113,7 @@ Expiration Time: <five minutes later>
 Resources:
 - urn:turnkey:organization:<organizationId>
 - urn:turnkey:wallet:<turnkeyWalletId>
-- urn:zolana-tvc:client-key:<clientPublicKey>
+- urn:spr-tvc:client-key:<clientPublicKey>
 ```
 
 The first line names the host the client called, one of
@@ -253,7 +253,7 @@ starts:
 
 - the local unattested privacy-wallet and decryption-service testkits, with fixed test keys and mock custody;
 - a mock Turnkey answering the ownership and Boot Proof queries (`e2e/mock-turnkey.ts`);
-- the gateway, with a release file from `cargo run -p zolana-tvc-protocol --example sign-release-policy -- --local-testkit <dir>`.
+- the gateway, with a release file from `cargo run -p spr-tvc-protocol --example sign-release-policy -- --local-testkit <dir>`.
 
 The tests send the headers gatekeeper would add and drive a wallet through
 the testkit client in gateway mode: enrollment, one session, Bootstrap,

@@ -1,4 +1,4 @@
-# Zolana TVC privacy wallet
+# spr-tvc
 
 A Zolana shielded wallet whose privacy keys live in a Turnkey Verifiable
 Compute enclave. The enclave holds the nullifier and viewing keys and answers
@@ -28,6 +28,14 @@ prover at `/v1/spr`, all with a Helius API key.
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
 | [`examples/typescript-client`](examples/typescript-client) | The client on a Turnkey API key, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: per-network releases, service keys, the localnet for `just headless-e2e`. |
+
+## Naming
+
+This repository is [`helius-labs/spr-tvc`](https://github.com/helius-labs/spr-tvc).
+Rust crates and binaries use the `spr-tvc-*` prefix. Wire proof types stay
+`zolana.tvc.*` so live enclaves and clients keep matching. Historical
+deployment records under `apps/*/deploy/**/*.deployment.json` still point at
+the previous GHCR image names.
 
 ## Responsibility split
 

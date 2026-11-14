@@ -288,10 +288,10 @@ export async function grantEnclaveBootstrap(
       organizationId,
       users: [
         {
-          userName: "zolana-tvc-wallet-authority",
+          userName: "spr-tvc-wallet-authority",
           apiKeys: [
             {
-              apiKeyName: "zolana-tvc-wallet-quorum-key",
+              apiKeyName: "spr-tvc-wallet-quorum-key",
               publicKey: servicePublicKey,
               curveType: "API_KEY_CURVE_P256",
             },
@@ -311,7 +311,7 @@ export async function grantEnclaveBootstrap(
   if (!configs.quorum || userId === owner.userId || configs.quorum.userIds.includes(userId)) {
     throw new Error("The enclave must be a non-root user distinct from the bootstrap approver");
   }
-  const policyName = `zolana-tvc-bootstrap-${walletAddress.slice(0, 12)}`;
+  const policyName = `spr-tvc-bootstrap-${walletAddress.slice(0, 12)}`;
   const condition = [
     "activity.type == 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2'",
     `wallet_account.address == '${walletAddress}'`,
@@ -369,7 +369,7 @@ async function walletAddress(
   if (accounts[0]) return accounts[0].address;
   const created = await owner.createWallet({
     organizationId,
-    walletName: `zolana-tvc-example-${Date.now()}`,
+    walletName: `spr-tvc-example-${Date.now()}`,
     accounts: DEFAULT_SOLANA_ACCOUNTS,
   });
   const [address] = created.addresses;

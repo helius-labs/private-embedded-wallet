@@ -1,21 +1,21 @@
 {
   "algorithm": "sha256",
   "files": {
-    "authorization-mutation.json": "4421068d70c47ef8818598fedeb4d55fb2d2fda342479f98229fd6f4fb761364",
+    "authorization-mutation.json": "55fb091ad762c303802da2fc3738818c167c1fa5aeb5b9f1801546ad1b3553dc",
     "canonical-u64.json": "adf29d66e4dd4509698b0eb48d17da07130cbbb9249779cd85bf245291fa10ec",
-    "descriptor-digest.json": "cf381693b591f8d69d0760cf53913379d86758e58f24da023c44d9be693148fb",
-    "digests.json": "d4135d036d0e93ce56cae8c4b06922555d1d853df6089edb70cadc9ad6f110f1",
-    "discovery-binding.json": "bbdb8ba45a029b22cc135599f99845b1be0e5266b3f4097604bb2c6dfcd4d24b",
-    "http-skeleton.json": "10b6f06f563ebda5172e11540bf5c3962215ab80e5c11718d08c028778e5405b",
+    "descriptor-digest.json": "a425d3c3186ef97affdbcaa37791cc837a074eff6b618cd9eef81fac5dd36016",
+    "digests.json": "b2a755cea536f0182c7ad0f7ea1aeed7a11553e50d5523afe6e7f465c85088a2",
+    "discovery-binding.json": "6ba2025a3a283c538d1512585f28facddc50411e5d3d54bfe072733bf4535564",
+    "http-skeleton.json": "5a4eb6529d10aac9f46cce6093868ab25f62b514e5e0efe8540c39dfacdcfdd4",
     "jcs-object-sort.json": "58d5e81815ffd1c39ec0cd3a3fda05ca50901875a13821ff05756f8f92a5783e",
     "json-reject.json": "3108301e4d4e0f648add6e0e9bc1b835b7ea1921ac24ff0b7f7e2a1cd5f79640",
-    "p256-signatures.json": "cb62923d5dd87b26b36a16c6e9fdfff5c97bb4701dae4d5be66c173205f67505",
-    "proof-payload-utf8.json": "fce1f29f28b5edac9809540bac9f41aeee6e2a32bb5eb688b3e8982a7e8a989f",
-    "qos-borsh-envelope.json": "2e8bc9d5afde86a65205c3472c883275f5de470192ea0c76afe544a88189bf61",
-    "qos-negative.json": "0a9698ba5aba75b5b0fdd19e1da97101631be5d496fe6a254da1b533723a3980",
-    "qos-p256-public.json": "d8332b125d10478c8ca74f5ff6bc5a9b20ea567b93c6a35eb4126bcb8abc5311",
-    "request-digest.json": "c38be8de9849d51bab7abff6823e7fa7b9c23c95c8d24bfb406f1322156c4bb1",
-    "signed-release-policy.json": "90f59bf2b0d04ebdec010f5860f6df25f8f5bacd2412bc04f891f6ea652ce890",
-    "wallet-grant-digest.json": "706914ea0a24316d09456941f421d4ec7e356fe2c43d43752458adaa33ef040d"
+    "p256-signatures.json": "755153b403564816c59518190c4de374fcd88b6d0f6285f46241e77a40c513f1",
+    "proof-payload-utf8.json": "66818091a961357f7064bfdd5960271aeb884fa0509df0f592b1881356788a55",
+    "qos-borsh-envelope.json": "aab2e45e9e745e985def39f8ce31a97b4c092e96690144bea4154fd8a4a3bccf",
+    "qos-negative.json": "74d215e4ad1c910ac65795924d298e6bd286aa55d50b84c1ed92aae409ad4984",
+    "qos-p256-public.json": "230e6543b4bb7206c8cdfdd24092d34a367665df149b1a9b7e568eb396cfb57c",
+    "request-digest.json": "8161b8708e16ba8dd338b20986b669e4a8a5e7d1ffa02b30f35780259036543b",
+    "signed-release-policy.json": "11e0740948a75b9e0d567f7b8854716344698d9f3f1830e584f7b7cc48d6d7b9",
+    "wallet-grant-digest.json": "3755d99d99f8013fbb4a21338ae5629a5298629c080356c2554be1ad2ec53ae3"
   }
 }

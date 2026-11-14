@@ -5,10 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use serde::Deserialize;
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::crypto::{sign_p256_prehash, verify_p256_prehash};
-use zolana_tvc_protocol::digest::descriptor_digest;
-use zolana_tvc_protocol::{
+use spr_tvc_protocol::constants::API_VERSION;
+use spr_tvc_protocol::crypto::{sign_p256_prehash, verify_p256_prehash};
+use spr_tvc_protocol::digest::descriptor_digest;
+use spr_tvc_protocol::{
     ClientGrant, ErrorCode, Network, PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy,
     WalletDescriptor, verify_signed_release_policy,
 };
@@ -181,7 +181,7 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use zolana_tvc_protocol::OperationKind;
+    use spr_tvc_protocol::OperationKind;
 
     pub const TEST_SECRET: [u8; 32] = [7; 32];
     pub const TEST_DESCRIPTOR_TTL_MS: u64 = 86_400_000;
@@ -251,7 +251,7 @@ pub(crate) mod tests {
         let expires = input.issued_at_ms + TEST_DESCRIPTOR_TTL_MS;
         assert_eq!(descriptor.expires_at_ms, expires);
         assert_eq!(provisioner.sign(&input), Ok(descriptor.clone()));
-        let skew = zolana_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
+        let skew = spr_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
         assert_eq!(provisioner.verify(&descriptor, expires + skew), Ok(()));
         assert_eq!(
             provisioner.verify(&descriptor, expires + skew + 1),
@@ -283,8 +283,8 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod release_file_tests {
-    use zolana_tvc_protocol::release::{ReleaseAuthorityKey, sign_release_policy};
-    use zolana_tvc_protocol::{ReleaseAuthoritySignature, SignedReleasePolicy};
+    use spr_tvc_protocol::release::{ReleaseAuthorityKey, sign_release_policy};
+    use spr_tvc_protocol::{ReleaseAuthoritySignature, SignedReleasePolicy};
 
     use super::tests::{TEST_SECRET, test_policy};
     use super::*;

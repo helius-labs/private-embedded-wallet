@@ -6,7 +6,7 @@ use std::io;
 
 use axum::Router;
 use spr_tvc_enclave::{App, Release, Service};
-use zolana_tvc_protocol::decryption_service::SERVICE_PROOF_TYPE;
+use spr_tvc_protocol::decryption_service::SERVICE_PROOF_TYPE;
 
 mod keys;
 mod operations;

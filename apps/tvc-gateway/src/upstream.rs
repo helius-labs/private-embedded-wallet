@@ -6,7 +6,7 @@ use bytes::{Bytes, BytesMut};
 use cadence_macros::{statsd_count, statsd_time};
 use reqwest::redirect::Policy;
 
-use zolana_tvc_protocol::{EncryptedRequest, QosPingRequest};
+use spr_tvc_protocol::{EncryptedRequest, QosPingRequest};
 
 use crate::config::EnclaveConfig;
 use crate::error::ApiError;

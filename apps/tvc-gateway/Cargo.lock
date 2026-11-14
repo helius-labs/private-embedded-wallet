@@ -3176,7 +3176,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
-name = "zolana-tvc-gateway"
+name = "spr-tvc-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3207,11 +3207,11 @@ dependencies = [
  "turnkey_client",
  "utoipa",
  "zeroize",
- "zolana-tvc-protocol",
+ "spr-tvc-protocol",
 ]
 
 [[package]]
-name = "zolana-tvc-protocol"
+name = "spr-tvc-protocol"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",

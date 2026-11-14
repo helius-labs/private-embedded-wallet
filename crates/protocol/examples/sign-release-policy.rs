@@ -3,9 +3,9 @@
 //! Usage:
 //!
 //! ```sh
-//! cargo run -p zolana-tvc-protocol --example sign-release-policy \
+//! cargo run -p spr-tvc-protocol --example sign-release-policy \
 //!     -- policy.json <authority-set-id>
-//! cargo run -p zolana-tvc-protocol --example sign-release-policy \
+//! cargo run -p spr-tvc-protocol --example sign-release-policy \
 //!     -- --local-testkit <out-dir>
 //! ```
 //!
@@ -37,14 +37,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
-use zolana_tvc_protocol::constants::{API_VERSION, EXPECTED_TURNKEY_TRUST_ROOT_ID};
-use zolana_tvc_protocol::crypto::public_key_uncompressed;
-use zolana_tvc_protocol::digest::sha256;
-use zolana_tvc_protocol::release::{
+use spr_tvc_protocol::constants::{API_VERSION, EXPECTED_TURNKEY_TRUST_ROOT_ID};
+use spr_tvc_protocol::crypto::public_key_uncompressed;
+use spr_tvc_protocol::digest::sha256;
+use spr_tvc_protocol::release::{
     sign_release_policy, verify_signed_release_policy, PinnedReleaseAuthorities,
     ReleaseAuthorityKey,
 };
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::types::{
     Network, OperationKind, ReleaseAuthoritySignature, ReleasePolicy, SignedReleasePolicy,
 };
 

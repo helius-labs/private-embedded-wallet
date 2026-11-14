@@ -9,7 +9,7 @@ use spr_transaction::instructions::merge::{
     merge_dummy_nullifier, merge_output_blinding, merge_output_key, merge_private_tx_blinding,
 };
 use spr_tvc_enclave::open_ciphertexts;
-use zolana_tvc_protocol::types::{DecryptItem, DeriveItem, OperationResult, TransactionKeyItem};
+use spr_tvc_protocol::types::{DecryptItem, DeriveItem, OperationResult, TransactionKeyItem};
 
 use super::sealed::Roles;
 use super::Failure;

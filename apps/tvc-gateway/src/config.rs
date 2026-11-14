@@ -13,7 +13,7 @@ use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use serde::Deserialize;
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::Network;
+use spr_tvc_protocol::Network;
 
 /// The shared settings every network overlay sits on, in the overlay's directory.
 pub const BASE_FILE: &str = "config.yaml";

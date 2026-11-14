@@ -67,6 +67,6 @@ export function walletEnrollmentMessage(enrollment: WalletEnrollment): string {
     "Resources:",
     `- urn:turnkey:organization:${enrollment.organizationId}`,
     `- urn:turnkey:wallet:${enrollment.turnkeyWalletId}`,
-    `- urn:zolana-tvc:client-key:${enrollment.clientPublicKey}`,
+    `- urn:spr-tvc:client-key:${enrollment.clientPublicKey}`,
   ].join("\n");
 }

@@ -8,10 +8,10 @@ use spr_keypair::{NullifierKey, ViewingKey, X25519Pubkey};
 use spr_tvc_enclave::{testing, NETWORK};
 use tower::ServiceExt as _;
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::crypto::public_key_uncompressed;
-use zolana_tvc_protocol::decryption_service::decrypt_message;
-use zolana_tvc_protocol::encoding::{jcs_serialize, parse_strict_json};
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::crypto::public_key_uncompressed;
+use spr_tvc_protocol::decryption_service::decrypt_message;
+use spr_tvc_protocol::encoding::{jcs_serialize, parse_strict_json};
+use spr_tvc_protocol::types::{
     DecryptItem, DecryptLabel, EncryptedRequest, Network, ServiceInfo, WalletGrant,
 };
 

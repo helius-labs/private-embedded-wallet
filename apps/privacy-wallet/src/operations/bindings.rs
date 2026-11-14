@@ -1,8 +1,8 @@
 //! Request bindings against the running release, as `/v1/info` describes it.
 
-use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::error::{ErrorCode, TvcError};
-use zolana_tvc_protocol::types::{OperationRequest, ServiceInfo};
+use spr_tvc_protocol::constants::API_VERSION;
+use spr_tvc_protocol::error::{ErrorCode, TvcError};
+use spr_tvc_protocol::types::{OperationRequest, ServiceInfo};
 
 pub(super) fn check_request_bindings(
     request: &OperationRequest,

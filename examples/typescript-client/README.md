@@ -220,8 +220,8 @@ testkit serves the network it was built for, so a mainnet testkit needs
 `SPR_NETWORK=mainnet` both when it is built and when the example runs:
 
 ```bash
-cargo run -p zolana-tvc-privacy-wallet --features local-dev \
-  --bin zolana-tvc-privacy-wallet-local -- \
+cargo run -p spr-tvc-privacy-wallet --features local-dev \
+  --bin spr-tvc-privacy-wallet-local -- \
   --wallet-keypair /path/to/disposable-keypair.json --live-prover
 ```
 

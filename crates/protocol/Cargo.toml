@@ -1,5 +1,5 @@
 [package]
-name = "zolana-tvc-protocol"
+name = "spr-tvc-protocol"
 version = "0.1.0"
 description = "Development TVC protocol, canonical encoding, and cryptographic foundations for Zolana private wallets"
 edition.workspace = true

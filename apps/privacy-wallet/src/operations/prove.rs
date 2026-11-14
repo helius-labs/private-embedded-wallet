@@ -15,8 +15,8 @@ use spr_prover_tee::{
     MAX_SIGNED_POLICY_BYTES,
 };
 use zeroize::{Zeroize, Zeroizing};
-use zolana_tvc_protocol::constants::{MAX_PROVER_TARGET_LEN, MAX_PROVE_INPUTS};
-use zolana_tvc_protocol::types::{FailureStage, ProverSealing, SealedProverRequest};
+use spr_tvc_protocol::constants::{MAX_PROVER_TARGET_LEN, MAX_PROVE_INPUTS};
+use spr_tvc_protocol::types::{FailureStage, ProverSealing, SealedProverRequest};
 
 use super::Failure;
 use crate::network::NET;

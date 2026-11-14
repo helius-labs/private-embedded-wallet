@@ -6,24 +6,24 @@ use std::sync::OnceLock;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::SecretKey;
 use sha2::{Digest, Sha256};
-use zolana_tvc_protocol::crypto::{
+use spr_tvc_protocol::crypto::{
     parse_uncompressed_sec1, qos_decrypt, sign_p256_prehash, verify_p256_prehash,
 };
-use zolana_tvc_protocol::encoding::{
+use spr_tvc_protocol::encoding::{
     canonicalize_json_str, decode_decimal_u64, decode_lower_hex, parse_strict_json,
 };
-use zolana_tvc_protocol::error::ErrorCode;
+use spr_tvc_protocol::error::ErrorCode;
 mod fixtures;
 
 use fixtures::{
     bind_discovery_to_policy, reject_double_hashed_signature, verify_fixtures, write_fixtures,
 };
-use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::release::verify_signed_release_policy;
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::constants::API_VERSION;
+use spr_tvc_protocol::release::verify_signed_release_policy;
+use spr_tvc_protocol::types::{
     DecryptLabel, DeriveItem, HealthResponse, Network, Operation, OperationKind, ServiceInfo,
 };
-use zolana_tvc_protocol::{PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy};
+use spr_tvc_protocol::{PinnedReleaseAuthorities, ReleasePolicy, SignedReleasePolicy};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures")
@@ -239,7 +239,7 @@ fn uppercase_hex_is_rejected() {
 
 #[test]
 fn sign_prehash_is_stable_for_test_scalar() {
-    let sk = Sha256::digest(b"zolana-tvc-test-client-sk");
+    let sk = Sha256::digest(b"spr-tvc-test-client-sk");
     let digest = Sha256::digest(b"digest");
     let a = sign_p256_prehash(&sk.into(), &digest.into()).unwrap();
     let b = sign_p256_prehash(&sk.into(), &digest.into()).unwrap();

@@ -14,11 +14,11 @@ use axum::Router;
 use qos_core::handles::Handles;
 use qos_core::{EPHEMERAL_KEY_FILE, MANIFEST_FILE, PIVOT_FILE, QUORUM_FILE};
 use qos_p256::P256Pair;
-use zolana_tvc_protocol::constants::{
+use spr_tvc_protocol::constants::{
     API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, TVC_APP_PROOF_SCHEME, TVC_QOS_PING_PROOF_TYPE,
 };
-use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
+use spr_tvc_protocol::types::{
     parse_qos_ping_challenge, parse_qos_ping_request, AppProof, HealthResponse, HealthStatus,
     QosPingResponse, ServiceInfo,
 };
@@ -210,10 +210,10 @@ pub async fn serve(address: SocketAddr, router: Router) -> io::Result<()> {
 mod tests {
     use axum::http::StatusCode;
     use tower::ServiceExt as _;
-    use zolana_tvc_protocol::constants::{QOS_P256_PUBLIC_LEN, RAW_P256_SIGNATURE_LEN};
-    use zolana_tvc_protocol::crypto::{verify_p256_message, QosP256Public};
-    use zolana_tvc_protocol::encoding::parse_strict_json;
-    use zolana_tvc_protocol::types::{OperationKind, QosPingChallenge, QosPingRequest};
+    use spr_tvc_protocol::constants::{QOS_P256_PUBLIC_LEN, RAW_P256_SIGNATURE_LEN};
+    use spr_tvc_protocol::crypto::{verify_p256_message, QosP256Public};
+    use spr_tvc_protocol::encoding::parse_strict_json;
+    use spr_tvc_protocol::types::{OperationKind, QosPingChallenge, QosPingRequest};
 
     use super::*;
     use crate::{App, NETWORK};

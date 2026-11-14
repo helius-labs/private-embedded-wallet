@@ -6,13 +6,13 @@ use axum::response::IntoResponse;
 use spr_tvc_enclave::{
     http, open_ciphertexts, open_envelope, respond, Failure, ProofBinding, Service,
 };
-use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::crypto::parse_uncompressed_sec1;
-use zolana_tvc_protocol::decryption_service::{
+use spr_tvc_protocol::constants::API_VERSION;
+use spr_tvc_protocol::crypto::parse_uncompressed_sec1;
+use spr_tvc_protocol::decryption_service::{
     parse_service_request, service_request_digest, DecryptedOutputs, ServiceOperation,
     ServiceRequest, ServiceResult, SERVICE_PROOF_TYPE,
 };
-use zolana_tvc_protocol::types::OperationKind;
+use spr_tvc_protocol::types::OperationKind;
 
 use crate::{keys, owner};
 

@@ -100,7 +100,7 @@ headless-e2e port_offset="200":
         done
         curl --fail --silent "http://127.0.0.1:$1/health" >/dev/null
     }
-    cargo run -p zolana-tvc-privacy-wallet --features local-dev --bin zolana-tvc-privacy-wallet-local -- \
+    cargo run -p spr-tvc-privacy-wallet --features local-dev --bin spr-tvc-privacy-wallet-local -- \
         --wallet-keypair "$wallet_keypair" --prover-url "$prover_url" &
     server_pid=$!
     healthy 44020 "$server_pid"
@@ -114,7 +114,7 @@ headless-e2e port_offset="200":
     export ZOLANA_ENDPOINT="$rpc_url" ZOLANA_INDEXER_URL="$indexer_url" ZOLANA_PROVER_URL="$prover_url"
     export SPL_MINT SPL_ASSET_ID SPL_TOKEN_ACCOUNT
     for example in deposit_transfer_withdraw spl_deposit_transfer_withdraw unregistered_recipient; do
-        {{pnpm}} --filter zolana-tvc-typescript-client-example example "examples/$example.ts"
+        {{pnpm}} --filter spr-tvc-typescript-client-example example "examples/$example.ts"
     done
 
 ci: fmt-check lint test check-protocol-fixtures install-ts ci-ts

@@ -6,10 +6,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use zeroize::Zeroizing;
-use zolana_tvc_privacy_wallet::{local_unattested_state, router, LocalProver, LocalProverTrust};
+use spr_tvc_privacy_wallet::{local_unattested_state, router, LocalProver, LocalProverTrust};
 
 #[derive(Debug, Parser)]
-#[command(name = "zolana-tvc-privacy-wallet-local")]
+#[command(name = "spr-tvc-privacy-wallet-local")]
 struct Cli {
     #[arg(long, default_value = "127.0.0.1")]
     host: IpAddr,

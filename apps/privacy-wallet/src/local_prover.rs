@@ -18,7 +18,7 @@ use spr_prover_tee::{
     seal_response, Anchors, FixtureProver, NitroFixture, SignedPolicyFile, ATTESTATION_PATH,
     HEADER_ENC, HEADER_VERSION, VERSION,
 };
-use zolana_tvc_protocol::encoding::decode_lower_hex_array;
+use spr_tvc_protocol::encoding::decode_lower_hex_array;
 
 use crate::local_dev::testkit_prover_keys;
 use crate::operations::sign_policy;

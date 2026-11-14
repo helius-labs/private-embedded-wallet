@@ -348,17 +348,17 @@ export function releasePolicy(releaseId, cfg, info, now) {
 
 /**
  * Signs `policy` under a fresh authority set with
- * `cargo run -p zolana-tvc-protocol --example sign-release-policy`, which
+ * `cargo run -p spr-tvc-protocol --example sign-release-policy`, which
  * verifies the result as `verify_signed_release_policy` does for the policy's
  * network before it answers. The authority key is generated inside that call,
  * used once, and gone when it exits; only the signed policy and the public
  * half come back, as `{releasePolicy, releaseAuthorities}`.
  */
 export function signReleasePolicy(policy, authoritySetId) {
-  const scratch = mkdtempSync(join(tmpdir(), "zolana-tvc-release-"));
+  const scratch = mkdtempSync(join(tmpdir(), "spr-tvc-release-"));
   try {
     writeFileSync(join(scratch, "policy.json"), JSON.stringify(policy));
-    const args = ["run", "-q", "-p", "zolana-tvc-protocol", "--example", "sign-release-policy", "--", join(scratch, "policy.json"), authoritySetId];
+    const args = ["run", "-q", "-p", "spr-tvc-protocol", "--example", "sign-release-policy", "--", join(scratch, "policy.json"), authoritySetId];
     return JSON.parse(capture("cargo", args));
   } finally {
     rmSync(scratch, { recursive: true, force: true });

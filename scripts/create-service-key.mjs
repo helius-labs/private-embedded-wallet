@@ -36,7 +36,7 @@ try {
       "secretsmanager", "create-secret",
       ...flag("--region"), ...flag("--profile"),
       "--name", name,
-      "--description", "Zolana TVC service key (P-256); its public key is compiled into the enclave",
+      "--description", "SPR TVC service key (P-256); its public key is compiled into the enclave",
       "--secret-string", "file:///dev/stdin",
       "--query", "ARN", "--output", "text",
     ],

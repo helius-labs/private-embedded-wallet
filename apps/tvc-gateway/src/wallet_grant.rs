@@ -6,9 +6,9 @@
 use std::collections::HashSet;
 
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::constants::{API_VERSION, MAX_WALLET_GRANT_LIFETIME_MS};
-use zolana_tvc_protocol::digest::descriptor_digest;
-use zolana_tvc_protocol::{WalletDescriptor, WalletGrant, client_key_id, sign_wallet_grant};
+use spr_tvc_protocol::constants::{API_VERSION, MAX_WALLET_GRANT_LIFETIME_MS};
+use spr_tvc_protocol::digest::descriptor_digest;
+use spr_tvc_protocol::{WalletDescriptor, WalletGrant, client_key_id, sign_wallet_grant};
 
 use crate::config::{WalletGrantConfig, load_signing_key};
 use crate::error::ApiError;
@@ -82,7 +82,7 @@ impl WalletGrants {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use zolana_tvc_protocol::verify_wallet_grant;
+    use spr_tvc_protocol::verify_wallet_grant;
 
     use super::*;
 

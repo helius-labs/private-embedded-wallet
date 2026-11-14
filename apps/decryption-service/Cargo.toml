@@ -24,7 +24,7 @@ tokio = { version = "=1.48.0", default-features = false, features = ["macros", "
 zeroize = "=1.9.0"
 spr-keypair = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297afa13e8bfb6edadf6408304ef3fc2f8c676" }
 spr-tvc-enclave = { path = "../../crates/enclave" }
-zolana-tvc-protocol = { path = "../../crates/protocol" }
+spr-tvc-protocol = { path = "../../crates/protocol" }
 
 [dev-dependencies]
 hex = "=0.4.3"
