@@ -25,15 +25,15 @@ transaction signatures are base58. A network is `devnet` or `mainnet`.
 
 | Domain | Payload | Use |
 | --- | --- | --- |
-| `SPR_TVC_REQUEST_V1` | `JCS(request)` without `authorization.signature` | `request_digest`; `client_key_id` stays in |
-| `SPR_TVC_RESULT_V1` | The encrypted result bytes | `result_digest`, bound by the App Proof |
-| `SPR_TVC_SEALED_SEED_DIGEST_V1` | The sealed seed wire bytes | Names the seed a response used |
-| `SPR_TVC_WALLET_ID_V1` | The wallet id | Binds a sealed seed to its wallet |
-| `SPR_TVC_WALLET_BINDING_V1` | `JCS({network, security_domain_id, turnkey_organization_id, turnkey_wallet_id, address})` of a descriptor | What a sealed seed's contents name the wallet by |
-| `SPR_TVC_PROVISIONING_AUTH_V1` | `JCS(descriptor)` without `provisioning_signature` | What the provisioning key signs |
-| `SPR_TVC_RELEASE_POLICY_V1` | `JCS(policy)` | What a release authority signs |
-| `SPR_TVC_WALLET_GRANT_V1` | `JCS(grant)` without `signature` | What the grant key signs |
-| `SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1` | `JCS(request)` without a `Decrypt`'s `signature` | A decryption-service `request_digest` |
+| `ZOLANA_TVC_REQUEST_V1` | `JCS(request)` without `authorization.signature` | `request_digest`; `client_key_id` stays in |
+| `ZOLANA_TVC_RESULT_V1` | The encrypted result bytes | `result_digest`, bound by the App Proof |
+| `ZOLANA_TVC_SEALED_SEED_DIGEST_V1` | The sealed seed wire bytes | Names the seed a response used |
+| `ZOLANA_TVC_WALLET_ID_V1` | The wallet id | Binds a sealed seed to its wallet |
+| `ZOLANA_TVC_WALLET_BINDING_V1` | `JCS({network, security_domain_id, turnkey_organization_id, turnkey_wallet_id, address})` of a descriptor | What a sealed seed's contents name the wallet by |
+| `ZOLANA_TVC_PROVISIONING_AUTH_V1` | `JCS(descriptor)` without `provisioning_signature` | What the provisioning key signs |
+| `ZOLANA_TVC_RELEASE_POLICY_V1` | `JCS(policy)` | What a release authority signs |
+| `ZOLANA_TVC_WALLET_GRANT_V1` | `JCS(grant)` without `signature` | What the grant key signs |
+| `ZOLANA_TVC_DECRYPTION_SERVICE_REQUEST_V1` | `JCS(request)` without a `Decrypt`'s `signature` | A decryption-service `request_digest` |
 
 ## Envelope
 
@@ -186,7 +186,7 @@ is a `ServiceRequest`: a request id, the release pins of an
 no wallet descriptor, client authorization or timestamps, and no operation
 changes state. The answer is an `EncryptedResponse` whose App Proof has the
 type `spr.tvc.decryption_service.v1`, the request digest
-`H(SPR_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
+`H(ZOLANA_TVC_DECRYPTION_SERVICE_REQUEST_V1, JCS(request))` without a `Decrypt`'s
 `signature`, the operation as `Service` followed by its name below, and 32
 zero bytes as `sealed_seed_digest`. A refused request gets the generic
 `InvalidRequest`.
@@ -230,7 +230,7 @@ A release policy names a release: its id, the network, the TVC
 application id, the security domain, the accepted manifest and executable
 digests, the Quorum key id, epoch and public key, the allowed operations, and
 the request and response size limits. Release authorities sign
-`H(SPR_TVC_RELEASE_POLICY_V1, JCS(policy))` with P-256; a client accepts
+`H(ZOLANA_TVC_RELEASE_POLICY_V1, JCS(policy))` with P-256; a client accepts
 the policy only for the network it expects (`NetworkMismatch` otherwise) and
 at a threshold of authority signatures, and verification fails closed on an
 empty, duplicate, or unknown key. A re-signed policy is a new authority set

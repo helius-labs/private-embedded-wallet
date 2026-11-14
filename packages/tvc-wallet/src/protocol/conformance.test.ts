@@ -71,9 +71,9 @@ function domainSeparatedHash(domain: string, payload: Uint8Array): Uint8Array {
 // Only the enclave computes these (the wallet id hash is inside a sealed seed);
 // the Rust fixtures still pin their domains.
 const walletIdHash = (walletId: string) =>
-  domainSeparatedHash("SPR_TVC_WALLET_ID_V1", new TextEncoder().encode(walletId));
+  domainSeparatedHash("ZOLANA_TVC_WALLET_ID_V1", new TextEncoder().encode(walletId));
 const requestIdHash = (requestId: Uint8Array) =>
-  domainSeparatedHash("SPR_TVC_REQUEST_ID_V1", requestId);
+  domainSeparatedHash("ZOLANA_TVC_REQUEST_ID_V1", requestId);
 
 describe("content-addressed fixtures", () => {
   it("matches MANIFEST sha256 for every file", () => {

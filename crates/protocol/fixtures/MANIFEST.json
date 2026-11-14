@@ -1,21 +1,21 @@
 {
   "algorithm": "sha256",
   "files": {
-    "authorization-mutation.json": "821ca09dbf5ecaa0892435b46323fdf83b92b5c57e701f9c2ecd3c28ee8f6c85",
+    "authorization-mutation.json": "55fb091ad762c303802da2fc3738818c167c1fa5aeb5b9f1801546ad1b3553dc",
     "canonical-u64.json": "adf29d66e4dd4509698b0eb48d17da07130cbbb9249779cd85bf245291fa10ec",
-    "descriptor-digest.json": "262fd70f0df3020c00b4d07399be7c5b6c063f32ef167bb04cb5c90499376e24",
-    "digests.json": "792c5a28e8f39aeb57d16237ad76eedbbc12385a87b4d95fdd073455a8242c7f",
+    "descriptor-digest.json": "a425d3c3186ef97affdbcaa37791cc837a074eff6b618cd9eef81fac5dd36016",
+    "digests.json": "b2a755cea536f0182c7ad0f7ea1aeed7a11553e50d5523afe6e7f465c85088a2",
     "discovery-binding.json": "d2ec3060543d60c9ce42a88c45e636735a6166390af9d4f3e48d853c5706d3dc",
     "http-skeleton.json": "9c90c165983ea1161f1fea22952cab959a30c38c7b7380316b8fa24dd37b6148",
     "jcs-object-sort.json": "58d5e81815ffd1c39ec0cd3a3fda05ca50901875a13821ff05756f8f92a5783e",
     "json-reject.json": "3108301e4d4e0f648add6e0e9bc1b835b7ea1921ac24ff0b7f7e2a1cd5f79640",
-    "p256-signatures.json": "15385bfd31520960788caf2df3372fee62b2e03ba871efc72920330ecd11b8c9",
+    "p256-signatures.json": "755153b403564816c59518190c4de374fcd88b6d0f6285f46241e77a40c513f1",
     "proof-payload-utf8.json": "66818091a961357f7064bfdd5960271aeb884fa0509df0f592b1881356788a55",
     "qos-borsh-envelope.json": "aab2e45e9e745e985def39f8ce31a97b4c092e96690144bea4154fd8a4a3bccf",
     "qos-negative.json": "74d215e4ad1c910ac65795924d298e6bd286aa55d50b84c1ed92aae409ad4984",
     "qos-p256-public.json": "230e6543b4bb7206c8cdfdd24092d34a367665df149b1a9b7e568eb396cfb57c",
-    "request-digest.json": "59d2d3f2f5ea93f1f0ce7f49ddfe42402afa5d0ddbbe6b63c87f2d538f380640",
-    "signed-release-policy.json": "80bc0883b0b1a50107257866efc911afd60530840525581d76e6c09ccbbb2ff6",
-    "wallet-grant-digest.json": "c60a144ad7cdec45e4f0723d835b1eeba17b7658e1fbeb8c6213d685a2f9db90"
+    "request-digest.json": "8161b8708e16ba8dd338b20986b669e4a8a5e7d1ffa02b30f35780259036543b",
+    "signed-release-policy.json": "11e0740948a75b9e0d567f7b8854716344698d9f3f1830e584f7b7cc48d6d7b9",
+    "wallet-grant-digest.json": "3755d99d99f8013fbb4a21338ae5629a5298629c080356c2554be1ad2ec53ae3"
   }
 }
