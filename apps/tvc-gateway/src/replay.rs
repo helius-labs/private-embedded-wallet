@@ -27,14 +27,17 @@ pub const MAX_KEPT_ANSWER_BYTES: usize = 64 * 1024;
 /// left it unknown.
 pub type Outcome = Result<Forwarded, ApiError>;
 
-/// The digest of a project and a ciphertext it claimed. Project IDs hold no
-/// NUL, so the pair is unambiguous.
+/// The digest of an application route, a project, and a ciphertext it claimed.
+/// Application routes and project IDs hold no NUL, so the triple is unambiguous
+/// and private-wallet vs decryption-service cannot share an entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Key([u8; 32]);
 
 impl Key {
-    fn of(project: &ProjectId, ciphertext: &[u8]) -> Self {
+    fn of(application: &str, project: &ProjectId, ciphertext: &[u8]) -> Self {
         let mut digest = Sha256::new();
+        digest.update(application.as_bytes());
+        digest.update([0]);
         digest.update(project.as_str().as_bytes());
         digest.update([0]);
         digest.update(ciphertext);
@@ -53,8 +56,8 @@ pub enum Claim {
 
 /// The first outcome of each project's `/operations` ciphertext within the
 /// window, so a resent operation gets that outcome instead of running twice.
-/// Projects do not share entries, so none can claim another's ciphertext
-/// first.
+/// Applications and projects do not share entries, so none can claim another's
+/// ciphertext first.
 pub enum ReplayLedger {
     Local(LocalLedger),
     Shared(SharedLedger),
@@ -76,9 +79,16 @@ impl ReplayLedger {
         }))
     }
 
-    /// Refuses a ciphertext the project's earlier request is still running.
-    pub async fn claim(&self, project: &ProjectId, ciphertext: &[u8]) -> Result<Claim, ApiError> {
-        let key = Key::of(project, ciphertext);
+    /// Refuses a ciphertext the project's earlier request on this application
+    /// is still running. `application` is the gateway route prefix
+    /// (`/v1/private-wallet` or `/v1/decryption`).
+    pub async fn claim(
+        &self,
+        application: &str,
+        project: &ProjectId,
+        ciphertext: &[u8],
+    ) -> Result<Claim, ApiError> {
+        let key = Key::of(application, project, ciphertext);
         let claim = match self {
             Self::Local(ledger) => ledger.claim(key, Instant::now()),
             Self::Shared(ledger) => ledger.claim(key).await,
@@ -343,73 +353,95 @@ mod tests {
         }
     }
 
+    const APP: &str = "/v1/private-wallet";
+    const OTHER_APP: &str = "/v1/decryption";
+
     /// Exercises one ledger the way two gateway tasks would.
     async fn a_resend_gets_the_first_outcome(ledger: &ReplayLedger) {
         let (project, other) = (ProjectId::for_tests("a"), ProjectId::for_tests("b"));
-        let Ok(Claim::New(key)) = ledger.claim(&project, b"ciphertext").await else {
+        let Ok(Claim::New(key)) = ledger.claim(APP, &project, b"ciphertext").await else {
             panic!("the first claim is new");
         };
         assert_eq!(
-            body(ledger.claim(&project, b"ciphertext").await),
+            body(ledger.claim(APP, &project, b"ciphertext").await),
             Err(ApiError::OperationInProgress)
         );
         ledger.record(key, &answer("first")).await;
         assert_eq!(
-            body(ledger.claim(&project, b"ciphertext").await),
+            body(ledger.claim(APP, &project, b"ciphertext").await),
             Ok("first".to_owned())
         );
 
         // Another project's request with the same ciphertext is its own: it
         // neither sees nor takes the first project's entry.
-        let Ok(Claim::New(theirs)) = ledger.claim(&other, b"ciphertext").await else {
+        let Ok(Claim::New(theirs)) = ledger.claim(APP, &other, b"ciphertext").await else {
             panic!("another project's claim is new");
         };
         assert_ne!(theirs, key);
         ledger.record(theirs, &answer("theirs")).await;
         assert_eq!(
-            body(ledger.claim(&project, b"ciphertext").await),
+            body(ledger.claim(APP, &project, b"ciphertext").await),
             Ok("first".to_owned())
         );
         assert_eq!(
-            body(ledger.claim(&other, b"ciphertext").await),
+            body(ledger.claim(APP, &other, b"ciphertext").await),
             Ok("theirs".to_owned())
         );
 
-        let Ok(Claim::New(failed)) = ledger.claim(&project, b"failed").await else {
+        // The same project and ciphertext on another application is its own:
+        // posting it to decryption must not return the private-wallet answer.
+        let Ok(Claim::New(cross)) = ledger.claim(OTHER_APP, &project, b"ciphertext").await else {
+            panic!("another application's claim is new");
+        };
+        assert_ne!(cross, key);
+        ledger.record(cross, &answer("decryption")).await;
+        assert_eq!(
+            body(ledger.claim(APP, &project, b"ciphertext").await),
+            Ok("first".to_owned())
+        );
+        assert_eq!(
+            body(ledger.claim(OTHER_APP, &project, b"ciphertext").await),
+            Ok("decryption".to_owned())
+        );
+
+        let Ok(Claim::New(failed)) = ledger.claim(APP, &project, b"failed").await else {
             panic!("the first claim is new");
         };
         ledger
             .record(failed, &Err(ApiError::EnclaveUnavailable))
             .await;
         assert_eq!(
-            body(ledger.claim(&project, b"failed").await),
+            body(ledger.claim(APP, &project, b"failed").await),
             Err(ApiError::EnclaveUnavailable)
         );
 
-        let Ok(Claim::New(released)) = ledger.claim(&project, b"released").await else {
+        let Ok(Claim::New(released)) = ledger.claim(APP, &project, b"released").await else {
             panic!("the first claim is new");
         };
         ledger.release(released).await;
         assert_eq!(
-            body(ledger.claim(&project, b"released").await),
+            body(ledger.claim(APP, &project, b"released").await),
             Ok("new".to_owned())
         );
 
         // An answer at the cap is kept; a larger one releases its claim.
         let largest = "x".repeat(MAX_KEPT_ANSWER_BYTES);
-        let Ok(Claim::New(kept)) = ledger.claim(&project, b"largest").await else {
+        let Ok(Claim::New(kept)) = ledger.claim(APP, &project, b"largest").await else {
             panic!("the first claim is new");
         };
         ledger.record(kept, &answer(&largest)).await;
-        assert_eq!(body(ledger.claim(&project, b"largest").await), Ok(largest));
-        let Ok(Claim::New(dropped)) = ledger.claim(&project, b"too large").await else {
+        assert_eq!(
+            body(ledger.claim(APP, &project, b"largest").await),
+            Ok(largest)
+        );
+        let Ok(Claim::New(dropped)) = ledger.claim(APP, &project, b"too large").await else {
             panic!("the first claim is new");
         };
         ledger
             .record(dropped, &answer(&"x".repeat(MAX_KEPT_ANSWER_BYTES + 1)))
             .await;
         assert_eq!(
-            body(ledger.claim(&project, b"too large").await),
+            body(ledger.claim(APP, &project, b"too large").await),
             Ok("new".to_owned())
         );
     }
@@ -456,7 +488,7 @@ mod tests {
         assert_eq!(
             body(
                 ledger
-                    .claim(&ProjectId::for_tests("a"), b"ciphertext")
+                    .claim(APP, &ProjectId::for_tests("a"), b"ciphertext")
                     .await
             ),
             Err(ApiError::ReplayGuardUnavailable)

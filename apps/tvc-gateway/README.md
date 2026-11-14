@@ -154,16 +154,19 @@ and project and valid for `wallet_grant.ttl_secs`. The enclave checks the grant
 names the request's descriptor and client key. The answer is the enclave's
 `EncryptedResponse` and the Boot Proof of the replica that answered.
 
-A resent ciphertext does not run twice. From the same project within
-`enclave.replay_window_secs`, it gets the first request's answer again,
-marked `Idempotent-Replayed: true`, or `409 OperationInProgress` while the
-first is still running. Each project's ciphertexts are its own: the same
-ciphertext from another project is a separate request, which the ownership
-check refuses, so no project can claim another's first. A request that never
-reached the enclave, refused by the ownership check for example, can be
-resent, and so can one whose answer was larger than 64 KiB, which the ledger
-does not keep: only `Decrypt`, `Derive`, `TransactionKeys` and `Prove`
-answer that much, and running them again is harmless.
+A resent ciphertext does not run twice. From the same project on the same
+application route within `enclave.replay_window_secs`, it gets the first
+request's answer again, marked `Idempotent-Replayed: true`, or
+`409 OperationInProgress` while the first is still running. Each project's
+ciphertexts are its own per application: the same ciphertext from another
+project, or on the other of `/v1/private-wallet` and `/v1/decryption`, is a
+separate request (and a cross-project resend of a private-wallet ciphertext
+is refused by the ownership check on the grant, so no project can claim
+another's first). A request that never reached the enclave, refused by the
+ownership check for example, can be resent, and so can one whose answer was
+larger than 64 KiB, which the ledger does not keep: only `Decrypt`,
+`Derive`, `TransactionKeys` and `Prove` answer that much, and running them
+again is harmless.
 
 To revoke a client key, add its `spr-client-p256-…` ID to
 `wallet_grant.revoked_client_key_ids`. The gateway refuses its enrollments and
@@ -173,7 +176,7 @@ operations from the next deploy.
 
 - **Requests in flight:** at most `enclave.max_in_flight_per_project` sessions, enrollments and operations per project (`429`).
 - **Turnkey calls:** at most 8 at once per project and 32 across all projects (`429`); both Turnkey keys are shared. The Boot Proof lookup for an operation the enclave already answered counts only toward the 32, so the project's share never wastes finished work. Lookups of one replica's Boot Proof run one at a time and share the answer, which is then cached.
-- **Resends:** the replay ledger keys each `/operations` ciphertext by the digest of the project and the ciphertext, however its JSON is encoded, and keeps answers up to 64 KiB. With `enclave.replay_redis_url` set, every task shares it through Redis, claiming with one `SET key running NX GET EX`, and it survives restarts; an unreachable Redis refuses the request with `424`. Without it, each process keeps its own.
+- **Resends:** the replay ledger keys each `/operations` ciphertext by the digest of the application route (`/v1/private-wallet` or `/v1/decryption`), the project, and the ciphertext, however its JSON is encoded, and keeps answers up to 64 KiB. With `enclave.replay_redis_url` set, every task shares it through Redis, claiming with one `SET key running NX GET EX`, and it survives restarts; an unreachable Redis refuses the request with `424`. Without it, each process keeps its own.
 - **Body size:** `enclave.max_body_bytes`.
 
 ## Configuration

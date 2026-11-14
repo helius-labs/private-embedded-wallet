@@ -339,7 +339,11 @@ pub(crate) async fn decryption_operations(
         return Err(ApiError::WalletGrantNotAllowed);
     }
     let _permit = state.limiter.try_acquire(&project)?;
-    let key = match state.replay.claim(&project, &request.ciphertext).await? {
+    let key = match state
+        .replay
+        .claim(DECRYPTION_SERVICE_PREFIX, &project, &request.ciphertext)
+        .await?
+    {
         Claim::New(key) => key,
         Claim::Answered(outcome) => {
             let mut response = answer(&state, outcome).await;
@@ -390,7 +394,11 @@ pub(crate) async fn operations(
         .wallet_grants
         .check_client_key(&client.client_public_key)?;
     let _permit = state.limiter.try_acquire(&project)?;
-    let key = match state.replay.claim(&project, &request.ciphertext).await? {
+    let key = match state
+        .replay
+        .claim(ROUTE_PREFIX, &project, &request.ciphertext)
+        .await?
+    {
         Claim::New(key) => key,
         Claim::Answered(outcome) => {
             let mut response = answer(&state, outcome).await;
