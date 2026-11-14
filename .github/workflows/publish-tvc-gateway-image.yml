@@ -37,7 +37,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.ZOLNET_IMAGE_PUBLISHER_ROLE_ARN }}
-          role-session-name: zolana-tvc-publish-tvc-gateway
+          role-session-name: spr-tvc-publish-tvc-gateway
           aws-region: ${{ env.AWS_REGION }}
 
       - id: login
