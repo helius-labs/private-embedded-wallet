@@ -14,7 +14,7 @@ long-lived nullifier secret, reaches only an attested TEE prover; see
 
 Helius hosts it on devnet behind gatekeeper: the private wallet at
 `https://devnet.helius-rpc.com/v1/private-wallet` (also on `beta-devnet`), the
-decryption service at `/v1/decryption-service` on the same host (Boot Proofs
+decryption service at `/v1/decryption` on the same host (Boot Proofs
 beside session and operations; API key only), and the Zolana indexer and TEE
 prover at `/v1/spr`, all with a Helius API key.
 
@@ -22,7 +22,7 @@ prover at `/v1/spr`, all with a Helius API key.
 | --- | --- |
 | [`apps/privacy-wallet`](apps/privacy-wallet) | The TVC application and an unattested local testkit. |
 | [`apps/decryption-service`](apps/decryption-service) | Prototype TVC application: decryption for addresses without a registered wallet. |
-| [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet` (sessions, enrollment, grants) and `/v1/decryption-service` (sessions and operations with Boot Proofs, no enroll). |
+| [`apps/tvc-gateway`](apps/tvc-gateway) | The Helius-hosted backend at `/v1/private-wallet` (sessions, enrollment, grants) and `/v1/decryption` (sessions and operations with Boot Proofs, no enroll). |
 | [`packages/tvc-wallet`](packages/tvc-wallet) | TypeScript client: connection verification, the Turnkey session key as the client key, the five operations, `SprEmbeddedWalletKeys` for the Zolana SDK. |
 | [`crates/enclave`](crates/enclave) | What both TVC applications serve around their operations: routes, the request envelope, the proof-carrying response, the pool cipher. |
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |

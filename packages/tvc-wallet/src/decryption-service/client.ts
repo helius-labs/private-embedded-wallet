@@ -75,10 +75,10 @@ const addressEncoder = getAddressEncoder();
 export type DecryptionServiceConfig = {
   readonly network: Network;
   /**
-   * The enclave's public ingress, or a tvc-gateway's `/v1/decryption-service`
-   * (with any query such as gatekeeper's `api-key`). Without `resolveBootProof`
-   * the client treats `endpoint` as a gateway and reads Boot Proofs beside
-   * session and operation answers.
+   * The enclave's public ingress, or a tvc-gateway's `/v1/decryption` (with any
+   * query such as gatekeeper's `api-key`). Without `resolveBootProof` the
+   * client treats `endpoint` as a gateway and reads Boot Proofs beside session
+   * and operation answers.
    */
   readonly endpoint: URL;
   /**

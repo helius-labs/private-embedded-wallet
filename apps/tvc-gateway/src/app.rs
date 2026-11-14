@@ -30,7 +30,7 @@ use crate::upstream::Enclave;
 use crate::wallet_grant::WalletGrants;
 
 pub const ROUTE_PREFIX: &str = "/v1/private-wallet";
-pub const DECRYPTION_SERVICE_PREFIX: &str = "/v1/decryption-service";
+pub const DECRYPTION_SERVICE_PREFIX: &str = "/v1/decryption";
 /// Marks an `/operations` answer that repeats an earlier request's outcome.
 pub const IDEMPOTENT_REPLAYED: HeaderName = HeaderName::from_static("idempotent-replayed");
 
@@ -257,7 +257,7 @@ pub(crate) async fn enroll(
 /// with a Solana signature on decrypt requests.
 #[utoipa::path(
     post,
-    path = "/v1/decryption-service/session",
+    path = "/v1/decryption/session",
     tag = "Decryption service",
     request_body = PingRequest,
     responses(
@@ -313,7 +313,7 @@ struct DecryptionEncryptedRequest {
 /// the first request's answer, marked `Idempotent-Replayed`.
 #[utoipa::path(
     post,
-    path = "/v1/decryption-service/operations",
+    path = "/v1/decryption/operations",
     tag = "Decryption service",
     request_body(content = DecryptionEncryptedRequest, description = "The enclave's EncryptedRequest, without wallet_grant"),
     responses(

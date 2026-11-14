@@ -5,7 +5,7 @@
 Added
 
 - `createDecryptionService({ endpoint })` without `resolveBootProof` talks to a
-  tvc-gateway `/v1/decryption-service` URL: Boot Proofs arrive beside session
+  tvc-gateway `/v1/decryption` URL: Boot Proofs arrive beside session
   and operation answers (Helius API key only). Passing `resolveBootProof` keeps
   the direct-enclave path.
 - `createLocalDecryptionService({ gateway: true })` reaches a local gateway in

@@ -2,7 +2,7 @@
 
 Helius-hosted backend for the Zolana private embedded wallet and decryption
 service. It gives any Helius customer those backends with only an API key, at
-`/v1/private-wallet/*` and `/v1/decryption-service/*` behind gatekeeper or
+`/v1/private-wallet/*` and `/v1/decryption/*` behind gatekeeper or
 directly. It fronts:
 
 - the private-wallet TVC enclave (`apps/privacy-wallet`),
@@ -45,7 +45,7 @@ gatekeeper's per-key limits.
 ## Endpoints
 
 Private-wallet paths are under `/v1/private-wallet`. Decryption-service paths
-are under `/v1/decryption-service` when that network's config sets
+are under `/v1/decryption` when that network's config sets
 `decryption_service`. Every route takes the caller's project from gatekeeper
 or from the caller's API key.
 
@@ -55,7 +55,7 @@ or from the caller's API key.
 | POST   | `/enroll`                         | an owner-signed enrollment  | `{descriptor}`            |
 | POST   | `/operations`                     | `{descriptor, request}`     | `{response, bootProof}`   |
 
-| Method | Path (under `/v1/decryption-service`) | Body                                      | Answer                    |
+| Method | Path (under `/v1/decryption`) | Body                                      | Answer                    |
 | ------ | ------------------------------------- | ----------------------------------------- | ------------------------- |
 | POST   | `/session`                            | the enclave's ping request                | `{info, ping, bootProof}` |
 | POST   | `/operations`                         | the enclave's `EncryptedRequest` as-is    | `{response, bootProof}`   |
@@ -68,7 +68,7 @@ signature. A request that includes `wallet_grant` is refused
 OpenAPI 3.1 document of the API as gatekeeper serves it. A test fails when it
 is stale; `BLESS_OPENAPI=1 cargo test` rewrites it.
 
-Gatekeeper must forward `/v1/decryption-service/*` the same way it forwards
+Gatekeeper must forward `/v1/decryption/*` the same way it forwards
 `/v1/private-wallet/*` (infra follow-up outside this repository when the
 route is first enabled on a host).
 
@@ -200,7 +200,7 @@ either file, with nested fields joined by `__`:
 
 **When a new gateway ships decryption-service support:** rebuild and redeploy
 the tvc-gateway image with `decryption_service` set in the network overlay (or
-the env override), then ensure gatekeeper forwards `/v1/decryption-service/*`.
+the env override), then ensure gatekeeper forwards `/v1/decryption/*`.
 Rebuild `@heliuslabs/spr-embedded-wallet` so clients pick up gateway mode.
 
 `enrollment.domains` are the hosts an enrollment message may name:
@@ -260,7 +260,7 @@ verifies again and opens the stored sealed seed with it; and the refusals
 of stale, forged, other-domain, other-network and other-project enrollments,
 other projects' wallets and resends, and descriptors this gateway did not
 provision. They also open a decryption-service session through
-`/v1/decryption-service`, run a sealed `PublicKeys`, check Boot Proofs are
+`/v1/decryption`, run a sealed `PublicKeys`, check Boot Proofs are
 present, and refuse a wallet grant and an `/enroll`. One test signs a release
 for the testkit through `scripts/release.mjs` and checks the client accepts it
 for the testkit's network only. CI runs it after `just ci`. Service logs go to
@@ -296,7 +296,7 @@ origin read timeout.
 Devnet's overlay already sets `decryption_service.enclave.base_url` to the
 live Turnkey app. After this gateway image is published and redeployed:
 
-1. Confirm gatekeeper forwards `/v1/decryption-service/*` to the same
+1. Confirm gatekeeper forwards `/v1/decryption/*` to the same
    tvc-gateway pool as `/v1/private-wallet/*` (monorepo / Heimdall follow-up
    if that path is not registered yet).
 2. Publish `@heliuslabs/spr-embedded-wallet` so clients pick up gateway mode

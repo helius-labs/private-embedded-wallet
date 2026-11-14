@@ -20,7 +20,7 @@
     }
   ],
   "paths": {
-    "/v1/decryption-service/operations": {
+    "/v1/decryption/operations": {
       "post": {
         "tags": [
           "Decryption service"
@@ -71,7 +71,7 @@
         }
       }
     },
-    "/v1/decryption-service/session": {
+    "/v1/decryption/session": {
       "post": {
         "tags": [
           "Decryption service"

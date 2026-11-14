@@ -460,11 +460,11 @@ export async function setup(): Promise<ExampleSetup> {
   return Object.freeze({ zolana, keys, signer });
 }
 
-/** The hosted decryption-service gateway: `DECRYPTION_SERVICE_GATEWAY_URL`, else the network's `/v1/decryption-service`. */
+/** The hosted decryption gateway: `DECRYPTION_SERVICE_GATEWAY_URL`, else the network's `/v1/decryption`. */
 function decryptionGatewayEndpoint(network: Network): URL {
   return new URL(
     process.env["DECRYPTION_SERVICE_GATEWAY_URL"]?.trim()
-      || heliusUrl(network, "/v1/decryption-service"),
+      || heliusUrl(network, "/v1/decryption"),
   );
 }
 
@@ -474,7 +474,7 @@ function decryptionGatewayEndpoint(network: Network): URL {
  * - `DECRYPTION_SERVICE_URL` (+ `TVC_ORG_ID` / Turnkey Boot Proof API keys): the
  *   enclave directly
  * - otherwise the hosted tvc-gateway (`DECRYPTION_SERVICE_GATEWAY_URL`, or the
- *   network's `/v1/decryption-service` with `API_KEY`); Boot Proofs come beside
+ *   network's `/v1/decryption` with `API_KEY`); Boot Proofs come beside
  *   session and operation answers, so no Turnkey org keys are needed
  */
 export function decryptionService(): DecryptionService {

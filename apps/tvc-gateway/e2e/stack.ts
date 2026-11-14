@@ -15,7 +15,7 @@ import { startMockTurnkey } from "./mock-turnkey.js";
 declare module "vitest" {
   export interface ProvidedContext {
     stack: {
-      /** The gateway's base URL; its routes are under `/v1/private-wallet` and `/v1/decryption-service`. */
+      /** The gateway's base URL; its routes are under `/v1/private-wallet` and `/v1/decryption`. */
       gatewayUrl: string;
       /** The privacy-wallet testkit enclave's base URL. */
       enclaveUrl: string;

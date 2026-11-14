@@ -30,7 +30,7 @@ import {
 
 const { gatewayUrl, enclaveUrl, originAuth, apiKey, walletSeedHex, turnkeyUrl } = inject("stack");
 const privateWallet = `${gatewayUrl}/v1/private-wallet`;
-const decryptionServiceUrl = `${gatewayUrl}/v1/decryption-service`;
+const decryptionServiceUrl = `${gatewayUrl}/v1/decryption`;
 const ownerSeed = decodeLowerHex(walletSeedHex);
 const ownerAddress = getAddressDecoder().decode(ed25519.getPublicKey(ownerSeed));
 const clientPublicKey = encodeLowerHex(
@@ -116,8 +116,8 @@ describe("the decryption service through the gateway", () => {
     expect(address.viewingPublicKey).toBeDefined();
     expect(address.nullifierPublicKey).toBeDefined();
     expect(sent.map(({ path }) => path)).toEqual([
-      "/v1/decryption-service/session",
-      "/v1/decryption-service/operations",
+      "/v1/decryption/session",
+      "/v1/decryption/operations",
     ]);
     const session = JSON.parse(sent[0]!.answer) as { bootProof: unknown };
     const operated = JSON.parse(sent[1]!.answer) as { response: unknown; bootProof: unknown };

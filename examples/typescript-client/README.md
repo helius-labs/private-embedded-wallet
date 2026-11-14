@@ -70,7 +70,7 @@ client.proofService)` in place of `keys`. Nothing else changes.
   Helius host, `devnet.helius-rpc.com` or `mainnet.helius-rpc.com`, serves
   everything else: the RPC, the indexer and the TEE prover at `/v1/spr`, the
   network's private-wallet gateway at `/v1/private-wallet`, and (on networks
-  that have one) the decryption-service gateway at `/v1/decryption-service`.
+  that have one) the decryption-service gateway at `/v1/decryption`.
 - A Turnkey sub-organization named after the API key's Helius project, with a
   Solana wallet, and a root user's API key in it, as the key pair or a Turnkey
   API key file (`TURNKEY_API_KEY_PATH`). Helius creates these sub-organizations

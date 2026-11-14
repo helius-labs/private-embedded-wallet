@@ -40,13 +40,13 @@ export type EnclaveBackend = {
 export type GatewayBackend = {
   readonly kind: "gateway";
   /**
-   * `…/v1/private-wallet` or `…/v1/decryption-service`, keeping any query such
-   * as gatekeeper's `api-key`.
+   * `…/v1/private-wallet` or `…/v1/decryption`, keeping any query such as
+   * gatekeeper's `api-key`.
    */
   readonly endpoint: URL;
   /**
    * When set, operations are the enclave's `EncryptedRequest` alone (no
-   * descriptor, no grant). The decryption-service gateway uses this.
+   * descriptor, no grant). The decryption gateway uses this.
    */
   readonly decryptionService?: true;
 };

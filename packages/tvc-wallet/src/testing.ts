@@ -211,8 +211,8 @@ export function createLocalDecryptionService(config: {
   /** The network the testkit was built for (`SPR_NETWORK`, devnet by default). */
   readonly network: Network;
   /**
-   * The testkit enclave, or a tvc-gateway's `/v1/decryption-service` in front of
-   * it, over loopback HTTP.
+   * The testkit enclave, or a tvc-gateway's `/v1/decryption` in front of it,
+   * over loopback HTTP.
    */
   readonly endpoint: URL;
   /**
