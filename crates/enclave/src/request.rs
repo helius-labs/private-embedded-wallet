@@ -6,17 +6,17 @@ use axum::response::IntoResponse;
 use p256::ecdsa::Signature;
 use qos_p256::P256Pair;
 use serde::Serialize;
-use zeroize::Zeroizing;
-use zolana_tvc_protocol::constants::{
+use spr_tvc_protocol::constants::{
     API_VERSION, MAX_ENCRYPTED_RESPONSE_BYTES, TVC_APP_PROOF_SCHEME,
 };
-use zolana_tvc_protocol::crypto::qos_encrypt;
-use zolana_tvc_protocol::digest::result_digest;
-use zolana_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::crypto::qos_encrypt;
+use spr_tvc_protocol::digest::result_digest;
+use spr_tvc_protocol::encoding::{is_rfc8785, jcs_serialize};
+use spr_tvc_protocol::types::{
     parse_encrypted_request, AppProof, EncryptedResponse, OperationKind, OperationProofPayload,
     ServiceInfo, WalletGrant,
 };
+use zeroize::Zeroizing;
 
 use crate::http::PublicError;
 

@@ -1,5 +1,5 @@
 [package]
-name = "zolana-tvc-privacy-wallet"
+name = "spr-tvc-privacy-wallet"
 version = "0.1.0"
 description = "Attested privacy-key backend for Zolana wallets"
 edition = "2021"
@@ -38,7 +38,7 @@ spr-keypair = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297a
 spr-prover-tee = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297afa13e8bfb6edadf6408304ef3fc2f8c676" }
 spr-transaction = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297afa13e8bfb6edadf6408304ef3fc2f8c676" }
 spr-tvc-enclave = { path = "../../crates/enclave" }
-zolana-tvc-protocol = { path = "../../crates/protocol" }
+spr-tvc-protocol = { path = "../../crates/protocol" }
 
 [dev-dependencies]
 spr-tvc-enclave = { path = "../../crates/enclave", features = ["testing"] }
@@ -49,10 +49,10 @@ reqwest = { version = "=0.12.28", default-features = false, features = ["json", 
 tower = { version = "=0.5.3", features = ["util"] }
 
 [[bin]]
-name = "zolana-tvc-privacy-wallet"
+name = "spr-tvc-privacy-wallet"
 path = "src/main.rs"
 
 [[bin]]
-name = "zolana-tvc-privacy-wallet-local"
+name = "spr-tvc-privacy-wallet-local"
 path = "src/bin/local.rs"
 required-features = ["local-dev"]

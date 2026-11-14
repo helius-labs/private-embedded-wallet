@@ -6,10 +6,10 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use solana_pubkey::Pubkey;
 use spr_keypair::shielded::ShieldedAddress;
 use spr_keypair::{derivation, Curve, NullifierKey, PublicKey, ViewingKey};
+use spr_tvc_protocol::constants::API_VERSION;
+use spr_tvc_protocol::digest::{sealed_seed_digest, wallet_binding_digest, wallet_id_hash};
+use spr_tvc_protocol::types::{OperationRequest, SealedSeed};
 use zeroize::{Zeroize, Zeroizing};
-use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::digest::{sealed_seed_digest, wallet_binding_digest, wallet_id_hash};
-use zolana_tvc_protocol::types::{OperationRequest, SealedSeed};
 
 use super::{Failure, DERIVATION_SUITE};
 use crate::Runtime;

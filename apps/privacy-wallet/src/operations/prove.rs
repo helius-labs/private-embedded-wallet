@@ -14,9 +14,9 @@ use spr_prover_tee::{
     verify_with, Anchors, Attestation, EncryptedRequest, PolicySigners, SignedPolicyFile,
     MAX_SIGNED_POLICY_BYTES,
 };
+use spr_tvc_protocol::constants::{MAX_PROVER_TARGET_LEN, MAX_PROVE_INPUTS};
+use spr_tvc_protocol::types::{FailureStage, ProverSealing, SealedProverRequest};
 use zeroize::{Zeroize, Zeroizing};
-use zolana_tvc_protocol::constants::{MAX_PROVER_TARGET_LEN, MAX_PROVE_INPUTS};
-use zolana_tvc_protocol::types::{FailureStage, ProverSealing, SealedProverRequest};
 
 use super::Failure;
 use crate::network::NET;

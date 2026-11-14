@@ -2,8 +2,8 @@
 
 use spr_keypair::viewing_key::Salt;
 use spr_keypair::{ViewingKey, X25519Pubkey};
-use zolana_tvc_protocol::constants::MAX_ITEMS_PER_BATCH;
-use zolana_tvc_protocol::types::{DecryptItem, DecryptLabel};
+use spr_tvc_protocol::constants::MAX_ITEMS_PER_BATCH;
+use spr_tvc_protocol::types::{DecryptItem, DecryptLabel};
 
 use crate::Failure;
 

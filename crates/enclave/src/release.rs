@@ -1,11 +1,11 @@
 //! What a release is, and what it advertises at `/v1/info`.
 
 use qos_p256::P256Pair;
-use zolana_tvc_protocol::constants::{
+use spr_tvc_protocol::constants::{
     API_VERSION, MAX_ENCRYPTED_REQUEST_BYTES, MAX_ENCRYPTED_RESPONSE_BYTES,
 };
-use zolana_tvc_protocol::encoding::decode_lower_hex_array;
-use zolana_tvc_protocol::types::{Network, OperationKind, ServiceInfo};
+use spr_tvc_protocol::encoding::decode_lower_hex_array;
+use spr_tvc_protocol::types::{Network, OperationKind, ServiceInfo};
 
 const SPR_NETWORK: &str = match option_env!("SPR_NETWORK") {
     Some(network) => network,

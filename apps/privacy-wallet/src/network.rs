@@ -1,7 +1,7 @@
 //! What an enclave image trusts, chosen at build time by `SPR_NETWORK`:
 //! `devnet` (the default) or `mainnet`. A change here is a new release.
 
-use zolana_tvc_protocol::types::Network;
+use spr_tvc_protocol::types::Network;
 
 /// One network's trust: the network the image serves, the public halves of
 /// the gateway's provisioning and wallet-grant keys, and who signs the

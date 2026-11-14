@@ -4001,10 +4001,10 @@ dependencies = [
  "solana-pubkey",
  "spr-keypair",
  "spr-tvc-enclave",
+ "spr-tvc-protocol",
  "tokio",
  "tower",
  "zeroize",
- "zolana-tvc-protocol",
 ]
 
 [[package]]
@@ -4020,11 +4020,59 @@ dependencies = [
  "serde",
  "serde_json",
  "spr-keypair",
+ "spr-tvc-protocol",
  "strum",
  "tokio",
  "tower",
  "zeroize",
- "zolana-tvc-protocol",
+]
+
+[[package]]
+name = "spr-tvc-privacy-wallet"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "borsh",
+ "clap",
+ "ed25519-dalek",
+ "hex",
+ "http-body-util",
+ "p256 0.13.2",
+ "qos_p256",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "solana-pubkey",
+ "spr-keypair",
+ "spr-prover-tee",
+ "spr-transaction",
+ "spr-tvc-enclave",
+ "spr-tvc-protocol",
+ "tokio",
+ "tower",
+ "turnkey_api_key_stamper",
+ "turnkey_client",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "spr-tvc-protocol"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "borsh",
+ "hex",
+ "hmac 0.12.1",
+ "p256 0.13.2",
+ "qos_p256",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "strum",
+ "zeroize",
 ]
 
 [[package]]
@@ -5015,51 +5063,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[package]]
-name = "zolana-tvc-privacy-wallet"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "base64 0.22.1",
- "borsh",
- "clap",
- "ed25519-dalek",
- "hex",
- "http-body-util",
- "p256 0.13.2",
- "qos_p256",
- "reqwest",
- "serde",
- "serde_json",
- "solana-pubkey",
- "spr-keypair",
- "spr-prover-tee",
- "spr-transaction",
- "spr-tvc-enclave",
- "tokio",
- "tower",
- "turnkey_api_key_stamper",
- "turnkey_client",
- "uuid",
- "zeroize",
- "zolana-tvc-protocol",
-]
-
-[[package]]
-name = "zolana-tvc-protocol"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "borsh",
- "hex",
- "hmac 0.12.1",
- "p256 0.13.2",
- "qos_p256",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "strum",
- "zeroize",
-]

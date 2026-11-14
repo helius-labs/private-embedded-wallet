@@ -80,15 +80,15 @@ async function waitForHealth(url: string, name: string, process: ChildProcess, l
 
 export default async function setup({ provide }: GlobalSetupContext) {
   cargoBuild(
-    "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "zolana-tvc-privacy-wallet",
-    "--features", "local-dev", "--bin", "zolana-tvc-privacy-wallet-local",
+    "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "spr-tvc-privacy-wallet",
+    "--features", "local-dev", "--bin", "spr-tvc-privacy-wallet-local",
   );
   cargoBuild(
     "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "spr-tvc-decryption-service",
     "--features", "local-dev", "--bin", "spr-tvc-decryption-service-local",
   );
   cargoBuild(
-    "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "zolana-tvc-protocol",
+    "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "spr-tvc-protocol",
     "--example", "sign-release-policy",
   );
   cargoBuild("--manifest-path", join(GATEWAY_DIR, "Cargo.toml"), "--bin", "tvc-gateway");
@@ -105,7 +105,7 @@ export default async function setup({ provide }: GlobalSetupContext) {
   const apiKey = randomUUID();
   const devApi = await startMockDevApi(apiKey, PROJECT_ID);
   const enclavePort = await freePort();
-  const enclave = start(logs, "enclave", debugBin("zolana-tvc-privacy-wallet-local"), [
+  const enclave = start(logs, "enclave", debugBin("spr-tvc-privacy-wallet-local"), [
     "--port", String(enclavePort), "--wallet-keypair", walletKeypair,
   ]);
   const decryptionPort = await freePort();

@@ -26,7 +26,7 @@ tokio = { version = "=1.48.0", default-features = false, features = ["macros", "
 zeroize = "=1.9.0"
 http-body-util = { version = "=0.1.3", optional = true }
 spr-keypair = { git = "https://github.com/helius-labs/zolana.git", rev = "c5297afa13e8bfb6edadf6408304ef3fc2f8c676" }
-zolana-tvc-protocol = { path = "../protocol" }
+spr-tvc-protocol = { path = "../protocol" }
 
 [dev-dependencies]
 http-body-util = "=0.1.3"

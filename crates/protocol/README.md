@@ -1,4 +1,4 @@
-# zolana-tvc-protocol
+# spr-tvc-protocol
 
 The wire protocol between a client and the privacy-wallet enclave, as Rust
 types and functions: strict JSON parsing, JCS canonicalization,

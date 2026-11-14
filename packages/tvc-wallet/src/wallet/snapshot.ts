@@ -16,7 +16,7 @@ import type { SprEmbeddedWalletKeys } from "./keys.js";
  * byte is 0xff is never one, and the key it selects belongs to no transaction.
  */
 const SNAPSHOT_KEY_CONTEXT: Bytes32 = (() => {
-  const context = sha256(new TextEncoder().encode("zolana-tvc/wallet-snapshot-key/v1"));
+  const context = sha256(new TextEncoder().encode("spr-tvc/wallet-snapshot-key/v1"));
   context[0] = 0xff;
   return context as Bytes32;
 })();

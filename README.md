@@ -1,22 +1,28 @@
-# Zolana TVC privacy wallet
+# spr-tvc
 
-A Zolana shielded wallet whose privacy keys live in a Turnkey Verifiable
-Compute enclave. The enclave holds the nullifier and viewing keys and answers
-the Zolana SDK's `WalletKeys` interface with them: it opens ciphertexts, derives
-nullifiers, mints per-transaction keys, and completes proof witnesses. The
-client runs every wallet flow with the Zolana TypeScript SDK, `SprEmbeddedWalletKeys` in
-place of `LocalKeys`: sync, selection, transfers, withdrawals, splits, merges,
-rings, deposits, registration, signing, and submission.
+Turnkey Verifiable Compute (TVC) applications and clients for Solana Privacy
+Rings: a privacy wallet whose keys live in an enclave, a decryption service for
+transfers to addresses that have not registered a wallet yet, the Helius-hosted
+gateway in front of both, and the shared protocol/enclave crates and TypeScript
+client.
+
+The privacy wallet answers the Zolana SDK's `WalletKeys` interface
+(`SprEmbeddedWalletKeys` in place of `LocalKeys`): sync, selection, transfers,
+withdrawals, splits, merges, rings, deposits, registration, signing, and
+submission. The decryption service returns viewing keys for an unregistered
+address and opens ciphertexts when the owner signs. Both apps share the enclave
+request envelope; the gateway adds Boot Proofs and project identity so clients
+use a Helius API key only.
 
 Pre-production, for disposable devnet funds. The witness, which holds the
 long-lived nullifier secret, reaches only an attested TEE prover; see
 [Network boundary](#network-boundary).
 
-Helius hosts it on devnet behind gatekeeper: the private wallet at
-`https://devnet.helius-rpc.com/v1/private-wallet` (also on `beta-devnet`), the
-decryption service at `/v1/decryption` on the same host (Boot Proofs
-beside session and operations; API key only), and the Zolana indexer and TEE
-prover at `/v1/spr`, all with a Helius API key.
+On Helius devnet (and `beta-devnet`), with a Helius API key:
+
+- private wallet: `https://devnet.helius-rpc.com/v1/private-wallet`
+- decryption service: `https://devnet.helius-rpc.com/v1/decryption`
+- indexer and TEE prover: `https://devnet.helius-rpc.com/v1/spr`
 
 | Path | Purpose |
 | --- | --- |
@@ -28,6 +34,10 @@ prover at `/v1/spr`, all with a Helius API key.
 | [`crates/protocol`](crates/protocol) | The protocol specification and its Rust implementation: wire types, JCS, digests, client authorization, QOS envelope, release policies, conformance fixtures. |
 | [`examples/typescript-client`](examples/typescript-client) | The client on a Turnkey API key, then SOL and SPL lifecycles and a merge, through the hosted gateway or against the local testkit. |
 | [`scripts`](scripts) | Operator tooling: per-network releases, service keys, the localnet for `just headless-e2e`. |
+
+## Naming
+
+This repository is [`helius-labs/spr-tvc`](https://github.com/helius-labs/spr-tvc). Rust crates and binaries use the `spr-tvc-*` prefix; wire proof types are `spr.tvc.*`. Historical deployment records under `apps/*/deploy/**/*.deployment.json` still point at previous GHCR image names.
 
 ## Responsibility split
 

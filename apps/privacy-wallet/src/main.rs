@@ -3,10 +3,10 @@ use std::net::{IpAddr, SocketAddr};
 
 use clap::Parser;
 use spr_tvc_enclave::{serve, Release};
-use zolana_tvc_privacy_wallet::{load_qos_state, router};
+use spr_tvc_privacy_wallet::{load_qos_state, router};
 
 #[derive(Debug, Parser)]
-#[command(name = "zolana-tvc-privacy-wallet")]
+#[command(name = "spr-tvc-privacy-wallet")]
 struct Cli {
     #[arg(long, default_value = "127.0.0.1")]
     host: IpAddr,

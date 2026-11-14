@@ -249,7 +249,7 @@ function localSigner() {
 }
 
 /**
- * The testkit's stand-in attested prover (`zolana-tvc-privacy-wallet-local
+ * The testkit's stand-in attested prover (`spr-tvc-privacy-wallet-local
  * --prover-tee-port`), with the policy file it publishes. The local enclave
  * trusts its fixture root and the testkit's policy signer; nothing else does.
  */

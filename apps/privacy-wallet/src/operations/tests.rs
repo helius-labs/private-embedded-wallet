@@ -6,13 +6,13 @@ use spr_prover_tee::{
     Anchors, FixtureProver, NitroFixture, PolicySigners, ReleasePayload, SignedPolicyFile,
     TeePolicy,
 };
-use zolana_tvc_protocol::constants::{API_VERSION, MAX_PROVE_INPUTS};
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::constants::{API_VERSION, MAX_PROVE_INPUTS};
+use spr_tvc_protocol::types::{
     ClientAuthorization, ClientGrant, DecryptItem, DecryptLabel, DeriveItem, Network,
     ProverSealing, TransactionKeyItem, WalletDescriptor,
 };
 
-use zolana_tvc_protocol::digest::sealed_seed_digest;
+use spr_tvc_protocol::digest::sealed_seed_digest;
 
 use super::sealed::{seal, unseal, Roles};
 use super::*;
@@ -142,9 +142,7 @@ fn merge_request() -> serde_json::Value {
     })
 }
 
-fn seal_case(
-    case: &ProverCase,
-) -> Result<zolana_tvc_protocol::types::SealedProverRequest, Failure> {
+fn seal_case(case: &ProverCase) -> Result<spr_tvc_protocol::types::SealedProverRequest, Failure> {
     prove::seal(
         &merge_request(),
         &[0x0a; 32],
@@ -746,7 +744,7 @@ fn state() -> AppState {
 
 #[test]
 fn a_request_bound_to_another_release_or_quorum_key_is_refused() {
-    use zolana_tvc_protocol::error::ErrorCode;
+    use spr_tvc_protocol::error::ErrorCode;
 
     let running = state().info;
     let bound = request(derive_nothing(), descriptor([0x07; 32]));
@@ -833,13 +831,13 @@ mod local {
     use serde::Deserialize;
     use spr_prover_tee::{decrypt_response, ATTESTATION_PATH, HEADER_ENC, HEADER_VERSION, VERSION};
     use spr_tvc_enclave::testing::{encrypt_request, open_response};
-    use zolana_tvc_protocol::auth::authorize_operation_request;
-    use zolana_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
-    use zolana_tvc_protocol::crypto::{public_key_uncompressed, sign_p256_prehash};
-    use zolana_tvc_protocol::digest::{descriptor_digest, request_digest, sha256};
-    use zolana_tvc_protocol::encoding::{decode_lower_hex_array, jcs_serialize, parse_strict_json};
-    use zolana_tvc_protocol::sign_wallet_grant;
-    use zolana_tvc_protocol::types::{SealedProverRequest, WalletGrant};
+    use spr_tvc_protocol::auth::authorize_operation_request;
+    use spr_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
+    use spr_tvc_protocol::crypto::{public_key_uncompressed, sign_p256_prehash};
+    use spr_tvc_protocol::digest::{descriptor_digest, request_digest, sha256};
+    use spr_tvc_protocol::encoding::{decode_lower_hex_array, jcs_serialize, parse_strict_json};
+    use spr_tvc_protocol::sign_wallet_grant;
+    use spr_tvc_protocol::types::{SealedProverRequest, WalletGrant};
 
     use super::*;
     use crate::{local_unattested_state, LocalProver, LocalProverTrust, POLICY_PATH};

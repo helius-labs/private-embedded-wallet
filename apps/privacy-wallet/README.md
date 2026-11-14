@@ -46,8 +46,8 @@ forwards them to the plaintext prover at `--prover-url`. `just headless-e2e`
 runs it end to end; to run it by hand:
 
 ```sh
-cargo run -p zolana-tvc-privacy-wallet --features local-dev \
-  --bin zolana-tvc-privacy-wallet-local -- \
+cargo run -p spr-tvc-privacy-wallet --features local-dev \
+  --bin spr-tvc-privacy-wallet-local -- \
   --wallet-keypair /path/to/disposable-keypair.json --prover-url http://127.0.0.1:3001
 ```
 

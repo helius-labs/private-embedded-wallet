@@ -5,9 +5,9 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
-use zolana_tvc_protocol::Network;
-use zolana_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
-use zolana_tvc_protocol::crypto::parse_uncompressed_sec1;
+use spr_tvc_protocol::Network;
+use spr_tvc_protocol::constants::MAX_CLOCK_SKEW_MS;
+use spr_tvc_protocol::crypto::parse_uncompressed_sec1;
 
 use crate::config::is_canonical_uuid;
 use crate::error::ApiError;
@@ -103,7 +103,7 @@ pub fn message(domain: &str, network: Network, request: &EnrollmentRequest) -> O
          Resources:\n\
          - urn:turnkey:organization:{organization}\n\
          - urn:turnkey:wallet:{wallet}\n\
-         - urn:zolana-tvc:client-key:{client_key}",
+         - urn:spr-tvc:client-key:{client_key}",
         address = request.solana_address,
         organization = request.organization_id,
         wallet = request.turnkey_wallet_id,

@@ -16,16 +16,16 @@ use axum::response::IntoResponse;
 use solana_pubkey::Pubkey;
 use spr_tvc_enclave::http::{self, PublicError};
 use spr_tvc_enclave::{open_envelope, respond, ProofBinding};
-use zolana_tvc_protocol::constants::{
+use spr_tvc_protocol::constants::{
     API_VERSION, MAX_CLOCK_SKEW_MS, MAX_REQUEST_AGE_MS, TVC_APP_PROOF_TYPE,
 };
-use zolana_tvc_protocol::crypto::{parse_uncompressed_sec1, verify_p256_prehash};
-use zolana_tvc_protocol::digest::{descriptor_digest, request_digest, sealed_seed_digest};
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::crypto::{parse_uncompressed_sec1, verify_p256_prehash};
+use spr_tvc_protocol::digest::{descriptor_digest, request_digest, sealed_seed_digest};
+use spr_tvc_protocol::types::{
     parse_operation_request, FailureStage, Operation, OperationKind, OperationRequest,
     OperationResult,
 };
-use zolana_tvc_protocol::{client_key_id, verify_wallet_grant};
+use spr_tvc_protocol::{client_key_id, verify_wallet_grant};
 
 use self::bindings::check_request_bindings;
 use crate::custody::{CustodyError, WalletKey};
@@ -250,7 +250,7 @@ fn validate<'a>(request: &'a OperationRequest, state: &AppState) -> Result<Walle
     {
         return Err(Failure::Invalid);
     }
-    zolana_tvc_protocol::verify_client_authorization(request, &grant.client_public_key)
+    spr_tvc_protocol::verify_client_authorization(request, &grant.client_public_key)
         .map_err(|_| Failure::Invalid)?;
     // Only an authorized request learns that its descriptor expired.
     descriptor

@@ -145,7 +145,7 @@ function connectFixture() {
     supported_operations: ["Bootstrap"],
     max_encrypted_request_bytes: "262144",
     max_encrypted_response_bytes: "262144",
-    proof_type: "zolana.tvc.wallet_operation.v1",
+    proof_type: "spr.tvc.wallet_operation.v1",
   };
   const expectedPcrs = {
     0: "44".repeat(48),

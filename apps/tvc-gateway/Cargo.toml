@@ -3,7 +3,7 @@ members = ["."]
 resolver = "2"
 
 [package]
-name = "zolana-tvc-gateway"
+name = "spr-tvc-gateway"
 version = "0.1.0"
 description = "Helius-hosted private-wallet gateway behind gatekeeper: enclave pass-through, enrollment and descriptor provisioning, Boot Proofs"
 edition = "2024"
@@ -47,7 +47,7 @@ tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
 turnkey_client = "=0.14.0"
 utoipa = "=6.0.0"
 zeroize = "=1.9.0"
-zolana-tvc-protocol = { path = "../../crates/protocol" }
+spr-tvc-protocol = { path = "../../crates/protocol" }
 
 [dev-dependencies]
 tower = { version = "=0.5.3", features = ["util"] }

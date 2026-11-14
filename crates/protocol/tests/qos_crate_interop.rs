@@ -4,12 +4,12 @@
 use qos_p256::encrypt::P256EncryptPair;
 use qos_p256::P256Pair;
 use sha2::{Digest, Sha256};
+use spr_tvc_protocol::crypto::{qos_decrypt, qos_encrypt};
+use spr_tvc_protocol::encoding::decode_lower_hex;
 use zeroize::Zeroizing;
-use zolana_tvc_protocol::crypto::{qos_decrypt, qos_encrypt};
-use zolana_tvc_protocol::encoding::decode_lower_hex;
 
 fn fixture_encryption_secret() -> [u8; 32] {
-    Sha256::digest(b"zolana-tvc-test-encryption-sk").into()
+    Sha256::digest(b"spr-tvc-test-encryption-sk").into()
 }
 
 #[test]

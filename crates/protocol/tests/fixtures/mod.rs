@@ -8,29 +8,29 @@ use p256::SecretKey;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use zolana_tvc_protocol::auth::{authorize_operation_request, verify_client_authorization};
-use zolana_tvc_protocol::constants::{
+use spr_tvc_protocol::auth::{authorize_operation_request, verify_client_authorization};
+use spr_tvc_protocol::constants::{
     API_VERSION, EXPECTED_TURNKEY_TRUST_ROOT_ID, MAX_ENCRYPTED_REQUEST_BYTES,
     MAX_ENCRYPTED_RESPONSE_BYTES, QOS_P256_PUBLIC_LEN, TVC_APP_PROOF_TYPE,
 };
-use zolana_tvc_protocol::crypto::{
+use spr_tvc_protocol::crypto::{
     public_key_uncompressed, qos_decrypt, qos_encrypt_with, qos_public_from_secrets,
     sign_p256_prehash, verify_p256_prehash, verify_turnkey_app_proof_p256_message, QosP256Public,
 };
-use zolana_tvc_protocol::digest::{
+use spr_tvc_protocol::digest::{
     client_auth_digest, client_auth_message, descriptor_digest, request_digest, request_id_hash,
     result_digest, sealed_seed_digest, wallet_grant_digest, wallet_id_hash,
 };
-use zolana_tvc_protocol::encoding::{
+use spr_tvc_protocol::encoding::{
     canonicalize_json_str, canonicalize_json_value, encode_decimal_u64, encode_lower_hex,
     jcs_serialize,
 };
-use zolana_tvc_protocol::error::{ErrorCode, TvcError};
-use zolana_tvc_protocol::release::{
+use spr_tvc_protocol::error::{ErrorCode, TvcError};
+use spr_tvc_protocol::release::{
     sign_release_policy, verify_signed_release_policy, PinnedReleaseAuthorities,
     ReleaseAuthorityKey,
 };
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::types::{
     ClientAuthorization, ClientGrant, HealthResponse, HealthStatus, Network, Operation,
     OperationKind, OperationRequest, ReleaseAuthoritySignature, ReleasePolicy, ServiceInfo,
     SignedReleasePolicy, WalletDescriptor, WalletGrant,
@@ -217,7 +217,7 @@ struct Running {
 fn sample_request(client_public: &[u8], running: &Running) -> OperationRequest {
     OperationRequest {
         version: API_VERSION,
-        request_id: sha256_label("zolana-tvc-test-request-id"),
+        request_id: sha256_label("spr-tvc-test-request-id"),
         issued_at_ms: 1_700_000_000_000,
         expires_at_ms: 1_700_000_300_000,
         target_release_id: running.release_id.clone(),
@@ -239,9 +239,9 @@ fn sample_request(client_public: &[u8], running: &Running) -> OperationRequest {
 fn sample_running() -> Running {
     Running {
         release_id: "tvc-dev-phase0".to_owned(),
-        manifest_digest: sha256_label("zolana-tvc-test-manifest"),
-        executable_digest: sha256_label("zolana-tvc-test-executable"),
-        security_domain_id: sha256_label("zolana-tvc-test-security-domain"),
+        manifest_digest: sha256_label("spr-tvc-test-manifest"),
+        executable_digest: sha256_label("spr-tvc-test-executable"),
+        security_domain_id: sha256_label("spr-tvc-test-security-domain"),
         quorum_key_id: "quorum-dev-1".to_owned(),
         quorum_key_epoch: 1,
     }
@@ -272,7 +272,7 @@ fn sample_policy(info: &ServiceInfo) -> ReleasePolicy {
         version: API_VERSION,
         release_id: info.release_id.clone(),
         network: info.network,
-        tvc_application_id: "zolana-tvc-privacy-wallet".to_owned(),
+        tvc_application_id: "spr-tvc-privacy-wallet".to_owned(),
         security_domain_id: info.security_domain_id,
         accepted_manifest_digests: vec![encode_lower_hex(&info.manifest_digest)],
         accepted_executable_digests: vec![encode_lower_hex(&info.executable_digest)],
@@ -301,14 +301,14 @@ fn authority_public(secret: &[u8; 32]) -> Vec<u8> {
 }
 
 /// Build the committed fixture set. File bodies are compact JSON objects.
-pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::error::TvcError> {
-    let client_sk = sha256_label("zolana-tvc-test-client-sk");
-    let encryption_sk = sha256_label("zolana-tvc-test-encryption-sk");
-    let signing_sk = sha256_label("zolana-tvc-test-signing-sk");
-    let ephemeral_sk = sha256_label("zolana-tvc-test-ephemeral-sk");
-    let wrong_sk = sha256_label("zolana-tvc-test-wrong-sk");
+pub fn fixture_files() -> Result<BTreeMap<String, String>, spr_tvc_protocol::error::TvcError> {
+    let client_sk = sha256_label("spr-tvc-test-client-sk");
+    let encryption_sk = sha256_label("spr-tvc-test-encryption-sk");
+    let signing_sk = sha256_label("spr-tvc-test-signing-sk");
+    let ephemeral_sk = sha256_label("spr-tvc-test-ephemeral-sk");
+    let wrong_sk = sha256_label("spr-tvc-test-wrong-sk");
     let mut nonce = [0u8; 12];
-    nonce.copy_from_slice(&sha256_label("zolana-tvc-test-nonce")[..12]);
+    nonce.copy_from_slice(&sha256_label("spr-tvc-test-nonce")[..12]);
 
     let client_public = public_key_uncompressed(
         &SecretKey::from_slice(&client_sk)
@@ -463,7 +463,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
         r#"{"outcome":"Completed","type":"APP_PROOF_TYPE_POLICY_OUTCOME","version":1}"#,
     )?;
     let proof_sig =
-        zolana_tvc_protocol::crypto::sign_p256_message(&signing_sk, proof_payload.as_bytes())?;
+        spr_tvc_protocol::crypto::sign_p256_message(&signing_sk, proof_payload.as_bytes())?;
     let parsed_proof_sig = p256::ecdsa::Signature::from_slice(&proof_sig).expect("signature");
     let (proof_r, proof_s) = parsed_proof_sig.split_scalars();
     let high_s_sig: [u8; 64] = p256::ecdsa::Signature::from_scalars(*proof_r, -*proof_s)
@@ -472,7 +472,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
         .into();
     let non_jcs_payload = r#"{"type":"APP_PROOF_TYPE_POLICY_OUTCOME","timestampMs":"1750000000000","policyOutcome":{}}"#;
     let non_jcs_sig =
-        zolana_tvc_protocol::crypto::sign_p256_message(&signing_sk, non_jcs_payload.as_bytes())?;
+        spr_tvc_protocol::crypto::sign_p256_message(&signing_sk, non_jcs_payload.as_bytes())?;
     files.insert(
         "proof-payload-utf8.json".to_owned(),
         fixture_json(&json!({
@@ -524,9 +524,9 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
     }
     reject_double_hashed_signature(&client_public, &client_auth, &double_sig)?;
 
-    let authority_sk1 = sha256_label("zolana-tvc-test-release-authority-1");
-    let authority_sk2 = sha256_label("zolana-tvc-test-release-authority-2");
-    let authority_sk3 = sha256_label("zolana-tvc-test-release-authority-3");
+    let authority_sk1 = sha256_label("spr-tvc-test-release-authority-1");
+    let authority_sk2 = sha256_label("spr-tvc-test-release-authority-2");
+    let authority_sk3 = sha256_label("spr-tvc-test-release-authority-3");
     let policy = sample_policy(&info);
     let authorities = PinnedReleaseAuthorities {
         authority_set_id: "dev-release-1".to_owned(),
@@ -591,7 +591,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
             "network": Network::Devnet,
             "authorities": authorities,
             "signed": signed,
-            "policy_digest": encode_lower_hex(&zolana_tvc_protocol::release::policy_signing_digest(&policy)?),
+            "policy_digest": encode_lower_hex(&spr_tvc_protocol::release::policy_signing_digest(&policy)?),
             "empty_signatures": verify(&unsigned, &authorities, Network::Devnet, 1_750_000_000_000),
             "empty_signatures_input": unsigned,
             "duplicate_key_id": verify(&duplicate, &authorities, Network::Devnet, 1_750_000_000_000),
@@ -628,7 +628,7 @@ pub fn fixture_files() -> Result<BTreeMap<String, String>, zolana_tvc_protocol::
     }
     {
         let mut m = info.clone();
-        m.proof_type = "zolana.tvc.other.v1".to_owned();
+        m.proof_type = "spr.tvc.other.v1".to_owned();
         binding_cases.push(("proof_type", m));
     }
     {
@@ -758,7 +758,7 @@ pub fn manifest_for(files: &BTreeMap<String, String>) -> Value {
     })
 }
 
-pub fn write_fixtures(dir: &Path) -> Result<(), zolana_tvc_protocol::error::TvcError> {
+pub fn write_fixtures(dir: &Path) -> Result<(), spr_tvc_protocol::error::TvcError> {
     std::fs::create_dir_all(dir).expect("create fixtures dir");
     let files = fixture_files()?;
     let manifest = serde_json::to_string_pretty(&manifest_for(&files)).expect("manifest");
@@ -769,7 +769,7 @@ pub fn write_fixtures(dir: &Path) -> Result<(), zolana_tvc_protocol::error::TvcE
     Ok(())
 }
 
-pub fn verify_fixtures(dir: &Path) -> Result<(), zolana_tvc_protocol::error::TvcError> {
+pub fn verify_fixtures(dir: &Path) -> Result<(), spr_tvc_protocol::error::TvcError> {
     let files = fixture_files()?;
     let committed_manifest: Value =
         serde_json::from_slice(&std::fs::read(dir.join("MANIFEST.json")).expect("read manifest"))

@@ -5,8 +5,8 @@ use std::str::FromStr;
 use ed25519_dalek::{Signature, VerifyingKey};
 use solana_pubkey::Pubkey;
 use spr_tvc_enclave::Failure;
-use zolana_tvc_protocol::decryption_service::{decrypt_message, ADDRESS_LEN};
-use zolana_tvc_protocol::types::Network;
+use spr_tvc_protocol::decryption_service::{decrypt_message, ADDRESS_LEN};
+use spr_tvc_protocol::types::Network;
 
 /// The key of an address a key can sign for: on the curve, not of small order.
 pub(crate) fn address_key(address: &str) -> Result<VerifyingKey, Failure> {

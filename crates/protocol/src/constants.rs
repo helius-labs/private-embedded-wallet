@@ -1,9 +1,9 @@
 //! Domain separators and protocol limits.
 
 pub const API_VERSION: u8 = 1;
-pub const TVC_APP_PROOF_TYPE: &str = "zolana.tvc.wallet_operation.v1";
+pub const TVC_APP_PROOF_TYPE: &str = "spr.tvc.wallet_operation.v1";
 pub const TVC_APP_PROOF_SCHEME: &str = "SIGNATURE_SCHEME_EPHEMERAL_KEY_P256";
-pub const TVC_QOS_PING_PROOF_TYPE: &str = "zolana.tvc.qos_ping.v1";
+pub const TVC_QOS_PING_PROOF_TYPE: &str = "spr.tvc.qos_ping.v1";
 pub const EXPECTED_TURNKEY_TRUST_ROOT_ID: &str = "aws-nitro-root-g1";
 /// A client key's ID is this prefix and the first 16 bytes of the SHA-256 of
 /// its SEC1 encoding, in hex.

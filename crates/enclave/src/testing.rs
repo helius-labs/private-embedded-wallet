@@ -3,14 +3,14 @@
 use axum::body::Body;
 use axum::http::Response;
 use http_body_util::BodyExt as _;
-use zeroize::Zeroizing;
-use zolana_tvc_protocol::constants::API_VERSION;
-use zolana_tvc_protocol::crypto::{qos_decrypt, qos_encrypt, verify_p256_message, QosP256Public};
-use zolana_tvc_protocol::digest::result_digest;
-use zolana_tvc_protocol::encoding::parse_strict_json;
-use zolana_tvc_protocol::types::{
+use spr_tvc_protocol::constants::API_VERSION;
+use spr_tvc_protocol::crypto::{qos_decrypt, qos_encrypt, verify_p256_message, QosP256Public};
+use spr_tvc_protocol::digest::result_digest;
+use spr_tvc_protocol::encoding::parse_strict_json;
+use spr_tvc_protocol::types::{
     EncryptedRequest, EncryptedResponse, OperationProofPayload, ServiceInfo, WalletGrant,
 };
+use zeroize::Zeroizing;
 
 use crate::Release;
 

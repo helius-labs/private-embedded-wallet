@@ -10,9 +10,9 @@ use axum::routing::{get, post};
 use cadence_macros::statsd_time;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+use spr_tvc_protocol::{EncryptedRequest, QosPingRequest, WalletDescriptor};
 use tower_http::set_header::SetResponseHeaderLayer;
 use utoipa::ToSchema;
-use zolana_tvc_protocol::{EncryptedRequest, QosPingRequest, WalletDescriptor};
 
 use crate::api_keys::ApiKeys;
 use crate::config::Config;
@@ -587,7 +587,7 @@ mod tests {
         serde_json::json!({
             "descriptor": descriptor,
             "request": {
-                "version": zolana_tvc_protocol::constants::API_VERSION,
+                "version": spr_tvc_protocol::constants::API_VERSION,
                 "quorum_key_id": "q",
                 "quorum_key_epoch": "1",
                 "ciphertext": ciphertext,

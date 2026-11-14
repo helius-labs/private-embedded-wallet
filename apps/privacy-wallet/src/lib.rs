@@ -16,8 +16,8 @@ use std::sync::Arc;
 use axum::Router;
 use qos_p256::P256Pair;
 use spr_tvc_enclave::{App, Release, Service};
-use zolana_tvc_protocol::constants::TVC_APP_PROOF_TYPE;
-use zolana_tvc_protocol::types::ServiceInfo;
+use spr_tvc_protocol::constants::TVC_APP_PROOF_TYPE;
+use spr_tvc_protocol::types::ServiceInfo;
 
 mod custody;
 mod network;
@@ -99,8 +99,8 @@ mod tests {
     use axum::http::header::CONTENT_TYPE;
     use axum::http::{Request, StatusCode};
     use spr_tvc_enclave::testing::{self, body};
+    use spr_tvc_protocol::encoding::parse_strict_json;
     use tower::ServiceExt as _;
-    use zolana_tvc_protocol::encoding::parse_strict_json;
 
     use super::*;
 

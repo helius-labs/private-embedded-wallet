@@ -1,8 +1,8 @@
 export const API_VERSION = 1;
-export const TVC_APP_PROOF_TYPE = "zolana.tvc.wallet_operation.v1";
+export const TVC_APP_PROOF_TYPE = "spr.tvc.wallet_operation.v1";
 export const EXPECTED_TURNKEY_TRUST_ROOT_ID = "aws-nitro-root-g1";
 export const TVC_APP_PROOF_SCHEME = "SIGNATURE_SCHEME_EPHEMERAL_KEY_P256";
-export const TVC_QOS_PING_PROOF_TYPE = "zolana.tvc.qos_ping.v1";
+export const TVC_QOS_PING_PROOF_TYPE = "spr.tvc.qos_ping.v1";
 export const TVC_APP_PROOF_KEYS = ["scheme", "public_key", "proof_payload", "signature"] as const;
 
 export const REQUEST_DIGEST_DOMAIN = "ZOLANA_TVC_REQUEST_V1";
