@@ -7,6 +7,7 @@ enclave (`@heliuslabs/spr-embedded-wallet`), in the layout of
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw, with the enclave as the key holder
 - **[spl_deposit_transfer_withdraw](examples/spl_deposit_transfer_withdraw.ts)** - The same lifecycle for an SPL token registered with the pool
 - **[merge](examples/merge.ts)** - Merge the wallet's SOL notes into one
+- **[unregistered_recipient](examples/unregistered_recipient.ts)** - Pay an address that has no registered wallet, via the decryption service
 
 ## What a TVC wallet is
 
@@ -67,8 +68,9 @@ client.proofService)` in place of `keys`. Nothing else changes.
 
 - Node.js 24+, pnpm, and a Helius API key (`API_KEY`). The network's
   Helius host, `devnet.helius-rpc.com` or `mainnet.helius-rpc.com`, serves
-  everything else: the RPC, the indexer and the TEE prover at `/v1/spr`, and
-  the network's private-wallet gateway at `/v1/private-wallet`.
+  everything else: the RPC, the indexer and the TEE prover at `/v1/spr`, the
+  network's private-wallet gateway at `/v1/private-wallet`, and (on networks
+  that have one) the decryption-service gateway at `/v1/decryption-service`.
 - A Turnkey sub-organization named after the API key's Helius project, with a
   Solana wallet, and a root user's API key in it, as the key pair or a Turnkey
   API key file (`TURNKEY_API_KEY_PATH`). Helius creates these sub-organizations
@@ -128,6 +130,25 @@ the merge proof:
 
 ```bash
 pnpm example examples/merge.ts
+```
+
+### Unregistered recipient (decryption service)
+
+Pays a fresh Solana address through the decryption service, then opens the
+notes with that address's signature. Point at the service in one of three ways
+(see `decryptionService()` in [`src/lib.ts`](src/lib.ts)):
+
+| Mode | Env | Credentials |
+| --- | --- | --- |
+| Hosted gateway (default) | `API_KEY`; optional `DECRYPTION_SERVICE_GATEWAY_URL` | Helius API key only |
+| Direct enclave | `DECRYPTION_SERVICE_URL`, `TVC_ORG_ID`, `TVC_API_KEY_PUBLIC`, `TVC_API_KEY_PRIVATE` | Turnkey Boot Proof keys of the TVC org |
+| Local testkit | `DECRYPTION_SERVICE_LOCAL_ENDPOINT` | none |
+
+Testers on the hosted path need only `API_KEY` (and the usual wallet Turnkey
+vars for `setup()`). No `TVC_ORG_ID` or Turnkey Boot Proof keys.
+
+```bash
+pnpm example examples/unregistered_recipient.ts
 ```
 
 ## Bootstrap authorization

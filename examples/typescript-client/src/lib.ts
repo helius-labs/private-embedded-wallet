@@ -460,27 +460,44 @@ export async function setup(): Promise<ExampleSetup> {
   return Object.freeze({ zolana, keys, signer });
 }
 
+/** The hosted decryption-service gateway: `DECRYPTION_SERVICE_GATEWAY_URL`, else the network's `/v1/decryption-service`. */
+function decryptionGatewayEndpoint(network: Network): URL {
+  return new URL(
+    process.env["DECRYPTION_SERVICE_GATEWAY_URL"]?.trim()
+      || heliusUrl(network, "/v1/decryption-service"),
+  );
+}
+
 /**
- * The decryption service: the local testkit's at
- * `DECRYPTION_SERVICE_LOCAL_ENDPOINT`, else the network's at
- * `DECRYPTION_SERVICE_URL`, whose Boot Proofs come from Turnkey with an API key
- * of the organization that holds the application (`TVC_ORG_ID`,
- * `TVC_API_KEY_PUBLIC`, `TVC_API_KEY_PRIVATE`).
+ * The decryption service, in one of three ways:
+ * - `DECRYPTION_SERVICE_LOCAL_ENDPOINT`: the unattested local testkit
+ * - `DECRYPTION_SERVICE_URL` (+ `TVC_ORG_ID` / Turnkey Boot Proof API keys): the
+ *   enclave directly
+ * - otherwise the hosted tvc-gateway (`DECRYPTION_SERVICE_GATEWAY_URL`, or the
+ *   network's `/v1/decryption-service` with `API_KEY`); Boot Proofs come beside
+ *   session and operation answers, so no Turnkey org keys are needed
  */
 export function decryptionService(): DecryptionService {
   const network = networkFromEnv();
   const local = process.env["DECRYPTION_SERVICE_LOCAL_ENDPOINT"]?.trim();
   if (local) return createLocalDecryptionService({ network, endpoint: new URL(local) });
-  const organizationId = env("TVC_ORG_ID");
-  const turnkey = turnkeyClient(organizationId, {
-    publicKey: env("TVC_API_KEY_PUBLIC"),
-    privateKey: env("TVC_API_KEY_PRIVATE"),
-  });
+  const direct = process.env["DECRYPTION_SERVICE_URL"]?.trim();
+  if (direct) {
+    const organizationId = env("TVC_ORG_ID");
+    const turnkey = turnkeyClient(organizationId, {
+      publicKey: env("TVC_API_KEY_PUBLIC"),
+      privateKey: env("TVC_API_KEY_PRIVATE"),
+    });
+    return createDecryptionService({
+      network,
+      endpoint: new URL(direct),
+      resolveBootProof: async ({ bootProofLookupKey }) =>
+        (await turnkey.getBootProof({ organizationId, ephemeralKey: bootProofLookupKey })).bootProof,
+    });
+  }
   return createDecryptionService({
     network,
-    endpoint: new URL(env("DECRYPTION_SERVICE_URL")),
-    resolveBootProof: async ({ bootProofLookupKey }) =>
-      (await turnkey.getBootProof({ organizationId, ephemeralKey: bootProofLookupKey })).bootProof,
+    endpoint: decryptionGatewayEndpoint(network),
   });
 }
 

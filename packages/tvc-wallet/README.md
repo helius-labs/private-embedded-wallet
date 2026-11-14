@@ -387,7 +387,14 @@ a wallet.
 ```ts
 import { createDecryptionService } from "@heliuslabs/spr-embedded-wallet/decryption-service";
 
-const service = createDecryptionService({ network, endpoint, resolveBootProof });
+// Through tvc-gateway (Helius API key only): Boot Proofs arrive beside answers.
+const service = createDecryptionService({
+  network,
+  endpoint: new URL("https://devnet.helius-rpc.com/v1/decryption-service?api-key=…"),
+});
+
+// Or the enclave directly, with a Turnkey Boot Proof lookup:
+// createDecryptionService({ network, endpoint, resolveBootProof });
 
 // Sender: the shielded address of a recipient without a registry record.
 const recipient = await service.address(solanaAddress);
@@ -402,9 +409,9 @@ await syncWallet({ client, wallet: received, keys });
 message in `open` and one for every batch of outputs a sync opens. The service
 returns the nullifier secret, so proofs are made as `LocalKeys` makes them,
 through `client.proofService`. The recipient then moves the balance to its own
-wallet with `buildTransferTransaction`. No release is pinned yet, and
-`resolveBootProof` needs a Turnkey API key of the application's organization
-until tvc-gateway serves the application.
+wallet with `buildTransferTransaction`. Without `resolveBootProof`, `endpoint`
+is a tvc-gateway `/v1/decryption-service` URL and Boot Proofs come beside
+session and operation answers (testers need only a Helius API key).
 
 ## Entry points
 

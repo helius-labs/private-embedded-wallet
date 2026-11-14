@@ -34,12 +34,21 @@ export type EnclaveBackend = {
 
 /**
  * A tvc-gateway, such as Helius's behind gatekeeper. It returns each replica's
- * Boot Proof beside its answer and adds a grant to each operation.
+ * Boot Proof beside its answer. The private-wallet path adds a grant; the
+ * decryption-service path forwards the encrypted request as it is.
  */
 export type GatewayBackend = {
   readonly kind: "gateway";
-  /** `…/v1/private-wallet`, keeping any query such as gatekeeper's `api-key`. */
+  /**
+   * `…/v1/private-wallet` or `…/v1/decryption-service`, keeping any query such
+   * as gatekeeper's `api-key`.
+   */
   readonly endpoint: URL;
+  /**
+   * When set, operations are the enclave's `EncryptedRequest` alone (no
+   * descriptor, no grant). The decryption-service gateway uses this.
+   */
+  readonly decryptionService?: true;
 };
 
 /**
@@ -170,7 +179,8 @@ export async function requestGrant(
 
 /** Bytes the backend adds to a request before the enclave receives it. */
 export function forwardedRequestBytes(backend: SprEmbeddedWalletBackend): number {
-  return backend.kind === "gateway" ? GATEWAY_GRANT_BYTES : 0;
+  if (backend.kind !== "gateway" || backend.decryptionService) return 0;
+  return GATEWAY_GRANT_BYTES;
 }
 
 /** Room for a refusal's JSON: the enclave's `{"error"}` or a gateway's problem document. */
@@ -222,6 +232,23 @@ export async function sendToEnclave(
   return { responseText: await readOperationAnswer(response, maxAnswerBytes, signal) };
 }
 
+/** Posts one encrypted request through a decryption-service gateway (no descriptor). */
+export async function sendToDecryptionGateway(
+  endpoint: URL,
+  request: EncryptedRequestWire,
+  transport: SprEmbeddedWalletTransport,
+  maxAnswerBytes: bigint,
+  signal?: AbortSignal,
+): Promise<OperationAnswer> {
+  const url = gatewayUrl(endpoint, "operations");
+  const response = await postJson(transport, url, canonicalizeJsonValue(request), signal);
+  const answer = parseStrictJson<{ response: unknown; bootProof: TurnkeyBootProofWire }>(
+    await readOperationAnswer(response, maxAnswerBytes + MAX_BOOT_PROOF_BYTES, signal),
+    GATEWAY_OPERATION_KEYS,
+  );
+  return { responseText: JSON.stringify(answer.response), bootProof: answer.bootProof };
+}
+
 /** Sends one encrypted request, whose enclave answer may take up to `maxAnswerBytes`. */
 export async function sendOperation(
   backend: SprEmbeddedWalletBackend,
@@ -235,6 +262,9 @@ export async function sendOperation(
     case "enclave":
       return sendToEnclave(backend.endpoint, request, transport, maxAnswerBytes, signal);
     case "gateway": {
+      if (backend.decryptionService) {
+        return sendToDecryptionGateway(backend.endpoint, request, transport, maxAnswerBytes, signal);
+      }
       const url = gatewayUrl(backend.endpoint, "operations");
       const response = await postJson(transport, url, canonicalizeJsonValue({ descriptor, request }), signal);
       const answer = parseStrictJson<{ response: unknown; bootProof: TurnkeyBootProofWire }>(
@@ -243,5 +273,24 @@ export async function sendOperation(
       );
       return { responseText: JSON.stringify(answer.response), bootProof: answer.bootProof };
     }
+  }
+}
+
+/**
+ * Sends one decryption-service encrypted request: direct to the enclave, or
+ * through a gateway that attaches the Boot Proof (and takes no grant).
+ */
+export async function sendDecryptionOperation(
+  backend: SprEmbeddedWalletBackend,
+  request: EncryptedRequestWire,
+  transport: SprEmbeddedWalletTransport,
+  maxAnswerBytes: bigint,
+  signal?: AbortSignal,
+): Promise<OperationAnswer> {
+  switch (backend.kind) {
+    case "enclave":
+      return sendToEnclave(backend.endpoint, request, transport, maxAnswerBytes, signal);
+    case "gateway":
+      return sendToDecryptionGateway(backend.endpoint, request, transport, maxAnswerBytes, signal);
   }
 }
