@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Helius Private Wallet API",
-    "description": "The backend of the Zolana private embedded wallet. Each successful enclave answer carries the Boot Proof of the replica that gave it; a session also carries discovery and the ping. The client verifies them against the release it pins.",
+    "description": "The backend of the Zolana private embedded wallet and decryption service. Each successful enclave answer carries the Boot Proof of the replica that gave it; a session also carries discovery and the ping. The client verifies them against the release it pins. The decryption service needs no enrollment: decrypt requests carry a Solana signature.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -20,6 +20,99 @@
     }
   ],
   "paths": {
+    "/v1/decryption/operations": {
+      "post": {
+        "tags": [
+          "Decryption service"
+        ],
+        "summary": "Run a decryption-service operation",
+        "description": "Forwards the client's encrypted request as it is (no wallet grant) and\nreturns the Boot Proof of the replica that answered. A resent request gets\nthe first request's answer, marked `Idempotent-Replayed`.",
+        "operationId": "decryption_operations",
+        "requestBody": {
+          "description": "The enclave's EncryptedRequest, without wallet_grant",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecryptionEncryptedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The enclave's answer and its evidence",
+            "headers": {
+              "Idempotent-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` when the answer repeats an earlier request's"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operated"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Refused, or the enclave or Turnkey did not answer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/decryption/session": {
+      "post": {
+        "tags": [
+          "Decryption service"
+        ],
+        "summary": "Open a decryption-service session",
+        "description": "Discovery, the enclave's answer to the ping and the Boot Proof of the\nreplica that answered. No enrollment: the decryption service authorizes\nwith a Solana signature on decrypt requests.",
+        "operationId": "decryption_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The evidence to verify",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Refused, or the enclave or Turnkey did not answer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/private-wallet/enroll": {
       "post": {
         "tags": [
@@ -157,6 +250,34 @@
   },
   "components": {
     "schemas": {
+      "DecryptionEncryptedRequest": {
+        "type": "object",
+        "description": "The enclave's `EncryptedRequest` without a wallet grant (OpenAPI shape).",
+        "required": [
+          "version",
+          "quorum_key_id",
+          "quorum_key_epoch",
+          "ciphertext"
+        ],
+        "properties": {
+          "ciphertext": {
+            "type": "string",
+            "description": "Hex ciphertext."
+          },
+          "quorum_key_epoch": {
+            "type": "string",
+            "description": "Decimal string of the quorum key epoch."
+          },
+          "quorum_key_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "Enrolled": {
         "type": "object",
         "required": [
@@ -287,6 +408,7 @@
               "ApiKeyRequired",
               "ApiKeyInvalid",
               "WaasNotEnabled",
+              "WalletGrantNotAllowed",
               "InvalidDescriptor",
               "DescriptorExpired",
               "ClientKeyRevoked",

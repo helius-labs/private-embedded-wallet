@@ -51,8 +51,7 @@ with a local Quorum key split 2-of-3 among three operator key files, which
 stand in for YubiKeys there. [`scripts/release.mjs`](../../scripts/README.md#release)
 releases it with `--app decryption-service`.
 
-Not there yet:
-
-- A published image and a release: `publish-enclave-image` runs from `main`.
-- A gateway route. Until then a client needs a Turnkey API key of the
-  application's organization to fetch Boot Proofs.
+Devnet clients reach it through tvc-gateway at `/v1/decryption` with a
+Helius API key only (Boot Proofs beside session and operations). Direct enclave
+access still needs a Turnkey API key of the application's organization for Boot
+Proofs.

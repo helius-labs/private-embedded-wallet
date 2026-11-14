@@ -210,14 +210,28 @@ export function createLocalSprEmbeddedWallet<Account extends SprEmbeddedWalletTu
 export function createLocalDecryptionService(config: {
   /** The network the testkit was built for (`SPR_NETWORK`, devnet by default). */
   readonly network: Network;
+  /**
+   * The testkit enclave, or a tvc-gateway's `/v1/decryption` in front of it,
+   * over loopback HTTP.
+   */
   readonly endpoint: URL;
+  /**
+   * When set, `endpoint` is a gateway that returns Boot Proofs beside answers
+   * (`decryptionService: true`). Defaults to a direct enclave.
+   */
+  readonly gateway?: true;
+  readonly transport?: SprEmbeddedWalletTransport;
 }): DecryptionService {
+  const backend: SprEmbeddedWalletBackend = config.gateway
+    ? { kind: "gateway", endpoint: config.endpoint, decryptionService: true }
+    : { kind: "enclave", endpoint: config.endpoint };
   return decryptionServiceFromSession(createLocalSprEmbeddedWalletSession({
     network: requireNetwork(config.network),
-    backend: { kind: "enclave", endpoint: config.endpoint },
+    backend,
     ...LOCAL_RELEASE,
     expectedOperations: ["ServicePublicKeys", "ServiceDecrypt"],
     expectedProofType: SERVICE_PROOF_TYPE,
+    ...(config.transport === undefined ? {} : { transport: config.transport }),
   }));
 }
 

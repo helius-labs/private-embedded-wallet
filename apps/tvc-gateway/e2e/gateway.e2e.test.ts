@@ -15,6 +15,7 @@ import {
   type WalletDescriptor,
 } from "@heliuslabs/spr-embedded-wallet/protocol";
 import {
+  createLocalDecryptionService,
   createLocalSprEmbeddedWallet,
   createTestSprEmbeddedWallet,
   type ReleaseTrust,
@@ -29,6 +30,7 @@ import {
 
 const { gatewayUrl, enclaveUrl, originAuth, apiKey, walletSeedHex, turnkeyUrl } = inject("stack");
 const privateWallet = `${gatewayUrl}/v1/private-wallet`;
+const decryptionServiceUrl = `${gatewayUrl}/v1/decryption`;
 const ownerSeed = decodeLowerHex(walletSeedHex);
 const ownerAddress = getAddressDecoder().decode(ed25519.getPublicKey(ownerSeed));
 const clientPublicKey = encodeLowerHex(
@@ -80,8 +82,74 @@ it("serves health without credentials", async () => {
   expect((await fetch(`${gatewayUrl}/health`)).status).toBe(200);
 });
 
-it("serves only /session, /enroll and /operations", async () => {
+it("serves only /session, /enroll and /operations under private-wallet", async () => {
   expect(await post("/unknown", {})).toMatchObject(problem(404, "NotFound"));
+});
+
+describe("the decryption service through the gateway", () => {
+  async function postDecryption(path: string, body: unknown) {
+    const response = await fetch(`${decryptionServiceUrl}${path}`, {
+      method: "POST",
+      headers: gatekeeperHeaders(),
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+    return { status: response.status, headers: response.headers, body: await response.json() };
+  }
+
+  const sent: { path: string; body: string; answer: string }[] = [];
+  const transport: SprEmbeddedWalletTransport = {
+    async fetch(url, init) {
+      const response = await fetch(url, { ...init, headers: gatekeeperHeaders() });
+      sent.push({ path: url.pathname, body: String(init?.body ?? ""), answer: await response.clone().text() });
+      return response;
+    },
+  };
+
+  it("opens a session and answers PublicKeys with a Boot Proof, without a grant", async () => {
+    const service = createLocalDecryptionService({
+      network: "devnet",
+      endpoint: new URL(decryptionServiceUrl),
+      gateway: true,
+      transport,
+    });
+    const address = await service.address(ownerAddress);
+    expect(address.viewingPublicKey).toBeDefined();
+    expect(address.nullifierPublicKey).toBeDefined();
+    expect(sent.map(({ path }) => path)).toEqual([
+      "/v1/decryption/session",
+      "/v1/decryption/operations",
+    ]);
+    const session = JSON.parse(sent[0]!.answer) as { bootProof: unknown };
+    const operated = JSON.parse(sent[1]!.answer) as { response: unknown; bootProof: unknown };
+    expect(session).toHaveProperty("bootProof");
+    expect(operated).toHaveProperty("bootProof");
+    expect(JSON.parse(sent[1]!.body)).not.toHaveProperty("descriptor");
+    expect(JSON.parse(sent[1]!.body)).not.toHaveProperty("wallet_grant");
+  });
+
+  it("refuses a wallet grant on operations", async () => {
+    expect(
+      await postDecryption("/operations", {
+        version: 1,
+        quorum_key_id: testkit.quorumKeyId,
+        quorum_key_epoch: "1",
+        ciphertext: "abcd",
+        wallet_grant: {
+          version: 1,
+          descriptor_digest: "00".repeat(32),
+          client_key_id: "client",
+          project_id: PROJECT_ID,
+          issued_at_ms: "1",
+          expires_at_ms: "2",
+          signature: "00".repeat(64),
+        },
+      }),
+    ).toMatchObject(problem(400, "WalletGrantNotAllowed"));
+  });
+
+  it("has no enroll route", async () => {
+    expect(await postDecryption("/enroll", {})).toMatchObject(problem(404, "NotFound"));
+  });
 });
 
 describe("enrollment", () => {

@@ -40,6 +40,8 @@ pub enum ApiError {
     #[error("the API key's project cannot use WaaS: its plan, or the WaaS rollout")]
     WaasNotEnabled,
 
+    #[error("the decryption service does not take a wallet grant")]
+    WalletGrantNotAllowed,
     #[error("this gateway did not provision the descriptor for the current release")]
     InvalidDescriptor,
     #[error("the descriptor has expired: enroll the client key again")]
@@ -118,7 +120,8 @@ impl ApiError {
             Self::InvalidJson
             | Self::InvalidEnrollmentRequest
             | Self::StaleEnrollment
-            | Self::InvalidOwnerEnrollmentSignature => StatusCode::BAD_REQUEST,
+            | Self::InvalidOwnerEnrollmentSignature
+            | Self::WalletGrantNotAllowed => StatusCode::BAD_REQUEST,
             Self::OriginAuthRequired
             | Self::ProjectRequired
             | Self::ApiKeyRequired

@@ -2,6 +2,7 @@
 network: mainnet
 enclave:
     base_url: https://app-8a2523d7-feb8-41ee-9587-c202048816ec.app.turnkey.cloud
+# decryption_service: set when a mainnet app exists (TVC_GATEWAY_DECRYPTION_SERVICE__ENCLAVE__BASE_URL).
 turnkey:
     tvc_organization_id: 9b98a0d8-04a4-47a3-9dc3-afa84c686de4
 provisioning:

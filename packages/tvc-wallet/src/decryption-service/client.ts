@@ -23,7 +23,11 @@ import {
   type MessagePartialSigner,
 } from "@solana/kit";
 
-import { sendToEnclave, type BootProofResolver } from "../client/backend.js";
+import {
+  sendDecryptionOperation,
+  type BootProofResolver,
+  type SprEmbeddedWalletBackend,
+} from "../client/backend.js";
 import type { ConnectedTvcRuntime } from "../client/connection.js";
 import {
   checkSignedRequestSize,
@@ -70,10 +74,18 @@ const addressEncoder = getAddressEncoder();
 
 export type DecryptionServiceConfig = {
   readonly network: Network;
-  /** The enclave's public ingress. */
+  /**
+   * The enclave's public ingress, or a tvc-gateway's `/v1/decryption` (with any
+   * query such as gatekeeper's `api-key`). Without `resolveBootProof` the
+   * client treats `endpoint` as a gateway and reads Boot Proofs beside session
+   * and operation answers.
+   */
   readonly endpoint: URL;
-  /** Fetches a replica's Boot Proof, such as with an authenticated Turnkey session. */
-  readonly resolveBootProof: BootProofResolver;
+  /**
+   * Fetches a replica's Boot Proof when talking to the enclave directly, such
+   * as with an authenticated Turnkey session. Omit for a gateway endpoint.
+   */
+  readonly resolveBootProof?: BootProofResolver;
   /** The release to verify against; the package's pin for `network` by default. */
   readonly release?: ReleaseTrust;
   readonly nowMs?: () => bigint;
@@ -157,7 +169,7 @@ async function execute<TOperation extends ServiceOperation>(
     proofType: SERVICE_PROOF_TYPE,
     grant: {},
     send: (encrypted, maxAnswerBytes) =>
-      sendToEnclave(context.backend.endpoint, encrypted, context.transport, maxAnswerBytes, signal),
+      sendDecryptionOperation(context.backend, encrypted, context.transport, maxAnswerBytes, signal),
   }, signal);
   const result = parseStrictJson<ServiceResult>(plaintext, RESULT_KEYS[operation.type]);
   if (result.type !== operation.type) throw new SprEmbeddedWalletError("ReleaseBindingMismatch");
@@ -299,6 +311,17 @@ export function decryptionServiceFromSession(
   };
 }
 
+/** Direct enclave or gateway backend for `createDecryptionService`. */
+function decryptionBackend(
+  endpoint: URL,
+  resolveBootProof: BootProofResolver | undefined,
+): SprEmbeddedWalletBackend {
+  if (resolveBootProof) {
+    return { kind: "enclave", endpoint, resolveBootProof };
+  }
+  return { kind: "gateway", endpoint, decryptionService: true };
+}
+
 /** A client of the decryption service at `config.endpoint`, verified against its release. */
 export function createDecryptionService(config: DecryptionServiceConfig): DecryptionService {
   const network = requireNetwork(config.network);
@@ -306,7 +329,7 @@ export function createDecryptionService(config: DecryptionServiceConfig): Decryp
   return decryptionServiceFromSession(
     createSprEmbeddedWalletSession({
       network,
-      backend: { kind: "enclave", endpoint, resolveBootProof },
+      backend: decryptionBackend(endpoint, resolveBootProof),
       release: config.release ?? releaseFor(network, DECRYPTION_SERVICE_RELEASES),
       proofType: SERVICE_PROOF_TYPE,
       ...(nowMs === undefined ? {} : { nowMs }),

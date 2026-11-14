@@ -15,10 +15,12 @@ import { startMockTurnkey } from "./mock-turnkey.js";
 declare module "vitest" {
   export interface ProvidedContext {
     stack: {
-      /** The gateway's base URL; its routes are under `/v1/private-wallet`. */
+      /** The gateway's base URL; its routes are under `/v1/private-wallet` and `/v1/decryption`. */
       gatewayUrl: string;
-      /** The testkit enclave's base URL. */
+      /** The privacy-wallet testkit enclave's base URL. */
       enclaveUrl: string;
+      /** The decryption-service testkit enclave's base URL. */
+      decryptionEnclaveUrl: string;
       /** The `Authorization` value gatekeeper sends. */
       originAuth: string;
       /** A Helius API key of `PROJECT_ID`, for a direct caller. */
@@ -33,6 +35,11 @@ declare module "vitest" {
 
 const GATEWAY_DIR = resolve(import.meta.dirname, "..");
 const REPO_DIR = resolve(GATEWAY_DIR, "../..");
+/** Prefer `CARGO_TARGET_DIR` when set (CI sandboxes), else the repo `target/`. */
+const TARGET_DIR = process.env.CARGO_TARGET_DIR
+  ? resolve(process.env.CARGO_TARGET_DIR)
+  : join(REPO_DIR, "target");
+const debugBin = (name: string) => join(TARGET_DIR, "debug", name);
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 const p256Public = (secretHex: string, compressed: boolean) =>
@@ -77,6 +84,10 @@ export default async function setup({ provide }: GlobalSetupContext) {
     "--features", "local-dev", "--bin", "zolana-tvc-privacy-wallet-local",
   );
   cargoBuild(
+    "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "spr-tvc-decryption-service",
+    "--features", "local-dev", "--bin", "spr-tvc-decryption-service-local",
+  );
+  cargoBuild(
     "--manifest-path", join(REPO_DIR, "Cargo.toml"), "-p", "zolana-tvc-protocol",
     "--example", "sign-release-policy",
   );
@@ -94,21 +105,34 @@ export default async function setup({ provide }: GlobalSetupContext) {
   const apiKey = randomUUID();
   const devApi = await startMockDevApi(apiKey, PROJECT_ID);
   const enclavePort = await freePort();
-  const enclave = start(logs, "enclave", join(REPO_DIR, "target/debug/zolana-tvc-privacy-wallet-local"), [
+  const enclave = start(logs, "enclave", debugBin("zolana-tvc-privacy-wallet-local"), [
     "--port", String(enclavePort), "--wallet-keypair", walletKeypair,
   ]);
+  const decryptionPort = await freePort();
+  const decryption = start(
+    logs,
+    "decryption",
+    debugBin("spr-tvc-decryption-service-local"),
+    ["--port", String(decryptionPort)],
+  );
 
   // The testkit's devnet release, as clients pin one: `<dir>/release.json`.
   const releaseDir = join(logs, "release");
-  execFileSync(join(REPO_DIR, "target/debug/examples/sign-release-policy"), ["--local-testkit", releaseDir]);
+  execFileSync(debugBin("examples/sign-release-policy"), ["--local-testkit", releaseDir]);
   const gatewayPort = await freePort();
   const originAuth = `Bearer local-e2e-${hex(randomBytes(16))}`;
   const turnkeyKey = hex(randomBytes(32));
-  const gateway = start(logs, "gateway", join(GATEWAY_DIR, "target/debug/tvc-gateway"), ["--config", "configs/devnet.yaml"], {
+  // Outside the root workspace the binary usually lands in apps/tvc-gateway/target;
+  // with CARGO_TARGET_DIR set (CI sandboxes) it shares that directory.
+  const gatewayBin = process.env.CARGO_TARGET_DIR
+    ? debugBin("tvc-gateway")
+    : join(GATEWAY_DIR, "target/debug/tvc-gateway");
+  const gateway = start(logs, "gateway", gatewayBin, ["--config", "configs/devnet.yaml"], {
     TVC_GATEWAY_LISTEN: `127.0.0.1:${gatewayPort}`,
     TVC_GATEWAY_ORIGIN_AUTH_HEADER: originAuth,
     TVC_GATEWAY_DEV_API__BASE_URL: devApi.url,
     TVC_GATEWAY_ENCLAVE__BASE_URL: `http://127.0.0.1:${enclavePort}`,
+    TVC_GATEWAY_DECRYPTION_SERVICE__ENCLAVE__BASE_URL: `http://127.0.0.1:${decryptionPort}`,
     TVC_GATEWAY_TURNKEY__API_BASE_URL: turnkey.url,
     TVC_GATEWAY_TURNKEY__BOOT_PROOF_API_KEY__PRIVATE_KEY: turnkeyKey,
     TVC_GATEWAY_TURNKEY__BOOT_PROOF_API_KEY__PUBLIC_KEY: p256Public(turnkeyKey, true),
@@ -126,12 +150,14 @@ export default async function setup({ provide }: GlobalSetupContext) {
 
   const teardown = async () => {
     enclave.kill();
+    decryption.kill();
     gateway.kill();
     await turnkey.close();
     await devApi.close();
   };
   try {
     await waitForHealth(`http://127.0.0.1:${enclavePort}`, "enclave", enclave, logs);
+    await waitForHealth(`http://127.0.0.1:${decryptionPort}`, "decryption", decryption, logs);
     await waitForHealth(`http://127.0.0.1:${gatewayPort}`, "gateway", gateway, logs);
   } catch (error) {
     await teardown();
@@ -140,6 +166,7 @@ export default async function setup({ provide }: GlobalSetupContext) {
   provide("stack", {
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     enclaveUrl: `http://127.0.0.1:${enclavePort}`,
+    decryptionEnclaveUrl: `http://127.0.0.1:${decryptionPort}`,
     originAuth,
     apiKey,
     walletSeedHex: hex(walletSeed),

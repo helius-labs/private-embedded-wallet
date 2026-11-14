@@ -1,10 +1,13 @@
 # tvc-gateway
 
-Helius-hosted backend for the Zolana private embedded wallet. It gives any
-Helius customer the private-wallet backend with only an API key, at
-`/v1/private-wallet/*` behind gatekeeper or directly. It fronts:
+Helius-hosted backend for the Zolana private embedded wallet and decryption
+service. It gives any Helius customer those backends with only an API key, at
+`/v1/private-wallet/*` and `/v1/decryption/*` behind gatekeeper or
+directly. It fronts:
 
-- the Zolana TVC enclave (`apps/privacy-wallet`),
+- the private-wallet TVC enclave (`apps/privacy-wallet`),
+- the decryption-service TVC enclave (`apps/decryption-service`), when that
+  network has one (`decryption_service.enclave.base_url`),
 - Turnkey (Boot Proofs and wallet ownership),
 
 and holds the provisioning key that signs wallet descriptors. The Zolana
@@ -41,18 +44,33 @@ gatekeeper's per-key limits.
 
 ## Endpoints
 
-All paths are under `/v1/private-wallet`, and all take the caller's project
-from gatekeeper or from the caller's API key.
+Private-wallet paths are under `/v1/private-wallet`. Decryption-service paths
+are under `/v1/decryption` when that network's config sets
+`decryption_service`. Every route takes the caller's project from gatekeeper
+or from the caller's API key.
 
-| Method | Path          | Body                                        | Answer                     |
-| ------ | ------------- | ------------------------------------------- | -------------------------- |
-| POST   | `/session`    | the enclave's ping request                  | `{info, ping, bootProof}`  |
-| POST   | `/enroll`     | an owner-signed enrollment                  | `{descriptor}`             |
-| POST   | `/operations` | `{descriptor, request}`                     | `{response, bootProof}`    |
+| Method | Path (under `/v1/private-wallet`) | Body                        | Answer                    |
+| ------ | --------------------------------- | --------------------------- | ------------------------- |
+| POST   | `/session`                        | the enclave's ping request  | `{info, ping, bootProof}` |
+| POST   | `/enroll`                         | an owner-signed enrollment  | `{descriptor}`            |
+| POST   | `/operations`                     | `{descriptor, request}`     | `{response, bootProof}`   |
+
+| Method | Path (under `/v1/decryption`) | Body                                      | Answer                    |
+| ------ | ------------------------------------- | ----------------------------------------- | ------------------------- |
+| POST   | `/session`                            | the enclave's ping request                | `{info, ping, bootProof}` |
+| POST   | `/operations`                         | the enclave's `EncryptedRequest` as-is    | `{response, bootProof}`   |
+
+There is no decryption-service `/enroll`: decrypt requests carry a Solana
+signature. A request that includes `wallet_grant` is refused
+(`400 WalletGrantNotAllowed`).
 
 `GET /health` needs no credentials. [`openapi.json`](openapi.json) is the
 OpenAPI 3.1 document of the API as gatekeeper serves it. A test fails when it
 is stale; `BLESS_OPENAPI=1 cargo test` rewrites it.
+
+Gatekeeper must forward `/v1/decryption/*` the same way it forwards
+`/v1/private-wallet/*` (infra follow-up outside this repository when the
+route is first enabled on a host).
 
 Failures are RFC 9457 problems, `application/problem+json`:
 `{"title", "status", "detail", "code"}`, where `code` is one of the codes the
@@ -136,16 +154,19 @@ and project and valid for `wallet_grant.ttl_secs`. The enclave checks the grant
 names the request's descriptor and client key. The answer is the enclave's
 `EncryptedResponse` and the Boot Proof of the replica that answered.
 
-A resent ciphertext does not run twice. From the same project within
-`enclave.replay_window_secs`, it gets the first request's answer again,
-marked `Idempotent-Replayed: true`, or `409 OperationInProgress` while the
-first is still running. Each project's ciphertexts are its own: the same
-ciphertext from another project is a separate request, which the ownership
-check refuses, so no project can claim another's first. A request that never
-reached the enclave, refused by the ownership check for example, can be
-resent, and so can one whose answer was larger than 64 KiB, which the ledger
-does not keep: only `Decrypt`, `Derive`, `TransactionKeys` and `Prove`
-answer that much, and running them again is harmless.
+A resent ciphertext does not run twice. From the same project on the same
+application route within `enclave.replay_window_secs`, it gets the first
+request's answer again, marked `Idempotent-Replayed: true`, or
+`409 OperationInProgress` while the first is still running. Each project's
+ciphertexts are its own per application: the same ciphertext from another
+project, or on the other of `/v1/private-wallet` and `/v1/decryption`, is a
+separate request (and a cross-project resend of a private-wallet ciphertext
+is refused by the ownership check on the grant, so no project can claim
+another's first). A request that never reached the enclave, refused by the
+ownership check for example, can be resent, and so can one whose answer was
+larger than 64 KiB, which the ledger does not keep: only `Decrypt`,
+`Derive`, `TransactionKeys` and `Prove` answer that much, and running them
+again is harmless.
 
 To revoke a client key, add its `spr-client-p256-…` ID to
 `wallet_grant.revoked_client_key_ids`. The gateway refuses its enrollments and
@@ -155,7 +176,7 @@ operations from the next deploy.
 
 - **Requests in flight:** at most `enclave.max_in_flight_per_project` sessions, enrollments and operations per project (`429`).
 - **Turnkey calls:** at most 8 at once per project and 32 across all projects (`429`); both Turnkey keys are shared. The Boot Proof lookup for an operation the enclave already answered counts only toward the 32, so the project's share never wastes finished work. Lookups of one replica's Boot Proof run one at a time and share the answer, which is then cached.
-- **Resends:** the replay ledger keys each `/operations` ciphertext by the digest of the project and the ciphertext, however its JSON is encoded, and keeps answers up to 64 KiB. With `enclave.replay_redis_url` set, every task shares it through Redis, claiming with one `SET key running NX GET EX`, and it survives restarts; an unreachable Redis refuses the request with `424`. Without it, each process keeps its own.
+- **Resends:** the replay ledger keys each `/operations` ciphertext by the digest of the application route (`/v1/private-wallet` or `/v1/decryption`), the project, and the ciphertext, however its JSON is encoded, and keeps answers up to 64 KiB. With `enclave.replay_redis_url` set, every task shares it through Redis, claiming with one `SET key running NX GET EX`, and it survives restarts; an unreachable Redis refuses the request with `424`. Without it, each process keeps its own.
 - **Body size:** `enclave.max_body_bytes`.
 
 ## Configuration
@@ -178,6 +199,12 @@ either file, with nested fields joined by `__`:
 | `TVC_GATEWAY_ENCLAVE__REPLAY_REDIS_URL`                           | Optional. Redis for the shared replay guard, such as `rediss://host:6379/2`.              |
 | `TVC_GATEWAY_TURNKEY__BOOT_PROOF_API_KEY__{PUBLIC,PRIVATE}_KEY`   | Turnkey API key in the TVC organization that can read Boot Proofs.                        |
 | `TVC_GATEWAY_TURNKEY__WAAS_API_KEY__{PUBLIC,PRIVATE}_KEY`         | Turnkey API key in the Helius WaaS parent organization, with read access to its sub-orgs. |
+| `TVC_GATEWAY_DECRYPTION_SERVICE__ENCLAVE__BASE_URL`              | Optional override of `decryption_service.enclave.base_url` (omit the route when unset on a network that has no app). |
+
+**When a new gateway ships decryption-service support:** rebuild and redeploy
+the tvc-gateway image with `decryption_service` set in the network overlay (or
+the env override), then ensure gatekeeper forwards `/v1/decryption/*`.
+Rebuild `@heliuslabs/spr-embedded-wallet` so clients pick up gateway mode.
 
 `enrollment.domains` are the hosts an enrollment message may name:
 gatekeeper's `devnet.helius-rpc.com` and `beta-devnet.helius-rpc.com` on devnet
@@ -224,7 +251,7 @@ just gateway-e2e
 Runs `e2e/`, a vitest suite, on loopback. Its global setup (`e2e/stack.ts`)
 starts:
 
-- the local unattested testkit enclave (`zolana-tvc-privacy-wallet-local`), with fixed test keys and mock custody;
+- the local unattested privacy-wallet and decryption-service testkits, with fixed test keys and mock custody;
 - a mock Turnkey answering the ownership and Boot Proof queries (`e2e/mock-turnkey.ts`);
 - the gateway, with a release file from `cargo run -p zolana-tvc-protocol --example sign-release-policy -- --local-testkit <dir>`.
 
@@ -235,10 +262,12 @@ key the client enrolls itself, and after a new login enrolls the next key,
 verifies again and opens the stored sealed seed with it; and the refusals
 of stale, forged, other-domain, other-network and other-project enrollments,
 other projects' wallets and resends, and descriptors this gateway did not
-provision. One test signs a release for the testkit through
-`scripts/release.mjs` and checks the client accepts it for the testkit's
-network only. CI runs it after `just ci`. Service logs go to a temporary
-directory the run prints.
+provision. They also open a decryption-service session through
+`/v1/decryption`, run a sealed `PublicKeys`, check Boot Proofs are
+present, and refuse a wallet grant and an `/enroll`. One test signs a release
+for the testkit through `scripts/release.mjs` and checks the client accepts it
+for the testkit's network only. CI runs it after `just ci`. Service logs go to
+a temporary directory the run prints.
 
 `fixtures/wallet-enrollment.json` is the enrollment message test vector that
 both this crate and `walletEnrollmentMessage` in `@heliuslabs/spr-embedded-wallet` check.
@@ -264,6 +293,21 @@ The container needs `TVC_GATEWAY_LISTEN=0.0.0.0:8940`, since the shipped config
 listens on loopback, and `TVC_GATEWAY_STAGE=prod` for JSON logs. The zolana-infra
 task definition sets both. The enclave timeout is 55s, under CloudFront's 60s
 origin read timeout.
+
+### Decryption service for external testers
+
+Devnet's overlay already sets `decryption_service.enclave.base_url` to the
+live Turnkey app. After this gateway image is published and redeployed:
+
+1. Confirm gatekeeper forwards `/v1/decryption/*` to the same
+   tvc-gateway pool as `/v1/private-wallet/*` (monorepo / Heimdall follow-up
+   if that path is not registered yet).
+2. Publish `@heliuslabs/spr-embedded-wallet` so clients pick up gateway mode
+   (`createDecryptionService` without `resolveBootProof`).
+3. Tell testers: set `API_KEY` and run
+   `examples/typescript-client` `unregistered_recipient` (optional
+   `DECRYPTION_SERVICE_GATEWAY_URL`). No `TVC_ORG_ID` or Turnkey Boot Proof
+   keys.
 
 ## Metrics
 

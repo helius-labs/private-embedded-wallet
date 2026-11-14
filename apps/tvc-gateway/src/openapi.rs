@@ -13,16 +13,23 @@ use crate::error::{ApiError, Problem};
     info(
         title = "Helius Private Wallet API",
         version = "1",
-        description = "The backend of the Zolana private embedded wallet. Each successful enclave \
-                       answer carries the Boot Proof of the replica that gave it; a session also \
-                       carries discovery and the ping. The client verifies them against the \
-                       release it pins.",
+        description = "The backend of the Zolana private embedded wallet and decryption service. \
+                       Each successful enclave answer carries the Boot Proof of the replica that \
+                       gave it; a session also carries discovery and the ping. The client \
+                       verifies them against the release it pins. The decryption service needs \
+                       no enrollment: decrypt requests carry a Solana signature.",
     ),
     servers(
         (url = "https://devnet.helius-rpc.com", description = "Devnet"),
         (url = "https://mainnet.helius-rpc.com", description = "Mainnet")
     ),
-    paths(crate::app::session, crate::app::enroll, crate::app::operations),
+    paths(
+        crate::app::session,
+        crate::app::enroll,
+        crate::app::operations,
+        crate::app::decryption_session,
+        crate::app::decryption_operations,
+    ),
     components(schemas(Problem)),
     modifiers(&HeliusApiKey, &ErrorCodes),
     security(("api-key" = [])),

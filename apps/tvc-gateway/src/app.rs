@@ -30,6 +30,7 @@ use crate::upstream::Enclave;
 use crate::wallet_grant::WalletGrants;
 
 pub const ROUTE_PREFIX: &str = "/v1/private-wallet";
+pub const DECRYPTION_SERVICE_PREFIX: &str = "/v1/decryption";
 /// Marks an `/operations` answer that repeats an earlier request's outcome.
 pub const IDEMPOTENT_REPLAYED: HeaderName = HeaderName::from_static("idempotent-replayed");
 
@@ -37,6 +38,8 @@ pub struct AppState {
     pub origin_auth_header: String,
     pub api_keys: ApiKeys,
     pub enclave: Enclave,
+    /// Present when `decryption_service` is configured for this network.
+    pub decryption_enclave: Option<Enclave>,
     pub turnkey: Turnkey,
     pub provisioner: Provisioner,
     pub enrollment: Enrollment,
@@ -47,10 +50,20 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(config: &Config) -> anyhow::Result<Self> {
+        let decryption_enclave = config
+            .decryption_service
+            .as_ref()
+            .map(|decryption| {
+                let mut enclave = config.enclave.clone();
+                enclave.base_url = decryption.enclave.base_url.clone();
+                Enclave::new(enclave)
+            })
+            .transpose()?;
         Ok(Self {
             origin_auth_header: config.origin_auth_header.clone(),
             api_keys: ApiKeys::new(&config.dev_api)?,
             enclave: Enclave::new(config.enclave.clone())?,
+            decryption_enclave,
             turnkey: Turnkey::new(&config.turnkey)?,
             provisioner: Provisioner::new(&config.provisioning, config.network)?,
             enrollment: Enrollment::new(config.network, &config.enrollment.domains),
@@ -74,9 +87,16 @@ pub fn router(state: Arc<AppState>, max_body_bytes: usize) -> Router {
         .route("/session", post(session))
         .route("/enroll", post(enroll))
         .route("/operations", post(operations));
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(health))
-        .nest(ROUTE_PREFIX, private_wallet)
+        .nest(ROUTE_PREFIX, private_wallet);
+    if state.decryption_enclave.is_some() {
+        let decryption_service = Router::new()
+            .route("/session", post(decryption_session))
+            .route("/operations", post(decryption_operations));
+        router = router.nest(DECRYPTION_SERVICE_PREFIX, decryption_service);
+    }
+    router
         .fallback(not_found)
         .layer(middleware::from_fn(track))
         .layer(DefaultBodyLimit::max(max_body_bytes))
@@ -230,6 +250,114 @@ pub(crate) async fn enroll(
     Ok(Json(Enrolled { descriptor }))
 }
 
+/// Open a decryption-service session
+///
+/// Discovery, the enclave's answer to the ping and the Boot Proof of the
+/// replica that answered. No enrollment: the decryption service authorizes
+/// with a Solana signature on decrypt requests.
+#[utoipa::path(
+    post,
+    path = "/v1/decryption/session",
+    tag = "Decryption service",
+    request_body = PingRequest,
+    responses(
+        (status = 200, description = "The evidence to verify", body = Session),
+        (status = "4XX", description = "Refused, or the enclave or Turnkey did not answer", body = Problem, content_type = "application/problem+json"),
+    ),
+)]
+pub(crate) async fn decryption_session(
+    State(state): State<Arc<AppState>>,
+    Caller(project): Caller,
+    ApiJson(ping): ApiJson<QosPingRequest>,
+) -> Result<Response, ApiError> {
+    let enclave = state
+        .decryption_enclave
+        .as_ref()
+        .ok_or(ApiError::NotFound)?;
+    let _permit = state.limiter.try_acquire(&project)?;
+    let (info, ping) = tokio::try_join!(enclave.info(), enclave.ping(&ping))?;
+    if !info.is_success() {
+        return Ok(info.into_response());
+    }
+    if !ping.is_success() {
+        return Ok(ping.into_response());
+    }
+    let boot_proof = state
+        .turnkey
+        .boot_proof(&app_proof_key(&ping.body)?, CallShare::Project(&project))
+        .await?;
+    Ok(Json(Session {
+        info: raw_json(&info.body)?,
+        ping: raw_json(&ping.body)?,
+        boot_proof: raw_json(&boot_proof)?,
+    })
+    .into_response())
+}
+
+/// The enclave's `EncryptedRequest` without a wallet grant (OpenAPI shape).
+#[derive(ToSchema)]
+#[allow(dead_code)]
+struct DecryptionEncryptedRequest {
+    version: u8,
+    quorum_key_id: String,
+    /// Decimal string of the quorum key epoch.
+    quorum_key_epoch: String,
+    /// Hex ciphertext.
+    ciphertext: String,
+}
+
+/// Run a decryption-service operation
+///
+/// Forwards the client's encrypted request as it is (no wallet grant) and
+/// returns the Boot Proof of the replica that answered. A resent request gets
+/// the first request's answer, marked `Idempotent-Replayed`.
+#[utoipa::path(
+    post,
+    path = "/v1/decryption/operations",
+    tag = "Decryption service",
+    request_body(content = DecryptionEncryptedRequest, description = "The enclave's EncryptedRequest, without wallet_grant"),
+    responses(
+        (
+            status = 200,
+            description = "The enclave's answer and its evidence",
+            body = Operated,
+            headers(("Idempotent-Replayed" = String, description = "`true` when the answer repeats an earlier request's")),
+        ),
+        (status = "4XX", description = "Refused, or the enclave or Turnkey did not answer", body = Problem, content_type = "application/problem+json"),
+    ),
+)]
+pub(crate) async fn decryption_operations(
+    State(state): State<Arc<AppState>>,
+    Caller(project): Caller,
+    ApiJson(request): ApiJson<EncryptedRequest>,
+) -> Result<Response, ApiError> {
+    let enclave = state
+        .decryption_enclave
+        .as_ref()
+        .ok_or(ApiError::NotFound)?;
+    if request.wallet_grant.is_some() {
+        return Err(ApiError::WalletGrantNotAllowed);
+    }
+    let _permit = state.limiter.try_acquire(&project)?;
+    let key = match state
+        .replay
+        .claim(DECRYPTION_SERVICE_PREFIX, &project, &request.ciphertext)
+        .await?
+    {
+        Claim::New(key) => key,
+        Claim::Answered(outcome) => {
+            let mut response = answer(&state, outcome).await;
+            response
+                .headers_mut()
+                .insert(IDEMPOTENT_REPLAYED, HeaderValue::from_static("true"));
+            return Ok(response);
+        }
+    };
+    let outcome = enclave.operations(&request).await;
+    state.replay.record(key, &outcome).await;
+    Ok(answer(&state, outcome).await)
+}
+
 /// Run an operation
 ///
 /// Forwards the client's encrypted request with a wallet grant this gateway
@@ -266,7 +394,11 @@ pub(crate) async fn operations(
         .wallet_grants
         .check_client_key(&client.client_public_key)?;
     let _permit = state.limiter.try_acquire(&project)?;
-    let key = match state.replay.claim(&project, &request.ciphertext).await? {
+    let key = match state
+        .replay
+        .claim(ROUTE_PREFIX, &project, &request.ciphertext)
+        .await?
+    {
         Claim::New(key) => key,
         Claim::Answered(outcome) => {
             let mut response = answer(&state, outcome).await;
@@ -337,10 +469,17 @@ async fn track(request: Request, next: Next) -> Response {
 }
 
 fn route_name(matched: &str) -> &'static str {
-    match matched.strip_prefix(ROUTE_PREFIX) {
-        Some("/session") => "session",
-        Some("/enroll") => "enroll",
-        Some("/operations") => "operations",
+    if let Some(path) = matched.strip_prefix(ROUTE_PREFIX) {
+        return match path {
+            "/session" => "session",
+            "/enroll" => "enroll",
+            "/operations" => "operations",
+            _ => "other",
+        };
+    }
+    match matched.strip_prefix(DECRYPTION_SERVICE_PREFIX) {
+        Some("/session") => "decryption_session",
+        Some("/operations") => "decryption_operations",
         Some(_) | None => "other",
     }
 }
@@ -394,6 +533,7 @@ mod tests {
             origin_auth_header: ORIGIN_AUTH.to_owned(),
             api_keys: ApiKeys::for_tests(UNREACHABLE),
             enclave,
+            decryption_enclave: None,
             turnkey: Turnkey::for_tests(UNREACHABLE),
             provisioner: crate::provisioner::tests::provisioner(),
             enrollment: crate::enrollment::tests::enrollment(&[crate::enrollment::tests::DOMAIN]),

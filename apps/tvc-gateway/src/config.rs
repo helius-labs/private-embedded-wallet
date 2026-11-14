@@ -37,10 +37,28 @@ pub struct Config {
     pub origin_auth_header: String,
     pub dev_api: DevApiConfig,
     pub enclave: EnclaveConfig,
+    /// The decryption-service TVC app: session and operations only (no enroll).
+    /// Absent until that network has an application; the route is then omitted.
+    #[serde(default)]
+    pub decryption_service: Option<DecryptionServiceConfig>,
     pub turnkey: TurnkeyConfig,
     pub provisioning: ProvisioningConfig,
     pub wallet_grant: WalletGrantConfig,
     pub enrollment: EnrollmentConfig,
+}
+
+/// The decryption-service enclave this gateway attaches Boot Proofs for.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecryptionServiceConfig {
+    pub enclave: DecryptionEnclaveConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecryptionEnclaveConfig {
+    /// The decryption-service TVC public ingress, without a trailing slash.
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,14 +219,28 @@ impl Config {
             self.enclave.base_url
         );
         anyhow::ensure!(
+            !self.enclave.base_url.ends_with('/'),
+            "enclave.base_url must not end with '/'"
+        );
+        if let Some(decryption) = &self.decryption_service {
+            anyhow::ensure!(
+                ["https://", "http://"]
+                    .iter()
+                    .any(|scheme| decryption.enclave.base_url.starts_with(scheme)),
+                "decryption_service.enclave.base_url must be the {} enclave's URL, not {:?}",
+                self.network,
+                decryption.enclave.base_url
+            );
+            anyhow::ensure!(
+                !decryption.enclave.base_url.ends_with('/'),
+                "decryption_service.enclave.base_url must not end with '/'"
+            );
+        }
+        anyhow::ensure!(
             is_canonical_uuid(&self.turnkey.tvc_organization_id),
             "turnkey.tvc_organization_id must be the {} TVC application's organization, not {:?}",
             self.network,
             self.turnkey.tvc_organization_id
-        );
-        anyhow::ensure!(
-            !self.enclave.base_url.ends_with('/'),
-            "enclave.base_url must not end with '/'"
         );
         anyhow::ensure!(
             !self.dev_api.base_url.ends_with('/'),
@@ -292,6 +324,16 @@ mod tests {
         assert_eq!(config.network, Network::Devnet);
         assert_eq!(config.provisioning.descriptor_ttl_secs, 86_400);
         assert_eq!(
+            config
+                .decryption_service
+                .as_ref()
+                .expect("devnet has a decryption-service app")
+                .enclave
+                .base_url
+                .as_str(),
+            "https://app-67d544db-f727-4c8b-83fe-74a929ac763b.app.turnkey.cloud"
+        );
+        assert_eq!(
             config.enrollment.domains,
             ["devnet.helius-rpc.com", "beta-devnet.helius-rpc.com"]
         );
@@ -319,6 +361,7 @@ mod tests {
             config.enclave.base_url.as_str(),
             "https://app-8a2523d7-feb8-41ee-9587-c202048816ec.app.turnkey.cloud"
         );
+        assert!(config.decryption_service.is_none());
         assert_eq!(
             config.turnkey.tvc_organization_id,
             "9b98a0d8-04a4-47a3-9dc3-afa84c686de4"
