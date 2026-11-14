@@ -1,22 +1,27 @@
 # spr-tvc
 
-A Zolana shielded wallet whose privacy keys live in a Turnkey Verifiable
-Compute enclave. The enclave holds the nullifier and viewing keys and answers
-the Zolana SDK's `WalletKeys` interface with them: it opens ciphertexts, derives
-nullifiers, mints per-transaction keys, and completes proof witnesses. The
-client runs every wallet flow with the Zolana TypeScript SDK, `SprEmbeddedWalletKeys` in
-place of `LocalKeys`: sync, selection, transfers, withdrawals, splits, merges,
-rings, deposits, registration, signing, and submission.
+Turnkey Verifiable Compute (TVC) applications and clients for Solana Privacy
+Rings: a privacy wallet whose keys live in an enclave, a decryption service for
+transfers to addresses that have not registered a wallet yet, the Helius-hosted
+gateway in front of both, and the shared protocol/enclave crates and TypeScript
+client.
+
+The privacy wallet answers the Zolana SDK's `WalletKeys` interface
+(`SprEmbeddedWalletKeys` in place of `LocalKeys`): sync, selection, transfers,
+withdrawals, splits, merges, rings, deposits, registration, signing, and
+submission. The decryption service returns viewing keys for an unregistered
+address and opens ciphertexts when the owner signs. Both apps share the enclave
+request envelope; the gateway adds Boot Proofs and project identity so clients
+use a Helius API key only.
 
 Pre-production, for disposable devnet funds. The witness, which holds the
 long-lived nullifier secret, reaches only an attested TEE prover; see
 [Network boundary](#network-boundary).
 
-Helius hosts it on devnet behind gatekeeper: the private wallet at
+Helius hosts them on devnet behind gatekeeper: the private wallet at
 `https://devnet.helius-rpc.com/v1/private-wallet` (also on `beta-devnet`), the
-decryption service at `/v1/decryption` on the same host (Boot Proofs
-beside session and operations; API key only), and the Zolana indexer and TEE
-prover at `/v1/spr`, all with a Helius API key.
+decryption service at `/v1/decryption` on the same host, and the Zolana indexer
+and TEE prover at `/v1/spr`, all with a Helius API key.
 
 | Path | Purpose |
 | --- | --- |
